@@ -211,6 +211,25 @@ tools/build_rootfs.sh arm64      # or armhf / amd64
 tools/stage_rootfs.sh            # copy into the app's flavor assets
 ```
 
+### Publishing a release
+
+Every change that should reach a phone gets its own tag, so the builds are
+easy to tell apart and there is always a "latest" download:
+
+``bash
+tools/release.sh v0.1.2            # builds, publishes and tags
+tools/release.sh v0.1.2 notes.md   # with your own release notes
+``
+
+The script bumps ersionCode/ersionName, builds the release APKs,
+publishes them as a GitHub release and pushes the tag. The repository is
+**private**, so download the APKs from a browser that is signed in to
+GitHub as `daddytroop`.
+
+Because the repository is private, GitHub answers unauthenticated download
+requests with a 404 rather than a 403. If a download link appears broken,
+check that you are signed in.
+
 ### Continuous integration
 
 `.github/workflows/build-apk.yml` runs on every push: it rebuilds the
