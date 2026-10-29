@@ -142,6 +142,16 @@ sleep 1
 pkill -f 'Xvnc :99' 2>/dev/null
 pkill -f 'Xtigervnc :99' 2>/dev/null
 
+echo "=== 8. the virtual gamepad helper is correct ==="
+# The helper talks to /dev/uinput, which a build machine does not have, so
+# the ioctl layer is replaced with a recorder and the setup is checked.
+if out=$(python3 "$(dirname "${BASH_SOURCE[0]}")/test_gamepad_helper.py" 2>&1); then
+  pass "the gamepad helper sets the device up correctly"
+else
+  fail "the gamepad helper is broken"
+  echo "$out" | sed 's/^/    /'
+fi
+
 echo
 if [ "$FAILURES" -eq 0 ]; then
   echo "INTEGRATION_TEST_PASSED"

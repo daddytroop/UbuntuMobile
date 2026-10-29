@@ -78,22 +78,17 @@ class VirtualPad:
         for code in (ABS_X, ABS_Y, ABS_RX, ABS_RY, ABS_Z, ABS_RZ):
             fcntl_ioctl(self.fd, UI_SET_ABSBIT, code)
 
-        # struct uinput_user_dev
+        # struct uinput_user_dev {
+        #     char name[80];
+        #     struct { __u16 bustype, vendor, product, version; } id;
+        #     __u32 ff_effects_max;
+        #     __s32 absmax[ABS_CNT];   /* ABS_CNT is 64 */
+        # }
         name = b"UbuntuMobile Virtual Gamepad\x00"
-        data = b"".join([
-            name.ljust(80, b"\x00"),
-            struct.pack("H", 0x03),      # BUS_USB
-            struct.pack("H", 0x0210),    # VENDOR
-            struct.pack("H", 0x0001),    # PRODUCT
-            struct.pack("H", 0x0001),    # VERSION
-            struct.pack("i", 1),         # ff_effects_max
-            struct.pack("i", len(BUTTON_MAP)),  # absmax index (approx)
-            b"\x00" * 4,                # ff_effects_max unused
-        ])
-        # uinput_user_dev layout is: name[80], id{bus,vendor,product,version},
-        # ff_effects_max, absmax[ABS_CNT=64] -> we build the raw struct below.
         absmax = b"".join(struct.pack("i", 0x7FFF) for _ in range(64))
-        payload = (
+        # The kernel writes the sysfs path back into this buffer, so it has
+        # to be mutable - a bytes object is not.
+        payload = bytearray(
             name.ljust(80, b"\x00")
             + struct.pack("HHHH", 0x03, 0x0210, 0x0001, 0x0001)
             + struct.pack("i", 0)
@@ -127,7 +122,12 @@ class VirtualPad:
         os.close(self.fd)
 
 
-def fcntl_ioctl(fd, request, arg):
+def fcntl_ioctl(fd, request, arg=0):
+    """Issue an ioctl on the uinput device.
+
+    `arg` is the value the ioctl takes: an integer for the simple ones and
+    a mutable buffer for the ones that write back into it.
+    """
     import fcntl
     if isinstance(arg, int):
         return fcntl.ioctl(fd, request, arg)
@@ -142,6 +142,10 @@ def main():
         pad = VirtualPad()
     except OSError as e:
         print("gamepad-helper: cannot open %s (%s)" % (UINPUT_PATH, e))
+        return 1
+    except Exception as e:
+        print("gamepad-helper: cannot create the virtual pad (%s: %s)"
+              % (type(e).__name__, e))
         return 1
 
     # Read the command fifo; the app writes one line per state update.
