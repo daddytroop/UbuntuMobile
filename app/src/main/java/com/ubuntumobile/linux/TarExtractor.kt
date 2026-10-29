@@ -31,6 +31,8 @@ class TarExtractor(
         val directories: Long,
         /** Symlink entries seen in the archive, whether or not they could be created. */
         val symlinkEntries: Long = 0,
+        /** Entries that could not be written. */
+        val failedEntries: Long = 0,
     )
 
     /**
@@ -58,12 +60,15 @@ class TarExtractor(
         var symlinkEntries = 0L
         var directories = 0L
 
+        var failedEntries = 0L
+
         stream.use { input ->
             val header = ByteArray(512)
             // GNU tar stores long paths in a preceding 'L' entry; the actual
             // file name then lives in that entry's data, so we must read it
             // (and skip its bytes) or the whole stream gets misaligned.
             var longName: String? = null
+            val dirModes = mutableListOf<Pair<File, Int>>()
 
             while (true) {
                 if (!readFully(input, header)) break
@@ -71,6 +76,7 @@ class TarExtractor(
 
                 val name = cString(header, 0, 100)
                 val size = parseOctal(cString(header, 124, 12))
+                val mode = parseOctal(cString(header, 100, 8)).toInt()
                 val typeFlag = header[156].toInt().toChar()
                 val prefix = cString(header, 345, 155)
 
@@ -94,9 +100,20 @@ class TarExtractor(
 
                 val target = File(destination, fullName)
 
+                // A single unwritable entry must not abort the whole
+                // extraction: the rootfs is ~20,000 files and a stray
+                // problem (a name the filesystem cannot represent, for
+                // instance) should not cost the user their whole Ubuntu.
+                try {
                 when (typeFlag) {
                     '5' -> {
                         target.mkdirs()
+                        // Directory permissions are applied at the very end:
+                        // a directory may be read-only in the archive, and
+                        // applying that immediately would stop us writing
+                        // its contents. GNU tar defers them for the same
+                        // reason.
+                        dirModes += target to mode
                         directories++
                     }
                     '2' -> {
@@ -128,6 +145,10 @@ class TarExtractor(
                     '0', '\u0000', '7' -> {
                         target.parentFile?.mkdirs()
                         target.outputStream().use { out -> copyExactly(input, out, size) }
+                        // The permission bits live in the tar header; without
+                        // them every binary would land non-executable and the
+                        // container could not start a shell.
+                        applyMode(target, mode)
                         files++
                         bytes += size
                     }
@@ -149,6 +170,15 @@ class TarExtractor(
                         if (size > 0) skipFully(input, size)
                     }
                 }
+                } catch (e: Exception) {
+                    // Keep going, but make sure the entry's payload is
+                    // consumed so the stream stays in sync.
+                    failedEntries++
+                    try {
+                        if (size > 0) skipFully(input, size)
+                    } catch (_: Exception) {
+                    }
+                }
 
                 // Tar pads entries to a multiple of 512 bytes.
                 val pad = (512 - (size % 512)) % 512
@@ -156,9 +186,15 @@ class TarExtractor(
 
                 onProgress(bytes)
             }
+
+            // Now that everything has been written, apply the directory
+            // permissions that were recorded in the archive.
+            for ((dir, dirMode) in dirModes.asReversed()) {
+                applyMode(dir, dirMode)
+            }
         }
 
-        return Result(files, bytes, symlinks, directories, symlinkEntries)
+        return Result(files, bytes, symlinks, directories, symlinkEntries, failedEntries)
     }
 
     private fun readFully(input: InputStream, buf: ByteArray): Boolean {
@@ -211,6 +247,31 @@ class TarExtractor(
         } catch (_: NumberFormatException) {
             0
         }
+    }
+
+    /**
+     * Apply the permission bits recorded in the tar header.
+     *
+     * Without this every extracted file would be created with the process
+     * umask (0644) and no binaries would be executable - the container
+     * could not even start bash.
+     */
+    private fun applyMode(file: File, mode: Int) {
+        val owner = (mode shr 6) and 7
+        val group = (mode shr 3) and 7
+        val other = mode and 7
+
+        file.setReadable(owner and 4 != 0, true)
+        file.setWritable(owner and 2 != 0, true)
+        file.setExecutable(owner and 1 != 0, true)
+
+        file.setReadable(group and 4 != 0, false)
+        file.setWritable(group and 2 != 0, false)
+        file.setExecutable(group and 1 != 0, false)
+
+        file.setReadable(other and 4 != 0, false)
+        file.setWritable(other and 2 != 0, false)
+        file.setExecutable(other and 1 != 0, false)
     }
 
     private companion object {

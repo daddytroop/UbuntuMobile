@@ -62,9 +62,17 @@ class RootfsInstaller(
             paths.root.mkdirs()
             onProgress(Progress(Progress.Phase.EXTRACTING, 0, total, "Unpacking Ubuntu…"))
             archive.inputStream().use { input ->
-                TarExtractor(paths.root) { copied ->
+                val result = TarExtractor(paths.root) { copied ->
                     onProgress(Progress(Progress.Phase.EXTRACTING, copied, total, "Unpacking Ubuntu…"))
                 }.extract(input)
+                Log.i(
+                    TAG,
+                    "extracted ${result.files} files, ${result.bytes} bytes, " +
+                        "${result.symlinkEntries} symlinks, ${result.failedEntries} failed",
+                )
+                if (result.failedEntries > 0) {
+                    Log.w(TAG, "${result.failedEntries} entries could not be extracted")
+                }
             }
             archive.delete()
 

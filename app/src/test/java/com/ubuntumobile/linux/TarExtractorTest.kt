@@ -32,6 +32,7 @@ class TarExtractorTest {
 
     @Test
     fun extractsAWorkingRootfsFromTheShippedArchive() {
+        val isLinux = System.getProperty("os.name").lowercase().contains("linux")
         val archive = archiveForAbi()
         assumeTrue("rootfs archive not present in the source tree", archive != null)
         val out = File(System.getProperty("java.io.tmpdir"), "linx-rootfs-test-${System.nanoTime()}")
@@ -43,22 +44,47 @@ class TarExtractorTest {
             }
 
             println("extracted ${result.files} files, ${result.bytes} bytes, " +
-                    "${result.symlinkEntries} symlink entries, ${result.directories} dirs")
+                    "${result.symlinkEntries} symlink entries, ${result.directories} dirs, " +
+                    "${result.failedEntries} failed")
 
             assertTrue("no files extracted", result.files > 1000)
             assertTrue("no symlink entries seen", result.symlinkEntries > 100)
+            if (isLinux) {
+                // Every entry has to be writable on the target filesystem.
+                assertEquals(
+                    "some entries could not be extracted",
+                    0L, result.failedEntries,
+                )
+            } else {
+                // Windows cannot represent case-colliding names, which the
+                // Ubuntu headers contain (ip6t_HL.h and ip6t_hl.h), so a
+                // small number of entries fail there.
+                assertTrue(
+                    "too many failures on Windows: ${result.failedEntries}",
+                    result.failedEntries < result.files / 20,
+                )
+            }
 
             // The shell must exist and be reachable through the merged-/usr
             // symlink, otherwise nothing in the container can start.
             val bash = File(out, "usr/bin/bash")
             assertTrue("usr/bin/bash missing", bash.exists())
-            assertTrue("usr/bin/bash is not executable", bash.canExecute())
+            if (isLinux) {
+                // The permission bits must survive the extraction, otherwise
+                // no binary in the container would be executable.
+                assertTrue(
+                    "usr/bin/bash is not executable (mode bits were lost)",
+                    bash.canExecute(),
+                )
+                val flatpak = File(out, "usr/bin/flatpak")
+                assertTrue("usr/bin/flatpak missing", flatpak.exists())
+                assertTrue("usr/bin/flatpak is not executable", flatpak.canExecute())
+            }
 
             // Creating symlinks requires privileges on Windows, so the
             // symlink assertions only run on the platform we actually ship
             // to. Everywhere else we still verify the archive was parsed
             // correctly (file and directory counts match GNU tar exactly).
-            val isLinux = System.getProperty("os.name").lowercase().contains("linux")
             if (isLinux) {
                 assertTrue("symlinks were not created", result.symlinks > 100)
 
