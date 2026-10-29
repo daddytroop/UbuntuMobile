@@ -35,7 +35,15 @@ class UbuntuViewModel(app: Application) : AndroidViewModel(app) {
             isInstalled = paths.isInstalled,
             isProotReady = paths.isProotReady,
         )
-        if (paths.isInstalled) refreshSystemInfo()
+        if (paths.isInstalled) {
+            // The phone may have moved to a different network since the
+            // container was set up, so refresh the resolver before anything
+            // tries to reach the internet.
+            viewModelScope.launch(Dispatchers.IO) {
+                com.ubuntumobile.linux.NetworkSetup.configureDns(app, paths)
+            }
+            refreshSystemInfo()
+        }
     }
 
     /** Install Ubuntu 26.04 if it is not present yet. */

@@ -190,6 +190,21 @@ if [ -d "$WORK/usr/lib/cargo/bin/coreutils" ] || [ -f "$WORK/usr/bin/coreutils" 
   rm -rf "$WORK/usr/lib/cargo/bin"
 fi
 
+# ---------------------------------------------------------------- resolver
+# The base image ships an empty /etc/resolv.conf, so nothing inside the
+# container can resolve a name and Flatpak cannot reach Flathub. The app
+# rewrites this file with the phone's own DNS servers, but a working
+# default means the container is usable even before that happens.
+echo "=== [$ARCH/$VARIANT] writing a default resolver ==="
+if [ ! -s "$WORK/etc/resolv.conf" ]; then
+  rm -f "$WORK/etc/resolv.conf"
+  printf 'nameserver 1.1.1.1\nnameserver 8.8.8.8\noptions timeout:2 attempts:2\n' \
+    > "$WORK/etc/resolv.conf"
+  echo "  wrote /etc/resolv.conf"
+else
+  echo "  /etc/resolv.conf already present"
+fi
+
 # ------------------------------------------------------- dpkg status merge
 # Merge RAW control stanzas. Never re-serialise: dpkg requires the exact
 # continuation-line formatting of multi-line fields such as Description.

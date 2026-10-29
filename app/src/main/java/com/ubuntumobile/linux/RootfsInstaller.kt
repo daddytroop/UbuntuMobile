@@ -105,6 +105,10 @@ class RootfsInstaller(
             archive.delete()
 
             // 4. first boot inside the container: locale + Flathub
+            //    The resolver has to be in place before Flatpak tries to
+            //    reach Flathub, and the rootfs ships an empty
+            //    /etc/resolv.conf.
+            NetworkSetup.configureDns(context, paths)
             onProgress(Progress(Progress.Phase.FIRSTBOOT, 0, total, "Configuring Flathub…"))
             val first = runtime.shell("/usr/local/lib/linx/firstboot.sh", timeoutSeconds = 300)
             Log.i(TAG, "firstboot rc=${first.exitCode}\n${first.output.take(2000)}")

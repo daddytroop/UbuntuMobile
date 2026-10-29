@@ -97,3 +97,44 @@ jobs:
           name: ubuntu-mobile-apk
           path: app/build/outputs/apk/debug/*.apk
           retention-days: 14
+
+  # ---------------------------------------------------------------------------
+  # The container has to actually work, not just compile.
+  #
+  # This job runs the exact command line the app builds against a real
+  # Ubuntu 26.04 rootfs with a real proot. It is the only check that can
+  # catch the failures that only show up on a phone: options the Termux
+  # build of proot rejects, and guest programs that depend on something
+  # proot changes.
+  #
+  # It runs on the amd64 rootfs, because that is the architecture the
+  # runner can execute.
+  # ---------------------------------------------------------------------------
+  integration:
+    runs-on: ubuntu-latest
+    timeout-minutes: 60
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Install the build dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends \
+            python3 xz-utils zstd ca-certificates build-essential pkg-config libtalloc-dev
+
+      - name: Cache the Ubuntu rootfs
+        uses: actions/cache@v4
+        with:
+          path: /opt/ubuntubuild
+          key: rootfs-integration-amd64-${{ hashFiles('tools/build_rootfs.sh') }}
+
+      - name: Build the Ubuntu 26.04 rootfs
+        run: |
+          sudo bash tools/build_rootfs.sh amd64 lite
+          sudo chown -R "$(id -u):$(id -g)" /opt/ubuntubuild
+
+      - name: Run the container end to end
+        run: sudo bash tools/integration_test.sh amd64
+

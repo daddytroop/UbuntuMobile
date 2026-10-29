@@ -28,17 +28,9 @@ class LinuxRuntime(private val paths: LinuxPaths) {
      * NOTE: proot does not accept a bare "--" as an end-of-options marker;
      * the Termux build rejects it with "unknown option '--'".
      */
-    internal fun baseArgs(): List<String> = listOf(
-        "-r", paths.root.absolutePath,
-        "-0",
-        "-b", "/dev",
-        "-b", "/proc",
-        "-b", "/sys",
-        "-b", "/data",
-        "-b", "/sdcard",
-        "-b", paths.sdcardDir.absolutePath,
-        "-w", "/root",
-    )
+    internal fun baseArgs(): List<String> =
+        baseArgsFor(paths.root.absolutePath, paths.sdcardDir.absolutePath)
+
 
     /** Environment passed to guest processes. */
     fun guestEnv(extra: Map<String, String> = emptyMap()): Map<String, String> = buildMap {
@@ -185,6 +177,28 @@ class LinuxRuntime(private val paths: LinuxPaths) {
 
     companion object {
         private const val TAG = "LinuxRuntime"
+
+        /**
+         * The proot command line, without the leading program name.
+         *
+         * Kept free of Android types so the unit tests can check it against
+         * the actual proot binary that ships in the APK: the Termux build
+         * rejects any option it does not know with "unknown option '...'",
+         * and upstream proot accepts things the Termux build does not (a
+         * bare "--" for instance). A mismatch is invisible on the host and
+         * fatal on the phone.
+         */
+        internal fun baseArgsFor(root: String, sdcard: String): List<String> = listOf(
+            "-r", root,
+            "-0",
+            "-b", "/dev",
+            "-b", "/proc",
+            "-b", "/sys",
+            "-b", "/data",
+            "-b", "/sdcard",
+            "-b", sdcard,
+            "-w", "/root",
+        )
 
         /** Expand a stream with a progress callback (bytes copied). */
         fun copyWithProgress(input: InputStream, output: FileOutputStream, total: Long, onProgress: (Long) -> Unit) {

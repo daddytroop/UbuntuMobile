@@ -1,6 +1,7 @@
 package com.ubuntumobile.linux
 
 import org.junit.Assert.assertEquals
+import org.junit.Assert.assertFalse
 import org.junit.Assert.assertTrue
 import org.junit.Assume.assumeTrue
 import org.junit.Test
@@ -166,6 +167,38 @@ class TarExtractorTest {
             assertTrue("os-release missing", osReleaseFile.exists())
             val osRelease = osReleaseFile.readText()
             assertTrue("unexpected release: $osRelease", osRelease.contains("26.04"))
+
+            if (isLinux) {
+                // Ubuntu 26.04 ships coreutils twice. The Rust (uutils)
+                // build decides which utility to run from AT_EXECFN, and
+                // proot sets AT_EXECFN to the path of its own loader - so
+                // every coreutils command in the container would die with
+                // "unknown program 'loader'". The standard names must
+                // therefore point at the GNU build.
+                val ls = File(out, "usr/bin/ls")
+                assertTrue("usr/bin/ls missing", ls.exists())
+                assertTrue(
+                    "usr/bin/ls must point at the GNU coreutils, not the Rust build " +
+                        "(it points at ${ls.toPath().toRealPath().fileName})",
+                    ls.toPath().toRealPath().fileName.toString().startsWith("gnu"),
+                )
+                assertFalse(
+                    "the Rust multicall binary must not be in the image",
+                    File(out, "usr/bin/coreutils").exists(),
+                )
+                assertFalse(
+                    "the Rust coreutils directory must not be in the image",
+                    File(out, "usr/lib/cargo/bin").exists(),
+                )
+                // The resolver has to exist, otherwise nothing in the
+                // container can resolve a name and Flatpak cannot work.
+                val resolv = File(out, "etc/resolv.conf")
+                assertTrue("etc/resolv.conf missing", resolv.exists())
+                assertTrue(
+                    "etc/resolv.conf has no nameserver",
+                    resolv.readText().contains("nameserver"),
+                )
+            }
         } finally {
             out.deleteRecursively()
         }
