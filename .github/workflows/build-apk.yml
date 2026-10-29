@@ -1,0 +1,89 @@
+name: Build APK
+
+# Builds the arm64 APK on every push and uploads it as an artifact, so the
+# app can be tested without a local Android toolchain.
+#
+# The Ubuntu 26.04 rootfs is rebuilt here as well - it is not committed
+# because it is ~330 MB per architecture and is produced by the tooling in
+# tools/. See the README for the local workflow.
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+  workflow_dispatch:
+    inputs:
+      abi:
+        description: 'Architecture to build'
+        required: true
+        default: arm64
+        type: choice
+        options: [arm64, armhf, amd64]
+
+permissions:
+  contents: read
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    timeout-minutes: 60
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up JDK 21
+        uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '21'
+
+      - name: Set up Gradle
+        uses: gradle/actions/setup-gradle@v4
+
+      - name: Install Android SDK
+        uses: android-actions/setup-android@v3
+
+      - name: Install SDK packages
+        run: |
+          sdkmanager --install \
+            "platform-tools" \
+            "platforms;android-36" \
+            "build-tools;36.0.0" \
+            "ndk;28.1.13356709" \
+            "cmake;3.22.1"
+          yes | sdkmanager --licenses > /dev/null
+
+      - name: Cache the Ubuntu rootfs
+        id: rootfs-cache
+        uses: actions/cache@v4
+        with:
+          path: /opt/ubuntubuild
+          key: rootfs-${{ inputs.abi || 'arm64' }}-${{ hashFiles('tools/build_rootfs.sh') }}
+
+      - name: Build the Ubuntu 26.04 rootfs
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends \
+            python3 xz-utils zstd ca-certificates
+          # The build only extracts .deb files, but apt wants a usable
+          # sandbox user, so run it as root.
+          sudo bash tools/build_rootfs.sh "${{ inputs.abi || 'arm64' }}" lite
+          sudo bash tools/stage_rootfs.sh lite
+          sudo chown -R "$(id -u):$(id -g)" app/src
+
+      - name: Fetch the proot runtime
+        run: sudo bash tools/fetch_proot.sh
+
+      - name: Run the unit tests
+        run: ./gradlew -Pubuntumobile.buildDir=app/build :app:testArm64DebugUnitTest --rerun-tasks
+
+      - name: Build the APK
+        run: ./gradlew -Pubuntumobile.buildDir=app/build :app:assembleDebug
+
+      - name: Upload the APK
+        uses: actions/upload-artifact@v4
+        with:
+          name: ubuntu-mobile-apk
+          path: app/build/outputs/apk/debug/*.apk
+          retention-days: 14

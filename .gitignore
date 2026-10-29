@@ -20,6 +20,9 @@ keystore/
 *.jks
 *.keystore
 
+# Machine-specific Android SDK location
+local.properties
+
 # IDE
 .idea/
 *.iml
