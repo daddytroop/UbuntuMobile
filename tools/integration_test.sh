@@ -42,7 +42,7 @@ fi
 # ----------------------------------------------------------------- the proot
 if [ ! -x "$PROOT" ] || [ ! -x "$LOADER" ]; then
   echo "=== building proot for the host ==="
-  "$(dirname "${BASH_SOURCE[0]}")/build_proot_host.sh" || exit 1
+  bash "$(dirname "${BASH_SOURCE[0]}")/build_proot_host.sh" || exit 1
 fi
 
 export PROOT_LOADER="$LOADER"
