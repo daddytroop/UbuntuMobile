@@ -274,23 +274,42 @@ class TarExtractor(
         chmod(file, mode)
     }
 
-    /** Applies a POSIX mode to [file]. Replaced on Android. */
+    /**
+     * Applies a POSIX mode to [file]. Replaced on Android with
+     * `android.system.Os.chmod`.
+     *
+     * The default implementation uses `java.nio.file` POSIX permissions,
+     * which are exact. The `java.io.File.setReadable/setWritable/
+     * setExecutable` helpers are NOT: their "group/other" handling can
+     * clobber the owner's bits, which leaves directories without an
+     * execute bit (so files inside become invisible) or without a write
+     * bit (so the installer cannot write into them).
+     */
     var chmod: (File, Int) -> Unit = { file, mode ->
-        val owner = (mode shr 6) and 7
-        val group = (mode shr 3) and 7
-        val other = mode and 7
+        try {
+            val perms = java.nio.file.attribute.PosixFilePermissions.fromString(
+                modeToPosixString(mode)
+            )
+            java.nio.file.Files.setPosixFilePermissions(file.toPath(), perms)
+        } catch (_: Exception) {
+            // No POSIX permissions on this filesystem (Windows): keep the
+            // file usable.
+            file.setReadable(true, true)
+            file.setWritable(true, true)
+            file.setExecutable(true, true)
+        }
+    }
 
-        file.setReadable(owner and 4 != 0, true)
-        file.setWritable(owner and 2 != 0, true)
-        file.setExecutable(owner and 1 != 0, true)
-
-        file.setReadable(group and 4 != 0, false)
-        file.setWritable(group and 2 != 0, false)
-        file.setExecutable(group and 1 != 0, false)
-
-        file.setReadable(other and 4 != 0, false)
-        file.setWritable(other and 2 != 0, false)
-        file.setExecutable(other and 1 != 0, false)
+    /** Render a numeric POSIX mode as the "rwxr-xr-x" form. */
+    private fun modeToPosixString(mode: Int): String {
+        val sb = StringBuilder(9)
+        for (shift in intArrayOf(6, 3, 0)) {
+            val bits = (mode shr shift) and 7
+            sb.append(if (bits and 4 != 0) 'r' else '-')
+            sb.append(if (bits and 2 != 0) 'w' else '-')
+            sb.append(if (bits and 1 != 0) 'x' else '-')
+        }
+        return sb.toString()
     }
 
     private companion object {
