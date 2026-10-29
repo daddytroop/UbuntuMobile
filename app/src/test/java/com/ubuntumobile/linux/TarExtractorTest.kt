@@ -90,9 +90,10 @@ class TarExtractorTest {
 
                 val binLink = File(out, "bin")
                 assertTrue("/bin is not a symlink", java.nio.file.Files.isSymbolicLink(binLink.toPath()))
+                // The archive stores the link target relative to the root.
                 assertEquals(
                     "usr/bin",
-                    java.nio.file.Files.readSymbolicLink(binLink.toPath()).toString().substringAfterLast("/"),
+                    java.nio.file.Files.readSymbolicLink(binLink.toPath()).toString(),
                 )
                 assertTrue("bin/bash not reachable via the /bin symlink", File(out, "bin/bash").exists())
             }
