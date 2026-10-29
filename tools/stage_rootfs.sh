@@ -7,7 +7,8 @@
 # strips the extension from the packaged name.
 set -euo pipefail
 
-PROJ="${LINX_PROJECT:-/mnt/c/Users/troop/OneDrive/Documents/Default Project/UbuntuMobile}"
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]:-$0}")" && pwd)"
+PROJ="${LINX_PROJECT:-$(cd "$SCRIPT_DIR/.." && pwd)}"
 OUT="${LINX_OUT:-/opt/ubuntubuild/out}"
 VARIANT="${1:-lite}"
 

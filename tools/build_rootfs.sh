@@ -12,6 +12,10 @@
 set -euo pipefail
 export DEBIAN_FRONTEND=noninteractive
 
+# Resolve this script's directory before any `cd`, so the helper
+# files next to it can be copied in reliably.
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]:-$0}")" && pwd)"
+
 ARCH="${1:-arm64}"
 VARIANT="${2:-lite}"
 OUT="${LINX_OUT:-/opt/ubuntubuild/out}"
@@ -400,7 +404,7 @@ chmod +x "$WORK/usr/local/lib/linx/flatpak-remove.sh"
 # Virtual gamepad helper: turns the on-screen controller's state into Linux
 # input events on a virtual uinput joystick.
 # ---------------------------------------------------------------------------
-cp "$(dirname "$0")/gamepad-helper.py" "$WORK/usr/local/lib/linx/gamepad-helper.py"
+cp "$SCRIPT_DIR/gamepad-helper.py" "$WORK/usr/local/lib/linx/gamepad-helper.py"
 chmod +x "$WORK/usr/local/lib/linx/gamepad-helper.py"
 
 # ---------------------------------------------------------------------------
@@ -416,7 +420,7 @@ if [ ! -e "$WORK/usr/bin/Xvnc" ] && [ -e "$WORK/usr/bin/Xtigervnc" ]; then
   ln -sfn /usr/bin/Xtigervnc "$WORK/usr/bin/Xvnc"
 fi
 
-cp "$(dirname "$0")/display-start.sh" "$WORK/usr/local/lib/linx/display-start.sh"
+cp "$SCRIPT_DIR/display-start.sh" "$WORK/usr/local/lib/linx/display-start.sh"
 chmod +x "$WORK/usr/local/lib/linx/display-start.sh"
 chmod +x "$WORK/usr/local/lib/linx/display-start.sh"
 

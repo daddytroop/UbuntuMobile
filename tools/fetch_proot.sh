@@ -9,7 +9,8 @@
 # it with PROOT_LOADER / PROOT_LOADER_32, otherwise every execve fails.
 set -euo pipefail
 
-PROJ="${LINX_PROJECT:-/mnt/c/Users/troop/OneDrive/Documents/Default Project/UbuntuMobile}"
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]:-$0}")" && pwd)"
+PROJ="${LINX_PROJECT:-$(cd "$SCRIPT_DIR/.." && pwd)}"
 WORK="${LINX_WORK:-/opt/prootbuild}"
 BASE="https://packages.termux.dev/apt/termux-main"
 
