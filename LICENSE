@@ -1,0 +1,32 @@
+UbuntuMobile - a complete Ubuntu 26.04 Linux system that runs on Android.
+
+Copyright (C) 2026 daddytroop
+
+This program is free software; you can redistribute it and/or modify it under
+the terms of the GNU General Public License as published by the Free Software
+Foundation; either version 2 of the License, or (at your option) any later
+version.
+
+This program is distributed in the hope that it will be useful, but WITHOUT
+ANY WARRANTY; without even the implied warranty of MERCHANTABILITY or FITNESS
+FOR A PARTICULAR PURPOSE.  See the GNU General Public License for more
+details.
+
+You should have received a copy of the GNU General Public License along with
+this program; if not, see <https://www.gnu.org/licenses/>.
+
+
+THIRD PARTY COMPONENTS
+======================
+
+The APK bundles prebuilt binaries that are redistributed unmodified:
+
+  * proot, loader, loader32, libtalloc.so.2, libandroid-shmem.so
+    - from the Termux project (https://github.com/termux/proot)
+    - proot is GPL-2.0; libtalloc is LGPL-3.0; libandroid-shmem is Apache-2.0
+    - the loader helper is extracted by the app at runtime
+
+  * The Ubuntu 26.04 rootfs is not redistributed in this repository. It is
+    built from Canonical's ubuntu-base image and Ubuntu archive packages by
+    tools/build_rootfs.sh, and each package keeps its own licence. Ubuntu is
+    licensed under the GPL/LPPL/BSD mix described by the Ubuntu archive.

@@ -1,0 +1,46 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- Ubuntu "circle of friends" mark, centred in the adaptive-icon safe zone. -->
+<vector xmlns:android="http://schemas.android.com/apk/res/android"
+    android:width="108dp"
+    android:height="108dp"
+    android:viewportWidth="108"
+    android:viewportHeight="108">
+
+    <!-- head -->
+    <path
+        android:pathData="M54,26m-11,0a11,11 0,1 1,22 0a11,11 0,1 1,-22 0"
+        android:fillColor="#E95420" />
+
+    <!-- body -->
+    <path
+        android:pathData="M54,42c-9,0 -16,6 -16,14v6h32v-6c0,-8 -7,-14 -16,-14z"
+        android:fillColor="#E95420" />
+
+    <!-- left arm -->
+    <path
+        android:pathData="M36,44c-6,1 -10,6 -10,12v4h7v-4c0,-3 1,-5 4,-6z"
+        android:fillColor="#E95420" />
+
+    <!-- right arm -->
+    <path
+        android:pathData="M72,44c6,1 10,6 10,12v4h-7v-4c0,-3 -1,-5 -4,-6z"
+        android:fillColor="#E95420" />
+
+    <!-- legs -->
+    <path
+        android:pathData="M44,64h7v20h-7z"
+        android:fillColor="#E95420" />
+    <path
+        android:pathData="M57,64h7v20h-7z"
+        android:fillColor="#E95420" />
+
+    <!-- left foot -->
+    <path
+        android:pathData="M38,84h13v6h-15a2,2 0,0 1,0,-4z"
+        android:fillColor="#E95420" />
+
+    <!-- right foot -->
+    <path
+        android:pathData="M70,84h-13v6h15a2,2 0,0 0,0,-4z"
+        android:fillColor="#E95420" />
+</vector>

@@ -1,0 +1,26 @@
+# Build output (redirected off OneDrive by default)
+build/
+app/build/
+.gradle/
+.cxx/
+
+# Release APKs are build artefacts - they are attached to the GitHub Release
+# instead of being committed (each is ~300 MB).
+dist/
+
+# The Ubuntu rootfs images are build outputs of tools/build_rootfs.sh.
+# Regenerate them with tools/build_rootfs.sh + tools/stage_rootfs.sh.
+app/src/arm64/assets/rootfs/*.rootfs
+app/src/armhf/assets/rootfs/*.rootfs
+app/src/amd64/assets/rootfs/*.rootfs
+app/*/assets/rootfs/*.rootfs
+
+# Local signing material - never commit keys
+keystore/
+*.jks
+*.keystore
+
+# IDE
+.idea/
+*.iml
+.DS_Store
