@@ -1,28 +1,37 @@
 #!/bin/bash
-# Fetch the Termux proot runtime (bionic) for each Android ABI and stage it
-# into the app's shared assets.
+# Fetch the Termux proot runtime (bionic) for each Android ABI, patch it so it
+# links correctly on Android, and stage it into the app.
 #
-# The payload is: proot, loader, loader32, libtalloc.so.2, libandroid-shmem.so
+# Payload: proot, loader, loader32, libtalloc.so, libandroid-shmem.so
 #
-# IMPORTANT: Termux's proot has the path of its loader helper baked in
-# (/data/data/com.termux/files/usr/libexec/proot/loader). The app overrides
-# it with PROOT_LOADER / PROOT_LOADER_32, otherwise every execve fails.
+# Why the patch is needed:
+#  * proot links against "libtalloc.so.2", but the Android build system only
+#    packages files matching *.so, so that name would never reach lib/<abi>/.
+#  * proot's RUNPATH points at Termux's private directory, which does not
+#    exist here.
+#  * Termux's proot also has the path of its loader helper baked in
+#    (/data/data/com.termux/files/usr/libexec/proot/loader). The app
+#    overrides it with PROOT_LOADER / PROOT_LOADER_32, otherwise every
+#    execve fails.
 set -euo pipefail
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]:-$0}")" && pwd)"
-PROJ="${LINX_PROJECT:-$(cd "$SCRIPT_DIR/.." && pwd)}"
+PROJECT="$(cd "$SCRIPT_DIR/.." && pwd)"
 WORK="${LINX_WORK:-/opt/prootbuild}"
 BASE="https://packages.termux.dev/apt/termux-main"
+PROOT_VERSION="5.1.107.101"
+
+command -v patchelf >/dev/null 2>&1 || {
+  echo "patchelf is required (apt-get install patchelf)" >&2
+  exit 1
+}
 
 mkdir -p "$WORK/debs" "$WORK/payload"
 cd "$WORK/debs"
 
-# The proot version to ship.
-PROOT_VERSION="5.1.107.101"
+declare -A ABI_DIR=( [aarch64]=arm64-v8a [arm]=armeabi-v7a [x86_64]=x86_64 )
 
 echo "=== resolving dependency packages ==="
-# DEB[arch] holds the full pool paths, e.g. "pool/main/p/proot/proot_x.deb",
-# because the Termux pool is split by first letter.
 declare -A DEB
 for arch in aarch64 arm x86_64; do
   idx="$WORK/pkg_$arch.txt"
@@ -55,66 +64,72 @@ echo "=== downloading ==="
 for arch in aarch64 arm x86_64; do
   for f in ${DEB[$arch]}; do
     out="$(basename "$f")"
-    if [ ! -s "$out" ]; then
-      echo "  fetching $out"
-      curl -sfL --retry 3 -o "$out" "$BASE/$f"
-    fi
+    [ -s "$out" ] || curl -sfL --retry 3 -o "$out" "$BASE/$f"
   done
 done
 
-echo "=== assembling payload ==="
+echo "=== assembling and patching the payload ==="
 for arch in aarch64 arm x86_64; do
   dest="$WORK/payload/$arch"
   rm -rf "$dest"; mkdir -p "$dest"
 
-  d="$WORK/x_$arch"
-  rm -rf "$d"; mkdir -p "$d"
+  d="$WORK/x_$arch"; rm -rf "$d"; mkdir -p "$d"
   dpkg-deb -x "$WORK/debs/proot_${PROOT_VERSION}_${arch}.deb" "$d"
   base="$d/data/data/com.termux/files/usr"
   cp "$base/bin/proot" "$dest/proot"
   cp "$base/libexec/proot/loader" "$dest/loader"
-  if [ -f "$base/libexec/proot/loader32" ]; then
-    cp "$base/libexec/proot/loader32" "$dest/loader32"
-  fi
+  [ -f "$base/libexec/proot/loader32" ] && cp "$base/libexec/proot/loader32" "$dest/loader32"
 
+  ld="$WORK/l_$arch"; rm -rf "$ld"; mkdir -p "$ld"
   for f in ${DEB[$arch]}; do
     out="$(basename "$f")"
-    case "$out" in
-      proot_*) continue ;;
-    esac
-    ld="$WORK/l_$arch"; rm -rf "$ld"; mkdir -p "$ld"
+    case "$out" in proot_*) continue ;; esac
     dpkg-deb -x "$WORK/debs/$out" "$ld"
-    find "$ld" -name 'libtalloc.so*' -exec cp -P {} "$dest/" \;
-    find "$ld" -name 'libandroid-shmem.so*' -exec cp -P {} "$dest/" \;
   done
+  find "$ld" -name 'libtalloc.so*' -exec cp -fL {} "$dest/libtalloc.so" \;
+  find "$ld" -name 'libandroid-shmem.so*' -exec cp -fL {} "$dest/libandroid-shmem.so" \;
 
-  # proot links against the soname libtalloc.so.2
-  if [ ! -f "$dest/libtalloc.so.2" ] && [ -f "$dest/libtalloc.so.2.5.0" ]; then
-    cp -P "$dest/libtalloc.so.2.5.0" "$dest/libtalloc.so.2"
-  fi
+  # Patch: drop Termux's RUNPATH and rename the talloc dependency so the
+  # library can live in the APK's native library directory.
+  patchelf --remove-rpath "$dest/proot" 2>/dev/null || true
+  patchelf --replace-needed libtalloc.so.2 libtalloc.so "$dest/proot"
+  patchelf --set-soname libtalloc.so "$dest/libtalloc.so"
 
   chmod 755 "$dest"/* 2>/dev/null || true
-  echo "  $arch: $(ls "$dest" | tr '\n' ' ')"
 
-  # Sanity check: the binaries must be there and executable.
-  for needed in proot loader libtalloc.so.2 libandroid-shmem.so; do
+  echo "  $arch:"
+  readelf -d "$dest/proot" | grep -E "NEEDED|RUNPATH" | sed 's/^/    /'
+  for needed in proot loader libtalloc.so libandroid-shmem.so; do
     if [ ! -f "$dest/$needed" ]; then
       echo "  ERROR: $needed missing for $arch" >&2
       exit 1
     fi
   done
+  # loader32 only exists in the 64-bit builds; the 32-bit proot uses loader.
+  if [ "$arch" != "arm" ] && [ ! -f "$dest/loader32" ]; then
+    echo "  ERROR: loader32 missing for $arch" >&2
+    exit 1
+  fi
 done
 
 echo "=== staging into the app ==="
-for pair in "aarch64:arm64" "arm:armhf" "x86_64:amd64"; do
-  src="${pair%%:*}"; flavor="${pair##*:}"
-  d="$PROJ/app/src/main/assets/proot/$src"
+for arch in aarch64 arm x86_64; do
+  flavor="${ABI_DIR[$arch]}"
+  d="$PROJECT/app/src/main/assets/proot/$arch"
   mkdir -p "$d"
   rm -f "$d"/*
-  cp -L "$WORK/payload/$src"/* "$d/"
+  cp -L "$WORK/payload/$arch"/* "$d/"
   chmod 755 "$d"/* 2>/dev/null || true
-  echo "  $flavor <- $(ls "$d" | tr '\n' ' ')"
+  echo "  assets/proot/$arch: $(ls "$d" | tr '\n' ' ')"
+
+  # The shared libraries also go into the APK's native library directory,
+  # where the Android linker always finds them.
+  j="$PROJECT/app/src/main/jniLibs/$flavor"
+  mkdir -p "$j"
+  rm -f "$j"/libtalloc.so* "$j"/libandroid-shmem.so*
+  cp -L "$WORK/payload/$arch/libtalloc.so" "$j/libtalloc.so"
+  cp -L "$WORK/payload/$arch/libandroid-shmem.so" "$j/libandroid-shmem.so"
+  echo "  jniLibs/$flavor: $(ls "$j" | tr '\n' ' ')"
 done
 
-du -sh "$PROJ/app/src/main/assets/proot"
 echo "PROOT_PAYLOAD_OK"

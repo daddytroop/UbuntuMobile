@@ -109,7 +109,14 @@ class LinuxRuntime(private val paths: LinuxPaths) {
                 append(exec).append('\n')
             }
         )
-        script.setExecutable(true, false)
+        // The script is run as "sh script", so it only needs to be readable.
+        // Do not touch the execute bit: the java.io.File permission helpers
+        // can clobber the owner's read bit on Android.
+        try {
+            android.system.Os.chmod(script.absolutePath, 0x1A4)
+        } catch (_: Exception) {
+            script.setReadable(true, false)
+        }
         return script
     }
 
