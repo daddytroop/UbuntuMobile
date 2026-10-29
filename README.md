@@ -337,6 +337,12 @@ coreutils command in the container dies with
 and work under proot untouched, so the builder points the standard names
 at them and drops the Rust multicall binary.
 
+**proot kills everything it started when it exits.** proot registers
+`atexit(kill_all_tracees)`, so a background job cannot outlive the shell
+that launched it. The X server therefore needs a proot process of its own
+that stays alive for as long as the display is wanted — the app starts
+one with `LinuxRuntime.startPersistent()`.
+
 **proot has no end-of-options marker.** Upstream proot accepts a bare `--`
 before the command; the Termux build does not and refuses to start with
 `unknown option '--'`. Anything the app passes to proot has to be in the
@@ -366,6 +372,10 @@ helper unsets it before launching the server.
   `tools/integration_test.sh` starts a shell in a real Ubuntu 26.04 rootfs
   with the app's exact command line, and checks that the coreutils, the
   toolchain, the Flathub remote and the resolver all work.
+- The X display was started inside the container and spoken to over RFB: the
+  handshake completes and the server reports a 1024x600 framebuffer.
+- The interactive login shell (`bash --login -i`) was started on a real pty
+  and reports the right user, working directory and terminal type.
 
 ## Not yet done
 
