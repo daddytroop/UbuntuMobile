@@ -1,5 +1,6 @@
 # UbuntuMobile
 
+[![Build APK](https://github.com/daddytroop/UbuntuMobile/actions/workflows/build-apk.yml/badge.svg)](https://github.com/daddytroop/UbuntuMobile/actions/workflows/build-apk.yml)
 **A complete Ubuntu 26.04 Linux system that runs on an Android phone.**
 
 One APK gives you a real Linux userland — bash, apt, GCC, Python, Git, Flatpak
