@@ -69,38 +69,47 @@ object ProotInstaller {
             }
 
             if (!paths.proot.canExecute()) {
-                Log.e(TAG, "proot is not executable after install")
+                val msg = "proot is not executable after install"
+                Log.e(TAG, msg)
+                paths.appendInstallLog(msg)
                 return false
             }
 
-            // Run it once: this catches a missing execute bit, a broken
-            // loader or a missing shared library straight away, instead of
-            // much later when a command mysteriously fails.
-            val check = try {
-                val pb = ProcessBuilder(paths.proot.absolutePath, "--version")
-                pb.environment().apply {
-                    clear()
-                    put("PATH", "/system/bin:/system/xbin")
-                    put("LD_LIBRARY_PATH", paths.libDir.absolutePath)
-                    put("HOME", paths.homeDir.absolutePath)
-                    put("PROOT_LOADER", File(paths.libDir, "loader").absolutePath)
-                    put("PROOT_LOADER_32", File(paths.libDir, "loader32").absolutePath)
+            // Try to run it. This is a diagnostic rather than a gate: the
+            // container smoke test is the real authority, and it produces a
+            // much better message. We try a couple of environments because
+            // Android is picky about what a child process inherits.
+            val attempts = listOf(
+                "proot" to mapOf(
+                    "PATH" to "/system/bin:/system/xbin",
+                    "LD_LIBRARY_PATH" to paths.libDir.absolutePath,
+                    "HOME" to paths.homeDir.absolutePath,
+                    "TMPDIR" to paths.cacheDir.absolutePath,
+                    "PROOT_LOADER" to File(paths.libDir, "loader").absolutePath,
+                    "PROOT_LOADER_32" to File(paths.libDir, "loader32").absolutePath,
+                    "PROOT_NO_SECCOMP" to "1",
+                ),
+                "proot (inherited environment)" to emptyMap(),
+            )
+            for ((label, env) in attempts) {
+                try {
+                    val pb = ProcessBuilder(paths.proot.absolutePath, "--version")
+                    pb.environment().apply {
+                        if (env.isNotEmpty()) {
+                            clear()
+                            putAll(env)
+                        }
+                    }
+                    pb.redirectErrorStream(true)
+                    val proc = pb.start()
+                    val out = proc.inputStream.bufferedReader().readText().trim()
+                    val code = proc.waitFor()
+                    paths.appendInstallLog("$label -> exit $code: $out")
+                    Log.i(TAG, "$label -> exit $code: $out")
+                } catch (e: Exception) {
+                    paths.appendInstallLog("$label -> ${e.message}")
+                    Log.w(TAG, "$label failed", e)
                 }
-                pb.redirectErrorStream(true)
-                val proc = pb.start()
-                val out = proc.inputStream.bufferedReader().readText()
-                proc.waitFor()
-                Log.i(TAG, "proot --version -> ${out.trim()}")
-                out
-            } catch (e: Exception) {
-                Log.e(TAG, "proot could not be executed", e)
-                return false
-            }
-            if (!check.contains("proot", ignoreCase = true) &&
-                !check.contains("PRoot", ignoreCase = true)
-            ) {
-                Log.e(TAG, "unexpected proot output: $check")
-                return false
             }
             true
         } catch (e: Exception) {

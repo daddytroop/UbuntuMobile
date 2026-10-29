@@ -27,6 +27,22 @@ class UbuntuApplication : Application() {
     override fun onCreate() {
         super.onCreate()
         installCrashHandler()
+        // The install log is written to a separate file, but folding it into
+        // crash.log means one command is enough to diagnose a failed install.
+        mirrorInstallLog()
+    }
+
+    /** Copy the tail of the install log into crash.log so one file has it all. */
+    private fun mirrorInstallLog() {
+        try {
+            val installLog = File(filesDir, "install.log")
+            if (!installLog.exists()) return
+            val tail = installLog.readText().takeLast(16 * 1024)
+            if (tail.isBlank()) return
+            val crash = File(filesDir, "crash.log")
+            crash.appendText("\n=== install log ===\n$tail\n")
+        } catch (_: Throwable) {
+        }
     }
 
     private fun installCrashHandler() {

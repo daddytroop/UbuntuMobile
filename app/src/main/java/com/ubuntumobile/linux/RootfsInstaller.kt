@@ -47,7 +47,11 @@ class RootfsInstaller(
 
             // 1. proot binary, loader and shared libraries
             if (!ProotInstaller.install(context, paths)) {
-                return@withContext Result.failure(IOException("Could not install the proot runtime"))
+                // Do not abort here: the container smoke test below gives a
+                // far better error message than "could not install the
+                // runtime", because it runs proot and shows what it said.
+                paths.appendInstallLog("the proot runtime could not be installed")
+                Log.w(TAG, "proot runtime install reported a problem, continuing to the smoke test")
             }
 
             // 2. copy the rootfs out of the APK
@@ -113,11 +117,13 @@ class RootfsInstaller(
                 "echo LINUX_SMOKE_OK; uname -sr; head -1 /etc/os-release",
                 timeoutSeconds = 120,
             )
+            paths.appendInstallLog("smoke rc=${smoke.exitCode} out=${smoke.output.take(400)}")
             Log.i(TAG, "smoke rc=${smoke.exitCode}\n${smoke.output.take(2000)}")
             if (!smoke.output.contains("LINUX_SMOKE_OK")) {
-                val detail = smoke.error ?: smoke.output.trim().take(400)
+                val detail = smoke.error ?: smoke.output.trim().take(600)
                 throw IOException(
-                    "Ubuntu did not start: ${if (detail.isNotEmpty()) detail else "no output from the container"}"
+                    "Ubuntu did not start: " +
+                        (if (detail.isNotEmpty()) detail else "the container produced no output")
                 )
             }
 
@@ -126,7 +132,14 @@ class RootfsInstaller(
             Result.success(Unit)
         } catch (e: Exception) {
             Log.e(TAG, "install failed", e)
-            onProgress(Progress(Progress.Phase.FAILED, detail = e.message ?: "Install failed"))
+            paths.appendInstallLog("install failed: ${e.message}")
+            val detail = paths.installLogTail(10)
+            onProgress(
+                Progress(
+                    Progress.Phase.FAILED,
+                    detail = if (detail.isNotEmpty()) detail else (e.message ?: "Install failed"),
+                )
+            )
             Result.failure(e)
         }
     }

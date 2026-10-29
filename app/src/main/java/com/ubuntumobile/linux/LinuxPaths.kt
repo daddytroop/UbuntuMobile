@@ -47,6 +47,47 @@ class LinuxPaths(context: Context) {
     val installMarker: File get() = File(root, ".linx-installed")
 
     /**
+     * A human-readable log of the install.
+     *
+     * Install failures are handled rather than thrown, so they never reach
+     * the crash handler. This file is the record of what happened and can be
+     * pulled with:
+     *
+     * ```
+     * adb shell run-as com.ubuntumobile cat files/install.log
+     * ```
+     */
+    val installLog: File get() = File(app.filesDir, "install.log")
+
+    /** Append a line to the install log. */
+    fun appendInstallLog(message: String) {
+        try {
+            val stamp = java.text.SimpleDateFormat("HH:mm:ss", java.util.Locale.US)
+                .format(java.util.Date())
+            val line = "[$stamp] $message\n"
+            installLog.appendText(line)
+            // Keep it bounded.
+            if (installLog.length() > 256 * 1024) {
+                installLog.writeText(installLog.readText().takeLast(128 * 1024))
+            }
+            // Mirror into crash.log so one command shows the whole story.
+            val crash = File(app.filesDir, "crash.log")
+            crash.appendText(line)
+            if (crash.length() > 512 * 1024) {
+                crash.writeText(crash.readText().takeLast(256 * 1024))
+            }
+        } catch (_: Exception) {
+        }
+    }
+
+    /** The last few lines of the install log, for display on screen. */
+    fun installLogTail(lines: Int = 12): String = try {
+        installLog.readLines().takeLast(lines).joinToString("\n")
+    } catch (_: Exception) {
+        ""
+    }
+
+    /**
      * Marker written once the rootfs has been unpacked.
      *
      * It lives outside the rootfs so that a failed first-boot step can be

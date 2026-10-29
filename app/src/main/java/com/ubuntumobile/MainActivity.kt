@@ -419,11 +419,13 @@ private fun SetupScreen(
                         ) {
                             Text("Retry", color = Color.White, fontWeight = FontWeight.SemiBold)
                         }
-                        Spacer(Modifier.height(10.dp))
+                        Spacer(Modifier.height(12.dp))
                         Text(
-                            "Retrying reuses the parts that already worked.",
+                            "Retrying reuses the parts that already worked.\n" +
+                                "The details are in files/install.log on the phone.",
                             color = Color.White.copy(alpha = 0.6f),
                             fontSize = 12.sp,
+                            textAlign = TextAlign.Center,
                         )
                     }
                 }
