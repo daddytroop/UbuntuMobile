@@ -165,25 +165,38 @@ UbuntuMobile/
 
 ### Requirements
 - JDK 21, Android SDK (platform 36, build-tools 36, NDK 28, CMake 3.22)
-- Gradle 8.14+ (a wrapper is not committed; use a local Gradle or add one)
+- Gradle 8.14+ (a wrapper is included, so `./gradlew` works)
 
 ### Commands
 
 ```bash
 # debug build for every ABI
-gradle :app:assembleDebug
+./gradlew :app:assembleDebug
 
 # signed release build
-gradle :app:assembleRelease
+./gradlew :app:assembleRelease
 
 # unit tests (unpacks the real rootfs and checks it is intact)
-gradle :app:testArm64DebugUnitTest
+./gradlew :app:testArm64DebugUnitTest
 ```
 
 Build output goes to `%LOCALAPPDATA%\UbuntuMobile\build\app\outputs\apk`
+on Windows and `~/.cache/UbuntuMobile/build/app/outputs/apk` elsewhere
 (configurable with `-Pubuntumobile.buildDir=...`). The project lives inside
 OneDrive, which conflicts with Gradle's file locking, so outputs are
 redirected to local disk by default.
+
+### One-command bootstrap
+
+`tools/bootstrap.sh` fetches the proot runtime, rebuilds the Ubuntu rootfs
+for all three architectures, stages them into the app and builds the APKs.
+It needs WSL2 with root access (the rootfs build extracts Ubuntu's `.deb`
+packages, which is root-only for the cross-architecture package indexes).
+
+```bash
+tools/bootstrap.sh                # everything
+tools/bootstrap.sh --skip-rootfs   # reuse an existing rootfs
+```
 
 ### Rebuilding the rootfs
 
@@ -196,6 +209,12 @@ bundle and packages the result.
 tools/build_rootfs.sh arm64      # or armhf / amd64
 tools/stage_rootfs.sh            # copy into the app's flavor assets
 ```
+
+### Continuous integration
+
+`.github/workflows/build-apk.yml` runs on every push: it rebuilds the
+rootfs, runs the unit tests, builds the APK and uploads it as an artifact
+(`ubuntu-mobile-apk`).
 
 ---
 

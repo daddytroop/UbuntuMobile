@@ -1,7 +1,7 @@
 name: Build APK
 
-# Builds the arm64 APK on every push and uploads it as an artifact, so the
-# app can be tested without a local Android toolchain.
+# Builds the APK on every push and uploads it as an artifact, so the app can
+# be tested without a local Android toolchain.
 #
 # The Ubuntu 26.04 rootfs is rebuilt here as well - it is not committed
 # because it is ~330 MB per architecture and is produced by the tooling in
@@ -41,8 +41,11 @@ jobs:
       - name: Set up Gradle
         uses: gradle/actions/setup-gradle@v4
 
-      - name: Install Android SDK
+      - name: Set up the Android SDK
         uses: android-actions/setup-android@v3
+        with:
+          # Accept the SDK licences here, otherwise sdkmanager fails later.
+          accept-android-sdk-licenses: yes
 
       - name: Install SDK packages
         run: |
@@ -52,7 +55,6 @@ jobs:
             "build-tools;36.0.0" \
             "ndk;28.1.13356709" \
             "cmake;3.22.1"
-          yes | sdkmanager --licenses > /dev/null
 
       - name: Cache the Ubuntu rootfs
         id: rootfs-cache
@@ -66,14 +68,17 @@ jobs:
           sudo apt-get update
           sudo apt-get install -y --no-install-recommends \
             python3 xz-utils zstd ca-certificates
-          # The build only extracts .deb files, but apt wants a usable
-          # sandbox user, so run it as root.
+          # The build extracts Ubuntu's .deb packages for a foreign
+          # architecture, which apt insists on doing as root.
           sudo bash tools/build_rootfs.sh "${{ inputs.abi || 'arm64' }}" lite
           sudo bash tools/stage_rootfs.sh lite
-          sudo chown -R "$(id -u):$(id -g)" app/src
+          # The cache and the app's assets must be readable by the runner.
+          sudo chown -R "$(id -u):$(id -g)" /opt/ubuntubuild app/src
 
       - name: Fetch the proot runtime
-        run: sudo bash tools/fetch_proot.sh
+        run: |
+          sudo bash tools/fetch_proot.sh
+          sudo chown -R "$(id -u):$(id -g)" app/src/main/assets/proot
 
       - name: Run the unit tests
         run: ./gradlew -Pubuntumobile.buildDir=app/build :app:testArm64DebugUnitTest --rerun-tasks
