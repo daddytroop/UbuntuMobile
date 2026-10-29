@@ -103,6 +103,45 @@ echo "=== 6. the container can resolve names ==="
 out=$(guest 'cat /etc/resolv.conf')
 if echo "$out" | grep -q nameserver; then pass "the resolver is configured"; else fail "no resolver: $out"; fi
 
+echo "=== 7. the X display comes up and speaks RFB ==="
+# proot kills every process it started when it exits, so the server has to
+# live in a proot process that stays alive - which is what the app does.
+"$PROOT" "${GUEST_ARGS[@]}" /bin/bash -c \
+  'export LINX_DISPLAY=99 LINX_RFB_PORT=5901 LINX_GEOMETRY=1024x600 LINX_DEPTH=24;
+   /usr/local/lib/linx/display-start.sh; exec sleep infinity' \
+  </dev/null >/dev/null 2>&1 &
+DISPLAY_PID=$!
+rfb_ok=0
+for _ in $(seq 1 25); do
+  if python3 - <<'PY' 2>/dev/null
+import socket, struct, sys
+s = socket.create_connection(("127.0.0.1", 5901), timeout=5)
+greeting = s.recv(12)
+if not greeting.startswith(b"RFB"):
+    sys.exit(1)
+s.sendall(b"RFB 003.008\n")
+sec = s.recv(16)
+s.sendall(b"\x01")
+if struct.unpack(">I", s.recv(4))[0] != 0:
+    sys.exit(1)
+s.sendall(b"\x01")
+info = s.recv(64)
+w, h = struct.unpack(">HH", info[:4])
+print("  RFB %dx%d" % (w, h))
+sys.exit(0 if w > 0 and h > 0 else 1)
+PY
+  then
+    rfb_ok=1
+    break
+  fi
+  sleep 1
+done
+if [ "$rfb_ok" = "1" ]; then pass "the X server exports a framebuffer over RFB"; else fail "the X display did not come up"; fi
+kill "$DISPLAY_PID" 2>/dev/null
+sleep 1
+pkill -f 'Xvnc :99' 2>/dev/null
+pkill -f 'Xtigervnc :99' 2>/dev/null
+
 echo
 if [ "$FAILURES" -eq 0 ]; then
   echo "INTEGRATION_TEST_PASSED"

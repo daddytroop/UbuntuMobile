@@ -71,6 +71,7 @@ import com.ubuntumobile.ui.UbuntuViewModel
 import com.ubuntumobile.ui.theme.UbuntuPalette
 import com.ubuntumobile.ui.theme.UbuntuTheme
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 
@@ -138,7 +139,29 @@ fun UbuntuApp(
     val terminal = remember { AnsiTerminal() }
     var terminalLines by remember { mutableStateOf(listOf<String>()) }
     var pty by remember { mutableStateOf<Pty?>(null) }
+    // The X server lives inside the container, and proot kills everything it
+    // started when it exits - so it needs a proot process that stays alive.
+    var displayProcess by remember { mutableStateOf<Process?>(null) }
     val scope = rememberCoroutineScope()
+
+    DisposableEffect(Unit) {
+        onDispose {
+            // Stop the X server first: killing the proot process that hosts
+            // it does not stop the server itself, and a leftover server
+            // would hold the RFB port.
+            val proc = displayProcess
+            displayProcess = null
+            if (proc != null) {
+                Thread({
+                    try {
+                        vm.runtime.shell("/usr/local/lib/linx/display-stop.sh", timeoutSeconds = 20)
+                    } catch (_: Exception) {
+                    }
+                    proc.destroyForcibly()
+                }, "display-stop").apply { isDaemon = true }.start()
+            }
+        }
+    }
 
     LaunchedEffect(Unit) {
         terminal.setSink { terminalLines = it }
@@ -167,6 +190,36 @@ fun UbuntuApp(
         }
     }
 
+    /**
+     * Start the X display inside the Ubuntu container.
+     *
+     * Xvnc (TigerVNC) runs an X server and exports it over RFB in one
+     * process. Because proot shares the host network namespace, the app
+     * can reach the RFB port on 127.0.0.1 directly.
+     *
+     * proot kills every process it started when it exits, so the server
+     * needs a proot process of its own that stays alive for as long as the
+     * display is wanted.
+     */
+    suspend fun startLinuxDisplay() {
+        withContext(Dispatchers.IO) {
+            displayProcess?.destroyForcibly()
+            displayProcess = vm.runtime.startPersistent(
+                listOf(
+                    "/bin/bash", "-c",
+                    "export LINX_DISPLAY=$DISPLAY_NUM LINX_RFB_PORT=$DISPLAY_PORT; " +
+                        "export LINX_GEOMETRY=1024x600 LINX_DEPTH=24; " +
+                        "/usr/local/lib/linx/display-start.sh; " +
+                        // Keep the container alive: the X server is a child
+                        // of this shell, and proot kills its children when
+                        // it exits.
+                        "exec sleep infinity",
+                ),
+            )
+            // Give the server a moment to open the RFB port.
+            delay(4000)
+        }
+    }
     // Install / setup screen
     if (!state.isInstalled) {
         SetupScreen(
@@ -193,7 +246,7 @@ fun UbuntuApp(
                             // Bring up the X display inside the container and
                             // then attach to its RFB stream.
                             scope.launch {
-                                startLinuxDisplay(vm)
+                                startLinuxDisplay()
                                 screen = Screen.DISPLAY
                             }
                         }
@@ -319,24 +372,6 @@ fun UbuntuApp(
 
 private fun quote(s: String): String = "'" + s.replace("'", "'\\''") + "'"
 
-/**
- * Start the X display inside the Ubuntu container.
- *
- * Xvnc (TigerVNC) runs an X server and exports it over RFB in one process.
- * Because proot shares the host network namespace, the app can reach the
- * RFB port on 127.0.0.1 directly.
- */
-private suspend fun startLinuxDisplay(vm: UbuntuViewModel) {
-    withContext(Dispatchers.IO) {
-        vm.runtime.shell(
-            "export LINX_DISPLAY=$DISPLAY_NUM LINX_RFB_PORT=$DISPLAY_PORT; " +
-                "export LINX_GEOMETRY=1024x600 LINX_DEPTH=24; " +
-                "nohup /usr/local/lib/linx/display-start.sh >/tmp/linx-display.log 2>&1 & " +
-                "sleep 8; echo DISPLAY_STARTED",
-            timeoutSeconds = 90,
-        )
-    }
-}
 
 /** The first-run screen that provisions Ubuntu. */
 @Composable

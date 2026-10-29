@@ -177,6 +177,43 @@ class LinuxRuntime(private val paths: LinuxPaths) {
     fun shell(script: String, timeoutSeconds: Long = 120): Result =
         run(listOf("/bin/bash", "-lc", script), timeoutSeconds)
 
+    /**
+     * Start a command in the guest and leave it running.
+     *
+     * proot registers `atexit(kill_all_tracees)`, so every process it
+     * started is killed when proot exits. A background job therefore
+     * cannot outlive the shell that launched it - which is why the X
+     * server needs a proot process of its own that stays alive for as
+     * long as the display is wanted.
+     *
+     * The returned [Process] must be kept alive and destroyed when the
+     * guest program is no longer wanted.
+     */
+    fun startPersistent(command: List<String>, env: Map<String, String> = emptyMap()): Process? {
+        if (!paths.isProotReady) return null
+        if (!paths.isInstalled) return null
+        return try {
+            val pb = ProcessBuilder(buildGuestCommand(command, env))
+            pb.environment().apply {
+                clear()
+                putAll(hostEnv())
+            }
+            pb.redirectErrorStream(true)
+            // Drain the output so the process never blocks on a full pipe.
+            val proc = pb.start()
+            Thread({
+                try {
+                    proc.inputStream.bufferedReader().forEachLine { }
+                } catch (_: Exception) {
+                }
+            }, "guest-output").apply { isDaemon = true }.start()
+            proc
+        } catch (e: Exception) {
+            Log.e(TAG, "could not start a persistent guest command", e)
+            null
+        }
+    }
+
     /** Result of a guest command. */
     data class Result(val exitCode: Int, val output: String, val error: String?) {
         val ok: Boolean get() = exitCode == 0
