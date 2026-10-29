@@ -64,8 +64,12 @@ GUEST_ARGS=(
 )
 
 # Run a command in the guest, exactly like the app does.
+#
+# proot writes warnings about bindings that do not exist on this machine
+# (/data, /sdcard and /storage/emulated/0 only exist on a phone). Those
+# are not failures, so they are filtered out; errors are kept.
 guest() {
-  "$PROOT" "${GUEST_ARGS[@]}" /bin/bash -lc "$1" 2>&1
+  "$PROOT" "${GUEST_ARGS[@]}" /bin/bash -lc "$1" 2>&1 | grep -v '^proot warning:'
 }
 
 echo "=== 1. the container starts ==="

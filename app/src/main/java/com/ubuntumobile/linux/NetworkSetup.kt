@@ -89,3 +89,44 @@ object NetworkSetup {
         }
     }
 }
+
+/**
+ * The bits of the container's state that have to exist before anything
+ * useful can happen in it.
+ */
+object ContainerSetup {
+
+    private const val TAG = "ContainerSetup"
+
+    /**
+     * Prepare the container: a resolver and a runtime directory.
+     *
+     * Flatpak refuses to work without `XDG_RUNTIME_DIR`, and the guest
+     * environment points it at `/tmp/runtime-root`, which the rootfs does
+     * not ship.
+     */
+    fun prepare(context: Context, paths: LinuxPaths) {
+        NetworkSetup.configureDns(context, paths)
+        ensureRuntimeDir(paths)
+    }
+
+    /** Create the guest's `XDG_RUNTIME_DIR` with the mode Flatpak wants. */
+    private fun ensureRuntimeDir(paths: LinuxPaths) {
+        val dir = File(paths.root, "tmp/runtime-root")
+        try {
+            if (!dir.isDirectory) dir.mkdirs()
+            java.nio.file.Files.setPosixFilePermissions(
+                dir.toPath(),
+                java.nio.file.attribute.PosixFilePermissions.fromString("rwx------"),
+            )
+        } catch (e: Exception) {
+            // The java.io helpers are a fallback: their "group/other"
+            // handling can leave the owner without the execute bit.
+            Log.w(TAG, "could not create the runtime directory", e)
+            dir.mkdirs()
+            dir.setReadable(true, false)
+            dir.setWritable(true, false)
+            dir.setExecutable(true, false)
+        }
+    }
+}

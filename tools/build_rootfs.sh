@@ -188,6 +188,20 @@ if [ -d "$WORK/usr/lib/cargo/bin/coreutils" ] || [ -f "$WORK/usr/bin/coreutils" 
   # can accidentally run it.
   rm -f "$WORK/usr/bin/coreutils"
   rm -rf "$WORK/usr/lib/cargo/bin"
+
+  # A few utilities only exist in the Rust build (sha3sum, shake128sum,
+  # hashsum and friends). They have no GNU equivalent, so their symlinks
+  # now point at nothing. Remove them rather than leaving dangling links
+  # behind - a command that is not there is better than one that looks
+  # like it is there and then fails.
+  removed=0
+  for f in "$WORK"/usr/bin/*; do
+    [ -L "$f" ] || continue
+    case "$(readlink "$f")" in
+      ../lib/cargo/bin/coreutils/*) rm -f "$f"; removed=$((removed+1)) ;;
+    esac
+  done
+  echo "  removed $removed commands that only exist in the Rust build"
 fi
 
 # ---------------------------------------------------------------- resolver

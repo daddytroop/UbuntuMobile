@@ -211,6 +211,32 @@ tools/build_rootfs.sh arm64      # or armhf / amd64
 tools/stage_rootfs.sh            # copy into the app's flavor assets
 ```
 
+### Testing the container
+
+`tools/integration_test.sh` runs the container for real on the build
+machine: it takes a rootfs, runs the **exact command line the app builds**
+against it with a real proot and checks that the guest userspace works.
+
+```bash
+tools/build_proot_host.sh         # build proot (with its loader) for the host
+tools/integration_test.sh amd64   # run the container end to end
+```
+
+This is the only check that catches the two classes of problem this app
+keeps hitting:
+
+* **Options proot does not accept.** The Termux build of proot rejects
+  anything it does not know (`unknown option '--'`), while the upstream
+  proot a developer builds on a desktop happily accepts it. The same
+  difference is checked statically by `ProotOptionsTest`, which reads the
+  option names out of the three proot binaries that ship in the APK.
+* **Guest programs that depend on something proot changes.** Ubuntu 26.04
+  ships coreutils twice, and the Rust (uutils) build works out which
+  utility to run from `AT_EXECFN` — which proot sets to the path of its
+  own loader helper, so every command dies with `unknown program
+  'loader'`. The rootfs builder therefore points the standard names at the
+  GNU build, which ignores `argv[0]` and works under proot untouched.
+
 ### Publishing a release
 
 Every change that should reach a phone gets its own tag, so the builds are
@@ -300,6 +326,27 @@ for a terminator.
 maintainer script creates — which never runs when you just extract `.deb`
 files. The build recreates the alias.
 
+**Ubuntu 26.04 ships coreutils twice.** `rust-coreutils` installs a single
+multicall binary at `/usr/bin/coreutils` with hard links under
+`/usr/lib/cargo/bin/coreutils/` and the familiar names as symlinks;
+`gnu-coreutils` installs the classic binaries as `/usr/bin/gnu<name>`.
+The Rust build works out which utility to run from **`AT_EXECFN`** — and
+proot sets `AT_EXECFN` to the path of its own loader helper — so every
+coreutils command in the container dies with
+`coreutils: unknown program 'loader'`. The GNU binaries ignore `argv[0]`
+and work under proot untouched, so the builder points the standard names
+at them and drops the Rust multicall binary.
+
+**proot has no end-of-options marker.** Upstream proot accepts a bare `--`
+before the command; the Termux build does not and refuses to start with
+`unknown option '--'`. Anything the app passes to proot has to be in the
+option list of the binary that actually ships.
+
+**The container needs a resolver.** `ubuntu-base` ships an empty
+`/etc/resolv.conf`, so the guest can reach the internet but cannot resolve
+a name — and Flatpak needs names to reach Flathub. The app writes the
+phone's own DNS servers into the rootfs when the container starts.
+
 **`x11vnc` refuses to start when `WAYLAND_DISPLAY` is set.** The display
 helper unsets it before launching the server.
 
@@ -315,6 +362,10 @@ helper unsets it before launching the server.
 - The Kotlin tar extractor was run against the real 316 MB archive and
   matches GNU tar exactly: **18 644 files, 1 622 directories, 1 032 symlinks**.
 - Release APKs are signed and verified with `apksigner`.
+- The container runs end to end under proot on the build machine:
+  `tools/integration_test.sh` starts a shell in a real Ubuntu 26.04 rootfs
+  with the app's exact command line, and checks that the coreutils, the
+  toolchain, the Flathub remote and the resolver all work.
 
 ## Not yet done
 

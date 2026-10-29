@@ -40,7 +40,7 @@ class UbuntuViewModel(app: Application) : AndroidViewModel(app) {
             // container was set up, so refresh the resolver before anything
             // tries to reach the internet.
             viewModelScope.launch(Dispatchers.IO) {
-                com.ubuntumobile.linux.NetworkSetup.configureDns(app, paths)
+                com.ubuntumobile.linux.ContainerSetup.prepare(app, paths)
             }
             refreshSystemInfo()
         }
