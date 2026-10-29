@@ -35,6 +35,9 @@ class Pty(private val runtime: LinuxRuntime, private val paths: LinuxPaths) {
      * @param onData invoked on a background thread with raw terminal bytes.
      */
     fun startShell(rows: Int = 24, cols: Int = 80, onData: (ByteArray, Int) -> Unit) {
+        loadError?.let {
+            throw IOException("The terminal helper is unavailable: $it")
+        }
         val argv = runtime.buildGuestCommand(listOf("/bin/bash", "--login", "-i"))
         val env = runtime.guestEnv(mapOf("TERM" to "xterm-256color"))
 
@@ -124,8 +127,22 @@ class Pty(private val runtime: LinuxRuntime, private val paths: LinuxPaths) {
     companion object {
         private const val TAG = "Pty"
 
+        /**
+         * The native PTY helper. If it cannot be loaded we must not crash
+         * the UI: the terminal is one feature among several, so we record the
+         * failure and let the caller report it.
+         */
+        @Volatile
+        var loadError: String? = null
+            private set
+
         init {
-            System.loadLibrary("linxpty")
+            try {
+                System.loadLibrary("linxpty")
+            } catch (e: UnsatisfiedLinkError) {
+                loadError = e.message ?: "liblinxpty.so could not be loaded"
+                Log.e(TAG, "liblinxpty failed to load", e)
+            }
         }
 
         @JvmStatic private external fun nativeSpawn(
