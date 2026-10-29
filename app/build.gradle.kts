@@ -12,7 +12,14 @@ android {
     defaultConfig {
         applicationId = "com.ubuntumobile"
         minSdk = 26
-        targetSdk = 36
+        // Target API 28 on purpose.
+        //
+        // Android 10 introduced the W^X restriction: apps that target API 29
+        // or higher may not execute files from their own home directory.
+        // proot lives in files/bin and has to be executed, so the app has to
+        // stay below API 29. This is exactly what Termux does, and it is why
+        // the app cannot go to the Play Store as it stands.
+        targetSdk = 28
         versionCode = 13
         versionName = "0.1.3"
         resourceConfigurations += listOf("en")
@@ -116,6 +123,14 @@ android {
                 }
             }
         }
+    }
+
+    lint {
+        // This app is sideloaded rather than published to the Play Store, and
+        // it deliberately targets API 28: Android's W^X restriction stops
+        // apps that target API 29+ from executing files in their own home
+        // directory, which is exactly where proot has to live.
+        disable += "ExpiredTargetSdkVersion"
     }
 
     externalNativeBuild {
