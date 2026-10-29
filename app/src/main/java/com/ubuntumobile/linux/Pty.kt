@@ -39,10 +39,13 @@ class Pty(private val runtime: LinuxRuntime, private val paths: LinuxPaths) {
             throw IOException("The terminal helper is unavailable: $it")
         }
         val argv = runtime.buildGuestCommand(listOf("/bin/bash", "--login", "-i"))
-        val env = runtime.guestEnv(mapOf("TERM" to "xterm-256color"))
 
+        // The environment of the *process* that starts proot, not the
+        // guest's environment: proot needs PROOT_LOADER to find its loader
+        // helper, and LD_LIBRARY_PATH to find its shared libraries. The
+        // guest environment is exported by the wrapper script.
         val jArgs = argv.toTypedArray()
-        val jEnv = env.map { "${it.key}=${it.value}" }.toTypedArray()
+        val jEnv = runtime.hostEnv().map { "${it.key}=${it.value}" }.toTypedArray()
 
         val pidOut = IntArray(1)
         val fd = nativeSpawn(jArgs, jEnv, paths.root.absolutePath, intArrayOf(rows, cols), pidOut)

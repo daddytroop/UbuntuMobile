@@ -22,8 +22,10 @@ if [ ! -d "$SRC" ]; then
   echo "=== fetching proot $VER ==="
   curl -sfL --retry 3 -o "$PREFIX/proot.tar.gz" \
     "https://github.com/proot-me/proot/archive/refs/tags/v$VER.tar.gz"
+  # The archive already unpacks into "proot-<version>".
+  rm -rf "$PREFIX/proot-$VER"
   tar -xzf "$PREFIX/proot.tar.gz" -C "$PREFIX"
-  mv "$PREFIX/proot-$VER" "$SRC"
+  [ -d "$SRC" ] || { echo "unexpected archive layout" >&2; exit 1; }
 fi
 
 # proot links against talloc.

@@ -396,7 +396,13 @@ BW
 chmod +x "$WORK/usr/local/libexec/bwrap-linx"
 ln -sfn /usr/local/libexec/bwrap-linx "$WORK/usr/local/bin/bwrap"
 
-sed -i 's/^# *\(en_US.UTF-8\)/\1/' "$WORK/etc/locale.gen" 2>/dev/null || true
+# The `locales` package creates /etc/locale.gen in its post-install
+# script, which never runs when we only extract packages. Without it
+# `locale-gen` does nothing and the container has no UTF-8 locale.
+if [ ! -f "$WORK/etc/locale.gen" ]; then
+  printf 'en_US.UTF-8 UTF-8\n' > "$WORK/etc/locale.gen"
+  echo "  created /etc/locale.gen"
+fi
 
 # Flathub remote definition, shipped offline so it can be added without
 # network access. It embeds the GPG key.
@@ -413,7 +419,7 @@ cat > "$WORK/usr/local/lib/linx/firstboot.sh" <<'FB'
 export DEBIAN_FRONTEND=noninteractive
 export PATH=/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin
 
-[ -e /var/lib/locale/C.UTF-8 ] || locale-gen en_US.UTF-8 || true
+[ -e /usr/lib/locale/en_US.UTF-8 ] || locale-gen en_US.UTF-8 || true
 
 # Add Flathub from the bundled .flatpakrepo (embeds the GPG key, works offline).
 # NOTE: --from is a BOOLEAN flag; LOCATION is the config file path.

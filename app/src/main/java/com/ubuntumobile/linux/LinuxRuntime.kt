@@ -40,8 +40,11 @@ class LinuxRuntime(private val paths: LinuxPaths) {
         put("SHELL", "/bin/bash")
         put("TERM", "xterm-256color")
         put("PATH", "/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin")
-        put("LANG", "en_US.UTF-8")
-        put("LC_ALL", "en_US.UTF-8")
+        // C.UTF-8 is built into glibc, so it works whether or not the
+        // locale archive has been compiled. en_US.UTF-8 would print a
+        // "setlocale: cannot change locale" warning on every shell.
+        put("LANG", "C.UTF-8")
+        put("LC_ALL", "C.UTF-8")
         put("DISPLAY", ":0")
         put("XDG_RUNTIME_DIR", "/tmp/runtime-root")
         put("TMPDIR", "/tmp")
@@ -57,8 +60,12 @@ class LinuxRuntime(private val paths: LinuxPaths) {
      * do not exist in our APK, so we point proot at our own copies via
      * PROOT_LOADER / PROOT_LOADER_32, otherwise every execve fails with
      * "the loader was not found or doesn't work".
+     *
+     * This is the environment of the *process* that starts proot; the guest
+     * environment is set by the wrapper script, which exports it before
+     * exec'ing proot.
      */
-    private fun hostEnv(): Map<String, String> = mapOf(
+    internal fun hostEnv(): Map<String, String> = mapOf(
         "PATH" to "/system/bin:/system/xbin",
         "HOME" to paths.homeDir.absolutePath,
         "TMPDIR" to paths.cacheDir.absolutePath,
