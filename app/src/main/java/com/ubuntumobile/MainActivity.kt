@@ -394,21 +394,37 @@ private fun SetupScreen(
                 }
 
                 RootfsInstaller.Progress.Phase.FAILED -> {
-                    Text(
-                        state.installDetail,
-                        color = UbuntuPalette.LightOnSurface,
-                        fontSize = 13.sp,
-                        textAlign = TextAlign.Center,
-                    )
-                    Spacer(Modifier.height(16.dp))
-                    Box(
-                        modifier = Modifier
-                            .clip(RoundedCornerShape(24.dp))
-                            .background(UbuntuPalette.UbuntuOrange)
-                            .androidClickable(onInstall)
-                            .padding(horizontal = 32.dp, vertical = 12.dp),
-                    ) {
-                        Text("Retry", color = Color.White, fontWeight = FontWeight.SemiBold)
+                    Column(horizontalAlignment = Alignment.CenterHorizontally) {
+                        Text(
+                            "The Ubuntu install did not finish",
+                            color = Color.White,
+                            fontSize = 18.sp,
+                            fontWeight = FontWeight.SemiBold,
+                        )
+                        Spacer(Modifier.height(10.dp))
+                        Text(
+                            state.installDetail,
+                            color = Color.White.copy(alpha = 0.85f),
+                            fontSize = 13.sp,
+                            textAlign = TextAlign.Center,
+                            modifier = Modifier.padding(horizontal = 12.dp),
+                        )
+                        Spacer(Modifier.height(18.dp))
+                        Box(
+                            modifier = Modifier
+                                .clip(RoundedCornerShape(24.dp))
+                                .background(UbuntuPalette.UbuntuOrange)
+                                .androidClickable(onInstall)
+                                .padding(horizontal = 32.dp, vertical = 12.dp),
+                        ) {
+                            Text("Retry", color = Color.White, fontWeight = FontWeight.SemiBold)
+                        }
+                        Spacer(Modifier.height(10.dp))
+                        Text(
+                            "Retrying reuses the parts that already worked.",
+                            color = Color.White.copy(alpha = 0.6f),
+                            fontSize = 12.sp,
+                        )
                     }
                 }
 

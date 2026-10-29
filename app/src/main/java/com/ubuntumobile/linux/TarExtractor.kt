@@ -22,7 +22,6 @@ class TarExtractor(
     private val destination: File,
     private val onProgress: (Long) -> Unit = {},
 ) {
-
     /** Result of an extraction run. */
     data class Result(
         val files: Long,
@@ -99,6 +98,12 @@ class TarExtractor(
                 longName = null
 
                 val target = File(destination, fullName)
+                // The archive's own root entry ("." or "./") maps onto the
+                // extraction destination, which is OUR directory - its mode
+                // must not be applied, or the installer could end up unable
+                // to write the marker file afterwards.
+                val isArchiveRoot = fullName.trim('/').isEmpty() ||
+                    fullName.trim('/') == "."
 
                 // A single unwritable entry must not abort the whole
                 // extraction: the rootfs is ~20,000 files and a stray
@@ -113,7 +118,7 @@ class TarExtractor(
                         // applying that immediately would stop us writing
                         // its contents. GNU tar defers them for the same
                         // reason.
-                        dirModes += target to mode
+                        if (!isArchiveRoot) dirModes += target to mode
                         directories++
                     }
                     '2' -> {
@@ -192,6 +197,10 @@ class TarExtractor(
             for ((dir, dirMode) in dirModes.asReversed()) {
                 applyMode(dir, dirMode)
             }
+
+            // The extraction destination belongs to us, not to the archive:
+            // make sure the installer can still write into it afterwards.
+            applyMode(destination, OWNER_RWX)
         }
 
         return Result(files, bytes, symlinks, directories, symlinkEntries, failedEntries)
@@ -255,8 +264,18 @@ class TarExtractor(
      * Without this every extracted file would be created with the process
      * umask (0644) and no binaries would be executable - the container
      * could not even start bash.
+     *
+     * The actual chmod is pluggable: on Android we use
+     * `android.system.Os.chmod`, which is a plain POSIX chmod. The
+     * `java.io.File` helpers have surprising group/other semantics on
+     * Android and can leave a directory without the owner's write bit.
      */
     private fun applyMode(file: File, mode: Int) {
+        chmod(file, mode)
+    }
+
+    /** Applies a POSIX mode to [file]. Replaced on Android. */
+    var chmod: (File, Int) -> Unit = { file, mode ->
         val owner = (mode shr 6) and 7
         val group = (mode shr 3) and 7
         val other = mode and 7
@@ -277,5 +296,8 @@ class TarExtractor(
     private companion object {
         /** Sanity limit for a GNU long-name entry. */
         const val MAX_LONG_NAME = 64 * 1024
+
+        /** rwx for the owner. */
+        const val OWNER_RWX = 0x1C0
     }
 }

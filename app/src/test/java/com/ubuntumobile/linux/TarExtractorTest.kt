@@ -98,6 +98,20 @@ class TarExtractorTest {
                 assertTrue("bin/bash not reachable via the /bin symlink", File(out, "bin/bash").exists())
             }
 
+            // The installer writes a marker file into the extracted root
+            // straight after unpacking. If the extraction left the directory
+            // read-only that step fails with EACCES, so prove it works.
+            val marker = File(out, ".linx-installed")
+            marker.writeText("ok")
+            assertTrue("could not write into the extracted root", marker.exists())
+            // And into a subdirectory, which the deferred directory modes
+            // could have left unwritable.
+            val nested = File(out, "usr/bin/.write-test")
+            nested.writeText("ok")
+            assertTrue("could not write into usr/bin", nested.exists())
+            nested.delete()
+            marker.delete()
+
             // Core tooling that the app relies on. Some of these are symlinks
             // (python3 -> python3.14), which Windows cannot create, so on
             // non-Linux hosts we check the package database instead.

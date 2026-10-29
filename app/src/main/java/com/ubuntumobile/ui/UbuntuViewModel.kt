@@ -40,7 +40,14 @@ class UbuntuViewModel(app: Application) : AndroidViewModel(app) {
 
     /** Install Ubuntu 26.04 if it is not present yet. */
     fun installUbuntu() {
-        if (_state.value.installPhase != RootfsInstaller.Progress.Phase.IDLE) return
+        // A failed attempt must be retryable, otherwise the Retry button
+        // silently does nothing.
+        val phase = _state.value.installPhase
+        if (phase != RootfsInstaller.Progress.Phase.IDLE &&
+            phase != RootfsInstaller.Progress.Phase.FAILED
+        ) {
+            return
+        }
         viewModelScope.launch {
             installer.install { progress ->
                 _state.value = _state.value.copy(
@@ -52,6 +59,7 @@ class UbuntuViewModel(app: Application) : AndroidViewModel(app) {
                 _state.value = _state.value.copy(
                     isInstalled = true,
                     installPhase = RootfsInstaller.Progress.Phase.DONE,
+                    installDetail = "",
                 )
                 refreshSystemInfo()
             }.onFailure { e ->

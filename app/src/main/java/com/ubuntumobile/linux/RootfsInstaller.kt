@@ -57,22 +57,46 @@ class RootfsInstaller(
                 onProgress(Progress(Progress.Phase.PREPARING, copied, size, "Unpacking Ubuntu 26.04…"))
             }
 
-            // 3. unpack it
-            paths.root.deleteRecursively()
-            paths.root.mkdirs()
-            onProgress(Progress(Progress.Phase.EXTRACTING, 0, total, "Unpacking Ubuntu…"))
-            archive.inputStream().use { input ->
-                val result = TarExtractor(paths.root) { copied ->
-                    onProgress(Progress(Progress.Phase.EXTRACTING, copied, total, "Unpacking Ubuntu…"))
-                }.extract(input)
-                Log.i(
-                    TAG,
-                    "extracted ${result.files} files, ${result.bytes} bytes, " +
-                        "${result.symlinkEntries} symlinks, ${result.failedEntries} failed",
-                )
-                if (result.failedEntries > 0) {
-                    Log.w(TAG, "${result.failedEntries} entries could not be extracted")
+            // 3. unpack it - unless a previous attempt already finished
+            //    this step, so a retry does not redo 330 MB of work.
+            if (paths.isExtracted()) {
+                Log.i(TAG, "rootfs already unpacked, reusing it")
+                onProgress(Progress(Progress.Phase.EXTRACTING, total, total, "Unpacking Ubuntu…"))
+            } else {
+                clearRootfs()
+                paths.root.mkdirs()
+                onProgress(Progress(Progress.Phase.EXTRACTING, 0, total, "Unpacking Ubuntu…"))
+                archive.inputStream().use { input ->
+                    val extractor = TarExtractor(paths.root) { copied ->
+                        onProgress(Progress(Progress.Phase.EXTRACTING, copied, total, "Unpacking Ubuntu…"))
+                    }
+                    // Use a plain POSIX chmod on Android: java.io.File's
+                    // permission helpers have surprising group/other
+                    // semantics there and can leave a directory without the
+                    // owner's write bit.
+                    extractor.chmod = { file, mode ->
+                        try {
+                            android.system.Os.chmod(file.absolutePath, mode)
+                        } catch (_: Exception) {
+                            // Fall back to the Java helpers.
+                            file.setReadable(true, true)
+                            file.setWritable(true, true)
+                            file.setExecutable(true, true)
+                        }
+                    }
+                    val result = extractor.extract(input)
+                    Log.i(
+                        TAG,
+                        "extracted ${result.files} files, ${result.bytes} bytes, " +
+                            "${result.symlinkEntries} symlinks, ${result.failedEntries} failed",
+                    )
+                    if (result.failedEntries > 0) {
+                        Log.w(TAG, "${result.failedEntries} entries could not be extracted")
+                    }
                 }
+                // Record that the unpack finished, so a failed first-boot
+                // step can be retried without unpacking again.
+                paths.extractedMarker.writeText(BuildConfigCompat.ROOTFS_VERSION)
             }
             archive.delete()
 
@@ -80,6 +104,22 @@ class RootfsInstaller(
             onProgress(Progress(Progress.Phase.FIRSTBOOT, 0, total, "Configuring Flathub…"))
             val first = runtime.shell("/usr/local/lib/linx/firstboot.sh", timeoutSeconds = 300)
             Log.i(TAG, "firstboot rc=${first.exitCode}\n${first.output.take(2000)}")
+
+            // 5. smoke test: prove the container actually starts a shell,
+            //    so a failure here is reported with the real reason instead
+            //    of surfacing later as "nothing works".
+            onProgress(Progress(Progress.Phase.FIRSTBOOT, 0, total, "Checking Ubuntu…"))
+            val smoke = runtime.shell(
+                "echo LINUX_SMOKE_OK; uname -sr; head -1 /etc/os-release",
+                timeoutSeconds = 120,
+            )
+            Log.i(TAG, "smoke rc=${smoke.exitCode}\n${smoke.output.take(2000)}")
+            if (!smoke.output.contains("LINUX_SMOKE_OK")) {
+                val detail = smoke.error ?: smoke.output.trim().take(400)
+                throw IOException(
+                    "Ubuntu did not start: ${if (detail.isNotEmpty()) detail else "no output from the container"}"
+                )
+            }
 
             paths.markInstalled()
             onProgress(Progress(Progress.Phase.DONE, total, total, "Ubuntu 26.04 is ready"))
@@ -99,6 +139,37 @@ class RootfsInstaller(
 
     private fun currentAbi(): String =
         android.os.Build.SUPPORTED_ABIS.firstOrNull() ?: "x86_64"
+
+    /**
+     * Remove a previous rootfs.
+     *
+     * A tree that was left read-only cannot be deleted (removing an entry
+     * needs write permission on its parent), so make it writable first and
+     * carry on even if the cleanup is incomplete - extracting over the top
+     * works either way.
+     */
+    private fun clearRootfs() {
+        val root = paths.root
+        if (!root.exists()) return
+        try {
+            android.system.Os.chmod(root.absolutePath, 0x1C0)
+        } catch (_: Exception) {
+        }
+        try {
+            root.walkBottomUp().forEach { dir ->
+                try {
+                    android.system.Os.chmod(dir.absolutePath, 0x1C0)
+                } catch (_: Exception) {
+                }
+            }
+        } catch (_: Exception) {
+        }
+        try {
+            root.deleteRecursively()
+        } catch (e: Exception) {
+            Log.w(TAG, "could not fully remove the old rootfs: ${e.message}")
+        }
+    }
 
     /**
      * Find the rootfs archive to unpack.

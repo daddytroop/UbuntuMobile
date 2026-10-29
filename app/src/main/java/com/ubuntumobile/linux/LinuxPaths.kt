@@ -46,11 +46,31 @@ class LinuxPaths(context: Context) {
     /** Where the rootfs tarball is unpacked to; also used to detect partial installs. */
     val installMarker: File get() = File(root, ".linx-installed")
 
+    /**
+     * Marker written once the rootfs has been unpacked.
+     *
+     * It lives outside the rootfs so that a failed first-boot step can be
+     * retried without unpacking 330 MB again.
+     */
+    val extractedMarker: File get() = File(app.filesDir, ".linx-extracted")
+
     fun markInstalled() {
-        installMarker.writeText(BuildConfigCompat.ROOTFS_VERSION)
+        // Write it into the rootfs if we can, and always keep a copy
+        // outside it, so a read-only rootfs cannot break the install.
+        try {
+            installMarker.writeText(BuildConfigCompat.ROOTFS_VERSION)
+        } catch (_: Exception) {
+            // The rootfs directory may not be writable; the copy outside is
+            // what actually matters.
+        }
+        extractedMarker.writeText(BuildConfigCompat.ROOTFS_VERSION)
     }
 
-    fun isMarkedInstalled(): Boolean = installMarker.exists()
+    fun isMarkedInstalled(): Boolean = extractedMarker.exists()
+
+    /** True when the rootfs has already been unpacked and can be reused. */
+    fun isExtracted(): Boolean =
+        extractedMarker.exists() && File(root, "usr/bin/bash").exists()
 
     /** Remove the whole Linux install so it can be re-provisioned. */
     fun wipe() {
