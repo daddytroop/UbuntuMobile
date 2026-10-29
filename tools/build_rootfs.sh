@@ -100,7 +100,8 @@ pulseaudio-utils alsa-utils libasound2t64 \
 fonts-dejavu-core fonts-noto-core fonts-noto-color-emoji \
 flatpak flatpak-xdg-utils bubblewrap appstream appstream-util \
 xdg-user-dirs desktop-file-utils shared-mime-info \
-tigervnc-standalone-server xvfb x11vnc x11-utils x11-xserver-utils xdotool xterm xfonts-base"
+    tigervnc-standalone-server xvfb x11vnc x11-utils x11-xserver-utils xdotool xterm xfonts-base \
+    gnu-coreutils"
 else
 PKGS="ca-certificates locales tzdata sudo \
 curl wget git gnupg openssh-client \
@@ -117,7 +118,8 @@ pulseaudio-utils alsa-utils libasound2t64 ffmpeg \
 fonts-dejavu-core fonts-noto-core fonts-noto-color-emoji fonts-noto-cjk \
 flatpak flatpak-xdg-utils bubblewrap appstream appstream-util \
 xdg-user-dirs desktop-file-utils shared-mime-info \
-tigervnc-standalone-server xvfb x11vnc x11-utils x11-xserver-utils xdotool xterm xfonts-base"
+    tigervnc-standalone-server xvfb x11vnc x11-utils x11-xserver-utils xdotool xterm xfonts-base \
+    gnu-coreutils"
 fi
 
 echo "=== [$ARCH/$VARIANT] downloading packages ==="
@@ -145,6 +147,48 @@ for pair in "bin:usr/bin" "sbin:usr/sbin" "lib:usr/lib" "lib64:usr/lib64"; do
   ln -sfn "$target" "$WORK/$link"
   echo "  $link -> $target"
 done
+
+# ---------------------------------------------------- coreutils selection
+# Ubuntu 26.04 ships coreutils TWICE:
+#
+#   * rust-coreutils   - the Rust (uutils) build. It installs one
+#                        multicall binary, /usr/bin/coreutils, with hard
+#                        links under /usr/lib/cargo/bin/coreutils/ and the
+#                        familiar names as symlinks (/usr/bin/ls -> ...).
+#   * gnu-coreutils    - the classic GNU build, installed under
+#                        "gnu" prefixed names (/usr/bin/gnuls, ...).
+#
+# The Rust build picks the utility to run from AT_EXECFN, and proot sets
+# AT_EXECFN to the path of its own loader helper. Every coreutils command
+# in the container therefore dies with:
+#
+#     coreutils: unknown program 'loader'
+#
+# The GNU binaries are ordinary standalone programs that ignore argv[0], so
+# they work under proot without any special handling. Point the standard
+# names at them.
+echo "=== [$ARCH/$VARIANT] selecting the GNU coreutils ==="
+if [ -d "$WORK/usr/lib/cargo/bin/coreutils" ] || [ -f "$WORK/usr/bin/coreutils" ]; then
+  repointed=0
+  for f in "$WORK"/usr/bin/*; do
+    [ -L "$f" ] || continue
+    case "$(readlink "$f")" in
+      ../lib/cargo/bin/coreutils/*)
+        name="${f##*/}"
+        if [ -f "$WORK/usr/bin/gnu$name" ]; then
+          ln -sfn "gnu$name" "$f"
+          repointed=$((repointed + 1))
+        fi
+        ;;
+    esac
+  done
+  echo "  repointed $repointed commands to the GNU build"
+  [ "$repointed" -gt 50 ] || { echo "GNU_COREUTILS_REPOINT_FAILED"; exit 1; }
+  # The Rust multicall binary is no longer reachable; drop it so nothing
+  # can accidentally run it.
+  rm -f "$WORK/usr/bin/coreutils"
+  rm -rf "$WORK/usr/lib/cargo/bin"
+fi
 
 # ------------------------------------------------------- dpkg status merge
 # Merge RAW control stanzas. Never re-serialise: dpkg requires the exact

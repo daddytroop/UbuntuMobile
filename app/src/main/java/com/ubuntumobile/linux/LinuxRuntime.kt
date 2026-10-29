@@ -24,8 +24,11 @@ class LinuxRuntime(private val paths: LinuxPaths) {
      * -b /dev /proc /sys   : kernel filesystems the guest expects
      * -b <sdcard>          : shared storage, mapped to /sdcard and /storage/emulated/0
      * -w /root             : initial working directory
+     *
+     * NOTE: proot does not accept a bare "--" as an end-of-options marker;
+     * the Termux build rejects it with "unknown option '--'".
      */
-    private fun baseArgs(): List<String> = listOf(
+    internal fun baseArgs(): List<String> = listOf(
         "-r", paths.root.absolutePath,
         "-0",
         "-b", "/dev",
@@ -105,7 +108,7 @@ class LinuxRuntime(private val paths: LinuxPaths) {
                 append(exported).append('\n')
                 append("cd ").append(shQuote(workingDir)).append(" 2>/dev/null || cd /\n")
                 append("exec ").append(paths.proot.absolutePath).append(' ')
-                append(baseArgs().joinToString(" ") { shQuote(it) }).append(" -- ")
+                append(baseArgs().joinToString(" ") { shQuote(it) }).append(' ')
                 append(exec).append('\n')
             }
         )
