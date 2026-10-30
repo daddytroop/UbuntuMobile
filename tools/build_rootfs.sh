@@ -419,18 +419,29 @@ cat > "$WORK/usr/local/lib/linx/firstboot.sh" <<'FB'
 export DEBIAN_FRONTEND=noninteractive
 export PATH=/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin
 
-[ -e /usr/lib/locale/en_US.UTF-8 ] || locale-gen en_US.UTF-8 || true
-
 # Add Flathub from the bundled .flatpakrepo (embeds the GPG key, works offline).
 # NOTE: --from is a BOOLEAN flag; LOCATION is the config file path.
-if ! flatpak remotes 2>/dev/null | grep -q '^flathub$'; then
-  flatpak remote-add --if-not-exists --from flathub \
-      /usr/local/share/linx/flathub.flatpakrepo 2>/dev/null \
-    || flatpak remote-add --if-not-exists flathub \
-         https://dl.flathub.org/repo/flathub.flatpakrepo 2>/dev/null \
-    || true
+#
+# This comes first: it is quick and it is what the store needs. "flatpak
+# remotes" prints "flathub<TAB>system", so the name is matched at the start
+# of the line rather than as the whole line.
+if ! flatpak remotes 2>/dev/null | grep -q '^flathub'; then
+  if flatpak remote-add --if-not-exists --from flathub \
+       /usr/local/share/linx/flathub.flatpakrepo; then
+    echo "FLATPAK_REMOTE_ADDED"
+  elif flatpak remote-add --if-not-exists --no-gpg-verify flathub \
+       https://dl.flathub.org/repo/flathub.flatpakrepo; then
+    echo "FLATPAK_REMOTE_ADDED_ONLINE"
+  else
+    echo "FLATPAK_REMOTE_FAILED"
+    flatpak remote-add --if-not-exists --from flathub \
+       /usr/local/share/linx/flathub.flatpakrepo 2>&1 | tail -3
+  fi
 fi
 flatpak remote-modify --enable flathub || true
+
+# The locale archive takes a while to compile, so it goes last.
+[ -e /usr/lib/locale/en_US.UTF-8 ] || locale-gen en_US.UTF-8 || true
 
 [ -x /usr/local/libexec/bwrap-linx ] && ln -sf /usr/local/libexec/bwrap-linx /usr/local/bin/bwrap
 

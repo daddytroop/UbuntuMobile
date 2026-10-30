@@ -91,6 +91,13 @@ class UbuntuViewModel(app: Application) : AndroidViewModel(app) {
     fun refreshSystemInfo() {
         viewModelScope.launch {
             val info = withContext(Dispatchers.IO) {
+                // If the Flathub remote is not there yet, add it: the
+                // first-boot script can fail for reasons that have nothing
+                // to do with Flatpak, and the store needs the remote.
+                val remotesBefore = runtime.shell("flatpak remotes 2>/dev/null | head -5", 60)
+                if (remotesBefore.output.lines().none { it.startsWith("flathub") }) {
+                    com.ubuntumobile.linux.ContainerSetup.ensureFlathub(runtime)
+                }
                 val release = runtime.shell("cat /etc/os-release 2>/dev/null | grep PRETTY_NAME | cut -d= -f2- | tr -d '\"'", 60)
                 val kernel = runtime.shell("uname -sr 2>/dev/null", 60)
                 val arch = runtime.shell("uname -m 2>/dev/null", 60)
@@ -102,7 +109,9 @@ class UbuntuViewModel(app: Application) : AndroidViewModel(app) {
                     kernel = kernel.output.trim().ifEmpty { "-" },
                     architecture = arch.output.trim().ifEmpty { "-" },
                     flatpakVersion = flatpak.output.trim().ifEmpty { "not installed" },
-                    flathubRemotes = remotes.output.lines().filter { it.isNotBlank() },
+                    flathubRemotes = remotes.output.lines()
+                        .filter { it.isNotBlank() }
+                        .map { it.substringBefore('\t').trim() },
                     diskUsage = disk.output.trim().ifEmpty { "-" },
                 )
             }

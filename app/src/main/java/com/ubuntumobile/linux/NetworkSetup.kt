@@ -99,7 +99,8 @@ object ContainerSetup {
     private const val TAG = "ContainerSetup"
 
     /**
-     * Prepare the container: a resolver and a runtime directory.
+     * Prepare the container: a resolver, a runtime directory and the
+     * Flathub remote.
      *
      * Flatpak refuses to work without `XDG_RUNTIME_DIR`, and the guest
      * environment points it at `/tmp/runtime-root`, which the rootfs does
@@ -108,6 +109,36 @@ object ContainerSetup {
     fun prepare(context: Context, paths: LinuxPaths) {
         NetworkSetup.configureDns(context, paths)
         ensureRuntimeDir(paths)
+    }
+
+    /**
+     * Make sure the Flathub remote is registered.
+     *
+     * The image ships the remote definition - including the GPG key - so
+     * this works without a network connection. It is done from the app
+     * rather than only from the first-boot script, because that script can
+     * fail for unrelated reasons (a slow locale archive, for instance) and
+     * then the store would have nothing to talk to.
+     *
+     * @return true when the remote is there afterwards.
+     */
+    fun ensureFlathub(runtime: LinuxRuntime): Boolean {
+        val remotes = runtime.shell("flatpak remotes 2>/dev/null", 90)
+        if (remotes.output.lines().any { it.startsWith("flathub") }) return true
+
+        Log.i(TAG, "the Flathub remote is missing; adding it")
+        val added = runtime.shell(
+            "flatpak remote-add --if-not-exists --from flathub " +
+                "/usr/local/share/linx/flathub.flatpakrepo 2>&1 | tail -3",
+            180,
+        )
+        Log.i(TAG, "remote-add: ${added.output.trim()}")
+        val after = runtime.shell("flatpak remotes 2>/dev/null", 90)
+        val ok = after.output.lines().any { it.startsWith("flathub") }
+        if (ok) {
+            runtime.shell("flatpak remote-modify --enable flathub 2>/dev/null", 60)
+        }
+        return ok
     }
 
     /** Create the guest's `XDG_RUNTIME_DIR` with the mode Flatpak wants. */

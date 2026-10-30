@@ -4,10 +4,14 @@ import androidx.compose.animation.AnimatedVisibility
 import androidx.compose.animation.core.animateFloatAsState
 import androidx.compose.animation.fadeIn
 import androidx.compose.animation.fadeOut
+import androidx.compose.animation.slideInHorizontally
+import androidx.compose.animation.slideOutHorizontally
 import androidx.compose.animation.slideInVertically
 import androidx.compose.animation.slideOutVertically
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
+import androidx.compose.foundation.horizontalScroll
+import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
@@ -18,6 +22,7 @@ import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxHeight
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
+import androidx.compose.foundation.layout.widthIn
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
@@ -111,7 +116,11 @@ fun UbuntuShell(
         Column(
             modifier = Modifier
                 .fillMaxSize()
-                .padding(top = 48.dp),
+                .padding(top = 48.dp)
+                // Keep the content clear of the dash: in landscape the dash
+                // is a column on the left, in portrait a row at the bottom.
+                .padding(start = if (wide) 96.dp else 0.dp)
+                .padding(bottom = if (wide) 24.dp else 100.dp),
         ) {
             if (overview) {
                 SearchField(
@@ -133,19 +142,32 @@ fun UbuntuShell(
                     onOpenStore = onOpenStore,
                     onRefresh = onRefresh,
                     modifier = Modifier
+                        // A phone in landscape is very wide; the panel
+                        // should not stretch across the whole screen.
+                        .widthIn(max = 720.dp)
                         .fillMaxWidth()
-                        .padding(16.dp),
+                        .padding(16.dp)
+                        .align(Alignment.CenterHorizontally),
                 )
             }
         }
 
-        // ---- Dash (bottom in portrait, side in landscape) ----
+        // ---- Dash (a column on the left in landscape, a row at the
+        //      bottom in portrait) ----
         AnimatedVisibility(
             visible = !overview,
-            enter = slideInVertically { it } + fadeIn(),
-            exit = slideOutVertically { it } + fadeOut(),
+            enter = if (wide) {
+                slideInHorizontally { -it } + fadeIn()
+            } else {
+                slideInVertically { it } + fadeIn()
+            },
+            exit = if (wide) {
+                slideOutHorizontally { -it } + fadeOut()
+            } else {
+                slideOutVertically { it } + fadeOut()
+            },
             modifier = if (wide) {
-                Modifier.align(Alignment.CenterStart)
+                Modifier.align(Alignment.BottomStart)
             } else {
                 Modifier.align(Alignment.BottomCenter)
             },
@@ -153,7 +175,7 @@ fun UbuntuShell(
             Dash(
                 apps = apps.filter { AppCatalog.dashFavorites.contains(it.id) },
                 onLaunch = onLaunchApp,
-                vertical = !wide,
+                vertical = wide,
             )
         }
     }
@@ -352,6 +374,12 @@ private fun Dash(
     onLaunch: (AppEntry) -> Unit,
     vertical: Boolean,
 ) {
+    // A row of icons has to fit the width of a phone, so the icons are
+    // smaller when the dash is horizontal and the row can be scrolled if
+    // there are more favourites than fit.
+    val iconSize = if (vertical) 48.dp else 40.dp
+    val spacing = if (vertical) 8.dp else 6.dp
+
     Surface(
         color = Color.Black.copy(alpha = 0.30f),
         shape = RoundedCornerShape(20.dp),
@@ -360,28 +388,30 @@ private fun Dash(
         if (vertical) {
             Column(
                 modifier = Modifier.padding(8.dp),
-                verticalArrangement = Arrangement.spacedBy(8.dp),
+                verticalArrangement = Arrangement.spacedBy(spacing),
                 horizontalAlignment = Alignment.CenterHorizontally,
             ) {
-                apps.forEach { DashIcon(it) { onLaunch(it) } }
+                apps.forEach { DashIcon(it, iconSize) { onLaunch(it) } }
             }
         } else {
             Row(
-                modifier = Modifier.padding(8.dp),
-                horizontalArrangement = Arrangement.spacedBy(8.dp),
+                modifier = Modifier
+                    .padding(8.dp)
+                    .horizontalScroll(rememberScrollState()),
+                horizontalArrangement = Arrangement.spacedBy(spacing),
                 verticalAlignment = Alignment.CenterVertically,
             ) {
-                apps.forEach { DashIcon(it) { onLaunch(it) } }
+                apps.forEach { DashIcon(it, iconSize) { onLaunch(it) } }
             }
         }
     }
 }
 
 @Composable
-private fun DashIcon(app: AppEntry, onClick: () -> Unit) {
+private fun DashIcon(app: AppEntry, size: androidx.compose.ui.unit.Dp, onClick: () -> Unit) {
     Box(
         modifier = Modifier
-            .size(48.dp)
+            .size(size)
             .clip(RoundedCornerShape(14.dp))
             .background(Color(app.accent))
             .clickable { onClick() },
@@ -460,7 +490,12 @@ private fun InfoRow(label: String, value: String) {
             fontWeight = FontWeight.Medium,
             maxLines = 1,
             overflow = TextOverflow.Ellipsis,
-            modifier = Modifier.padding(start = 12.dp),
+            textAlign = TextAlign.End,
+            // The value takes what is left of the row, so a long kernel
+            // string is shortened instead of pushing the label around.
+            modifier = Modifier
+                .weight(1f, fill = false)
+                .padding(start = 12.dp),
         )
     }
 }
