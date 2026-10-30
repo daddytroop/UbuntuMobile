@@ -29,7 +29,7 @@ class LinuxRuntime(private val paths: LinuxPaths) {
      * the Termux build rejects it with "unknown option '--'".
      */
     internal fun baseArgs(): List<String> =
-        baseArgsFor(paths.root.absolutePath, paths.sdcardDir.absolutePath)
+        baseArgsFor(paths.root.absolutePath, paths.sdcardDir.absolutePath, paths.sharedTmpDir.absolutePath)
 
 
     /** Environment passed to guest processes. */
@@ -232,7 +232,7 @@ class LinuxRuntime(private val paths: LinuxPaths) {
          * bare "--" for instance). A mismatch is invisible on the host and
          * fatal on the phone.
          */
-        internal fun baseArgsFor(root: String, sdcard: String): List<String> = listOf(
+        internal fun baseArgsFor(root: String, sdcard: String, sharedTmp: String): List<String> = listOf(
             "-r", root,
             "-0",
             "-b", "/dev",
@@ -241,6 +241,10 @@ class LinuxRuntime(private val paths: LinuxPaths) {
             "-b", "/data",
             "-b", "/sdcard",
             "-b", sdcard,
+            // All proot processes must share /tmp so the X11 unix socket
+            // started by the display process is visible to apps launched
+            // in other proot processes.
+            "-b", "$sharedTmp:/tmp",
             "-w", "/root",
         )
 

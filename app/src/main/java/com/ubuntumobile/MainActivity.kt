@@ -2,6 +2,7 @@ package com.ubuntumobile
 
 import android.os.Bundle
 import android.view.WindowManager
+import android.view.inputmethod.InputMethodManager
 import androidx.activity.ComponentActivity
 import androidx.activity.compose.setContent
 import androidx.activity.enableEdgeToEdge
@@ -42,12 +43,17 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
+import androidx.compose.ui.focus.FocusRequester
+import androidx.compose.ui.focus.focusRequester
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.platform.LocalConfiguration
+import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.platform.LocalView
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import androidx.core.content.ContextCompat
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import androidx.lifecycle.viewmodel.compose.viewModel
 import com.ubuntumobile.display.DisplayScreen
@@ -129,11 +135,26 @@ fun UbuntuApp(
     vm: UbuntuViewModel = viewModel(),
 ) {
     val state by vm.state.collectAsStateWithLifecycle()
-    var screen by remember { mutableStateOf(Screen.DESKTOP) }
+    // Default to the real Linux desktop; the Compose app launcher is still
+    // available as an overlay/secondary screen.
+    var screen by remember { mutableStateOf(Screen.DISPLAY) }
 
+    val context = LocalContext.current
     val config = LocalConfiguration.current
     val landscape = config.orientation == android.content.res.Configuration.ORIENTATION_LANDSCAPE
     val wide = config.screenWidthDp >= 600
+
+    // The in-container X display is sized to the phone screen. Using the
+    // real pixel dimensions avoids the stretched/compressed look of a fixed
+    // 1024x600 framebuffer on a modern phone.
+    val geometry = remember {
+        val metrics = context.resources.displayMetrics
+        "${metrics.widthPixels}x${metrics.heightPixels}"
+    }
+
+    // Hidden text field used to raise the Android soft keyboard so it can
+    // send key events to the VNC session.
+    val keyboardFocus = remember { FocusRequester() }
 
     // Terminal state
     val terminal = remember { AnsiTerminal() }
@@ -167,6 +188,44 @@ fun UbuntuApp(
         terminal.setSink { terminalLines = it }
     }
 
+    /**
+     * Start the X display inside the Ubuntu container.
+     *
+     * Xvnc (TigerVNC) runs an X server and exports it over RFB in one
+     * process. Because proot shares the host network namespace, the app
+     * can reach the RFB port on 127.0.0.1 directly.
+     *
+     * proot kills every process it started when it exits, so the server
+     * needs a proot process of its own that stays alive for as long as the
+     * display is wanted.
+     */
+    suspend fun startLinuxDisplay() {
+        withContext(Dispatchers.IO) {
+            displayProcess?.destroyForcibly()
+            displayProcess = vm.runtime.startPersistent(
+                listOf(
+                    "/bin/bash", "-c",
+                    "export LINX_DISPLAY=$DISPLAY_NUM LINX_RFB_PORT=$DISPLAY_PORT; " +
+                        "export LINX_GEOMETRY=$geometry LINX_DEPTH=24; " +
+                        "/usr/local/lib/linx/display-start.sh; " +
+                        // Keep the container alive: the X server is a child
+                        // of this shell, and proot kills its children when
+                        // it exits.
+                        "exec sleep infinity",
+                ),
+            )
+            // Give the server a moment to open the RFB port and start XFCE.
+            delay(5000)
+        }
+    }
+
+    // Once Ubuntu is installed, boot straight into the real desktop.
+    LaunchedEffect(state.isInstalled) {
+        if (state.isInstalled && displayProcess == null) {
+            startLinuxDisplay()
+        }
+    }
+
     // Launch a guest app in a PTY
     fun launchInTerminal(entry: AppEntry) {
         screen = Screen.TERMINAL
@@ -190,36 +249,25 @@ fun UbuntuApp(
         }
     }
 
-    /**
-     * Start the X display inside the Ubuntu container.
-     *
-     * Xvnc (TigerVNC) runs an X server and exports it over RFB in one
-     * process. Because proot shares the host network namespace, the app
-     * can reach the RFB port on 127.0.0.1 directly.
-     *
-     * proot kills every process it started when it exits, so the server
-     * needs a proot process of its own that stays alive for as long as the
-     * display is wanted.
-     */
-    suspend fun startLinuxDisplay() {
-        withContext(Dispatchers.IO) {
-            displayProcess?.destroyForcibly()
-            displayProcess = vm.runtime.startPersistent(
-                listOf(
-                    "/bin/bash", "-c",
-                    "export LINX_DISPLAY=$DISPLAY_NUM LINX_RFB_PORT=$DISPLAY_PORT; " +
-                        "export LINX_GEOMETRY=1024x600 LINX_DEPTH=24; " +
-                        "/usr/local/lib/linx/display-start.sh; " +
-                        // Keep the container alive: the X server is a child
-                        // of this shell, and proot kills its children when
-                        // it exits.
-                        "exec sleep infinity",
-                ),
-            )
-            // Give the server a moment to open the RFB port.
-            delay(4000)
-        }
+    /** Launch a Linux GUI app as a window in the running XFCE desktop. */
+    fun launchOnDisplay(command: List<String>) {
+        // Set DISPLAY to the in-container X server. Because proot shares
+        // the network namespace and /tmp, a separate proot process can
+        // still connect to the X11 unix socket started by the display
+        // process.
+        vm.runtime.startPersistent(
+            listOf("/bin/bash", "-lc", command.joinToString(" ") { quote(it) }),
+            mapOf("DISPLAY" to ":$DISPLAY_NUM"),
+        )
     }
+
+    /** Show the Android soft keyboard so key events reach the VNC session. */
+    fun showSoftKeyboard(view: android.view.View, ctx: android.content.Context) {
+        keyboardFocus.requestFocus()
+        val imm = ContextCompat.getSystemService(ctx, InputMethodManager::class.java)
+        imm?.showSoftInput(view, InputMethodManager.SHOW_IMPLICIT)
+    }
+
     // Install / setup screen
     if (!state.isInstalled) {
         SetupScreen(
@@ -242,19 +290,13 @@ fun UbuntuApp(
                     when (entry.id) {
                         "store" -> screen = Screen.STORE
                         "gamepad" -> screen = Screen.GAMEPAD
-                        "display" -> {
-                            // Bring up the X display inside the container and
-                            // then attach to its RFB stream.
-                            scope.launch {
-                                startLinuxDisplay()
-                                screen = Screen.DISPLAY
-                            }
-                        }
-                        else -> launchInTerminal(entry)
+                        "terminal" -> launchInTerminal(entry)
+                        else -> launchOnDisplay(entry.command)
                     }
                 },
                 onOpenStore = { screen = Screen.STORE },
                 onRefresh = { vm.refreshSystemInfo() },
+                onBack = { screen = Screen.DISPLAY },
                 modifier = Modifier.systemBarsPadding(),
             )
         }
@@ -266,7 +308,7 @@ fun UbuntuApp(
                 onClose = {
                     pty?.close()
                     pty = null
-                    screen = Screen.DESKTOP
+                    screen = Screen.DISPLAY
                 },
                 onSend = { text -> pty?.write(text + "\n") },
             )
@@ -295,7 +337,7 @@ fun UbuntuApp(
                         timeout = 900,
                     )
                 },
-                onClose = { screen = Screen.DESKTOP },
+                onClose = { screen = Screen.DISPLAY },
                 modifier = Modifier.systemBarsPadding(),
             )
         }
@@ -339,7 +381,7 @@ fun UbuntuApp(
                     )
                 }
                 IconButton(
-                    onClick = { screen = Screen.DESKTOP },
+                    onClick = { screen = Screen.DISPLAY },
                     modifier = Modifier
                         .align(Alignment.TopEnd)
                         .padding(12.dp)
@@ -360,12 +402,33 @@ fun UbuntuApp(
                     session.stop()
                 }
             }
-            DisplayScreen(
-                session = session,
-                landscape = landscape,
-                onClose = { screen = Screen.DESKTOP },
-                modifier = Modifier.systemBarsPadding(),
-            )
+            // An invisible text field that captures key events for the VNC
+            // session. It is shown behind the display so it never blocks
+            // touch, but it can receive focus when the keyboard button is
+            // pressed.
+            val view = LocalView.current
+            Box(Modifier.fillMaxSize()) {
+                androidx.compose.foundation.text.BasicTextField(
+                    value = "",
+                    onValueChange = {},
+                    modifier = Modifier
+                        .focusRequester(keyboardFocus)
+                        .size(1.dp),
+                    textStyle = androidx.compose.ui.text.TextStyle(color = Color.Transparent),
+                )
+                DisplayScreen(
+                    session = session,
+                    landscape = landscape,
+                    onClose = { screen = Screen.DESKTOP },
+                    onShowLauncher = { screen = Screen.DESKTOP },
+                    onOpenTerminal = { launchOnDisplay(listOf("/usr/bin/xfce4-terminal")) },
+                    onOpenFiles = { launchOnDisplay(listOf("/usr/bin/thunar")) },
+                    onOpenStore = { screen = Screen.STORE },
+                    onOpenGamepad = { screen = Screen.GAMEPAD },
+                    onShowKeyboard = { showSoftKeyboard(view, context) },
+                    modifier = Modifier.systemBarsPadding(),
+                )
+            }
         }
     }
 }

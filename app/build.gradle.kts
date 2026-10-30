@@ -20,8 +20,8 @@ android {
         // stay below API 29. This is exactly what Termux does, and it is why
         // the app cannot go to the Play Store as it stands.
         targetSdk = 28
-        versionCode = 19
-        versionName = "0.1.9"
+        versionCode = 20
+        versionName = "0.2.0"
         resourceConfigurations += listOf("en")
     }
 
@@ -171,6 +171,7 @@ dependencies {
     implementation(libs.androidx.compose.ui.tooling.preview)
     implementation(libs.androidx.compose.material3)
     implementation(libs.androidx.compose.material3.window)
+    implementation(libs.androidx.compose.material.icons.extended)
     implementation(libs.androidx.compose.material.icons.extended)
     debugImplementation(libs.androidx.compose.ui.tooling)
 

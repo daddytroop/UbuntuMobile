@@ -101,6 +101,7 @@ fonts-dejavu-core fonts-noto-core fonts-noto-color-emoji \
 flatpak flatpak-xdg-utils bubblewrap appstream appstream-util \
 xdg-user-dirs desktop-file-utils shared-mime-info \
     tigervnc-standalone-server xvfb x11vnc x11-utils x11-xserver-utils xdotool xterm xfonts-base \
+    xfce4 xfce4-terminal xfce4-taskmanager mousepad \
     gnu-coreutils"
 else
 PKGS="ca-certificates locales tzdata sudo \
@@ -119,6 +120,7 @@ fonts-dejavu-core fonts-noto-core fonts-noto-color-emoji fonts-noto-cjk \
 flatpak flatpak-xdg-utils bubblewrap appstream appstream-util \
 xdg-user-dirs desktop-file-utils shared-mime-info \
     tigervnc-standalone-server xvfb x11vnc x11-utils x11-xserver-utils xdotool xterm xfonts-base \
+    xfce4 xfce4-terminal xfce4-taskmanager mousepad \
     gnu-coreutils"
 fi
 
@@ -439,6 +441,19 @@ if ! flatpak remotes 2>/dev/null | grep -q '^flathub'; then
   fi
 fi
 flatpak remote-modify --enable flathub || true
+
+# GTK/GLib caches are empty because .debs were extracted without running
+# their post-install scripts. Regenerate them so XFCE's panel, file manager
+# and window manager can load icons, pixbufs and mimetypes.
+for loader_dir in /usr/lib/*/gdk-pixbuf-2.0/2.10.0; do
+  [ -d "$loader_dir" ] || continue
+  gdk-pixbuf-query-loaders > "$loader_dir/loaders.cache" 2>/dev/null || true
+done
+update-mime-database /usr/share/mime 2>/dev/null || true
+for theme_dir in /usr/share/icons/*/; do
+  [ -f "${theme_dir}index.theme" ] || continue
+  gtk-update-icon-cache -f "$theme_dir" 2>/dev/null || true
+done
 
 # The locale archive takes a while to compile, so it goes last.
 [ -e /usr/lib/locale/en_US.UTF-8 ] || locale-gen en_US.UTF-8 || true

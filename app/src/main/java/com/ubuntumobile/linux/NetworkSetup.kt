@@ -141,9 +141,15 @@ object ContainerSetup {
         return ok
     }
 
-    /** Create the guest's `XDG_RUNTIME_DIR` with the mode Flatpak wants. */
+    /** Create the guest's `XDG_RUNTIME_DIR` with the mode Flatpak wants.
+     *
+     * Because proot binds the shared app tmp to `/tmp`, this directory lives
+     * in `paths.sharedTmpDir` on the host so it is visible to every proot
+     * process (the display server, flatpak, and the apps launched from the
+     * shell).
+     */
     private fun ensureRuntimeDir(paths: LinuxPaths) {
-        val dir = File(paths.root, "tmp/runtime-root")
+        val dir = File(paths.sharedTmpDir, "runtime-root")
         try {
             if (!dir.isDirectory) dir.mkdirs()
             java.nio.file.Files.setPosixFilePermissions(

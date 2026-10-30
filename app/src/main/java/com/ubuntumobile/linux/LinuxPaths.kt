@@ -25,6 +25,8 @@ class LinuxPaths(context: Context) {
     val binDir: File = File(app.filesDir, "bin")
     val homeDir: File = File(app.filesDir, "home")
     val cacheDir: File = File(app.filesDir, ".cache")
+    /** Shared /tmp so every proot process sees the same X11 unix socket. */
+    val sharedTmpDir: File = File(app.filesDir, "tmp")
     val sdcardDir: File get() = File(app.getExternalFilesDir(null) ?: app.filesDir, "shared")
 
     /** proot executable for the current ABI. */
@@ -40,7 +42,7 @@ class LinuxPaths(context: Context) {
         get() = proot.exists() && proot.canExecute()
 
     fun ensureDirs() {
-        listOf(root, binDir, homeDir, cacheDir, sdcardDir).forEach { it.mkdirs() }
+        listOf(root, binDir, homeDir, cacheDir, sharedTmpDir, sdcardDir).forEach { it.mkdirs() }
     }
 
     /** Where the rootfs tarball is unpacked to; also used to detect partial installs. */

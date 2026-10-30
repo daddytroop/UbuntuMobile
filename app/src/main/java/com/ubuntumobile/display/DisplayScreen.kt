@@ -16,9 +16,16 @@ import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.foundation.gestures.detectTransformGestures
 import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.filled.Apps
 import androidx.compose.material.icons.filled.Close
+import androidx.compose.material.icons.filled.Folder
+import androidx.compose.material.icons.filled.Gamepad
+import androidx.compose.material.icons.filled.Keyboard
 import androidx.compose.material.icons.filled.Refresh
+import androidx.compose.material.icons.filled.ShoppingCart
+import androidx.compose.material.icons.filled.Terminal
 import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
@@ -53,6 +60,12 @@ fun DisplayScreen(
     session: DisplaySession,
     landscape: Boolean,
     onClose: () -> Unit,
+    onShowLauncher: () -> Unit = {},
+    onOpenTerminal: () -> Unit = {},
+    onOpenFiles: () -> Unit = {},
+    onOpenStore: () -> Unit = {},
+    onOpenGamepad: () -> Unit = {},
+    onShowKeyboard: () -> Unit = {},
     modifier: Modifier = Modifier,
 ) {
     var frameTick by remember { mutableStateOf(0) }
@@ -71,20 +84,38 @@ fun DisplayScreen(
             .fillMaxSize()
             .background(Color(0xFF101010)),
     ) {
-        // Header
+        // Header: a thin system bar with the essential launchers.
         Row(
             modifier = Modifier
                 .fillMaxWidth()
                 .background(Color.Black.copy(alpha = 0.55f))
-                .padding(horizontal = 12.dp, vertical = 6.dp),
+                .padding(horizontal = 6.dp, vertical = 4.dp),
             verticalAlignment = Alignment.CenterVertically,
         ) {
+            IconButton(onClick = onShowLauncher) {
+                Icon(Icons.Default.Apps, contentDescription = "Apps", tint = Color.White)
+            }
             Text(
-                "Linux Display",
+                "Ubuntu 26.04",
                 color = Color.White,
                 fontSize = 14.sp,
                 modifier = Modifier.weight(1f),
             )
+            IconButton(onClick = onOpenTerminal) {
+                Icon(Icons.Default.Terminal, contentDescription = "Terminal", tint = Color.White)
+            }
+            IconButton(onClick = onOpenFiles) {
+                Icon(Icons.Default.Folder, contentDescription = "Files", tint = Color.White)
+            }
+            IconButton(onClick = onOpenStore) {
+                Icon(Icons.Default.ShoppingCart, contentDescription = "Store", tint = Color.White)
+            }
+            IconButton(onClick = onOpenGamepad) {
+                Icon(Icons.Default.Gamepad, contentDescription = "Gamepad", tint = Color.White)
+            }
+            IconButton(onClick = onShowKeyboard) {
+                Icon(Icons.Default.Keyboard, contentDescription = "Keyboard", tint = Color.White)
+            }
             IconButton(onClick = { session.refresh() }) {
                 Icon(Icons.Default.Refresh, contentDescription = "Refresh", tint = Color.White)
             }
@@ -146,6 +177,13 @@ fun DisplayScreen(
                                         session.pointer(x, y, 1)
                                         session.pointer(x, y, 0)
                                     },
+                                    onLongPress = { offset ->
+                                        // Long press sends a right click.
+                                        val x = (offset.x / scale).toInt()
+                                        val y = (offset.y / scale).toInt()
+                                        session.pointer(x, y, 4)
+                                        session.pointer(x, y, 0)
+                                    },
                                 )
                             }
                             .pointerInput(Unit) {
@@ -190,12 +228,12 @@ fun DisplayScreen(
             modifier = Modifier
                 .fillMaxWidth()
                 .background(Color.Black.copy(alpha = 0.55f))
-                .padding(horizontal = 12.dp, vertical = 6.dp),
+                .padding(horizontal = 12.dp, vertical = 4.dp),
             horizontalArrangement = Arrangement.SpaceBetween,
         ) {
             Text(
                 if (session.connected) {
-                    "${session.width}x${session.height}  Â·  ${session.bitmap?.width ?: 0}x${session.bitmap?.height ?: 0}"
+                    "${session.width}x${session.height}"
                 } else {
                     "disconnected"
                 },
@@ -203,7 +241,7 @@ fun DisplayScreen(
                 fontSize = 11.sp,
             )
             Text(
-                "Touch = mouse Â· use the keyboard for keys",
+                "tap = click / long-press = right-click / drag = move",
                 color = Color.White.copy(alpha = 0.5f),
                 fontSize = 11.sp,
             )

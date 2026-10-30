@@ -36,10 +36,12 @@ import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.text.KeyboardActions
 import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.automirrored.filled.ArrowBack
 import androidx.compose.material.icons.filled.Search
 import androidx.compose.material.icons.filled.Terminal
 import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.Icon
+import androidx.compose.material3.IconButton
 import androidx.compose.material3.LinearProgressIndicator
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedTextField
@@ -80,6 +82,7 @@ fun UbuntuShell(
     onLaunchApp: (AppEntry) -> Unit,
     onOpenStore: () -> Unit,
     onRefresh: () -> Unit = {},
+    onBack: () -> Unit = {},
     modifier: Modifier = Modifier,
 ) {
     var overview by remember { mutableStateOf(false) }
@@ -109,6 +112,7 @@ fun UbuntuShell(
             onActivities = { overview = !overview },
             activitiesActive = overview,
             wide = wide,
+            onBack = onBack,
             modifier = Modifier.align(Alignment.TopCenter),
         )
 
@@ -188,6 +192,7 @@ private fun TopBar(
     onActivities: () -> Unit,
     activitiesActive: Boolean,
     wide: Boolean,
+    onBack: () -> Unit,
     modifier: Modifier = Modifier,
 ) {
     Surface(
@@ -202,23 +207,31 @@ private fun TopBar(
             verticalAlignment = Alignment.CenterVertically,
             horizontalArrangement = Arrangement.SpaceBetween,
         ) {
-            // Activities
             Row(
-                modifier = Modifier
-                    .clip(RoundedCornerShape(12.dp))
-                    .clickable { onActivities() }
-                    .background(
-                        if (activitiesActive) Color.White.copy(alpha = 0.22f) else Color.Transparent
-                    )
-                    .padding(horizontal = 12.dp, vertical = 6.dp),
                 verticalAlignment = Alignment.CenterVertically,
+                horizontalArrangement = Arrangement.spacedBy(4.dp),
             ) {
-                Text(
-                    text = "Activities",
-                    color = Color.White,
-                    fontSize = 14.sp,
-                    fontWeight = FontWeight.Medium,
-                )
+                IconButton(onClick = onBack) {
+                    Icon(Icons.AutoMirrored.Filled.ArrowBack, contentDescription = "Back", tint = Color.White)
+                }
+                // Activities
+                Row(
+                    modifier = Modifier
+                        .clip(RoundedCornerShape(12.dp))
+                        .clickable { onActivities() }
+                        .background(
+                            if (activitiesActive) Color.White.copy(alpha = 0.22f) else Color.Transparent
+                        )
+                        .padding(horizontal = 12.dp, vertical = 6.dp),
+                    verticalAlignment = Alignment.CenterVertically,
+                ) {
+                    Text(
+                        text = "Activities",
+                        color = Color.White,
+                        fontSize = 14.sp,
+                        fontWeight = FontWeight.Medium,
+                    )
+                }
             }
 
             // Clock

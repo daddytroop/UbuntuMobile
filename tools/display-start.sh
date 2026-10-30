@@ -93,6 +93,32 @@ esac
 # Wait for the RFB port so the caller knows the display is ready.
 for _ in 1 2 3 4 5 6 7 8 9 10 11 12 13 14 15; do
   if port_open "$RFB_PORT"; then
+    # Start a lightweight XFCE desktop inside the container. The components
+    # run as children of the persistent proot process so they stay alive
+    # as long as the display is wanted.
+    export XDG_RUNTIME_DIR="/tmp/runtime-root"
+    export XDG_CURRENT_DESKTOP="XFCE"
+    export DESKTOP_SESSION="xfce"
+    export XDG_CONFIG_DIRS="/etc/xdg/xdg-xfce4:/etc/xdg"
+    mkdir -p "$XDG_RUNTIME_DIR"
+    # XFCE's panel and window manager need a session D-Bus. dbus-run-session
+    # starts one, runs the desktop components under it, and keeps the bus
+    # alive as long as the wrapper sleeps.
+    if command -v dbus-run-session >/dev/null 2>&1; then
+      dbus-run-session -- bash -c '
+        xfwm4 --compositor=off >/tmp/linx-xfwm4.log 2>&1 &
+        xfce4-panel >/tmp/linx-panel.log 2>&1 &
+        xfdesktop >/tmp/linx-desktop.log 2>&1 &
+        thunar --daemon >/tmp/linx-thunar.log 2>&1 &
+        exec sleep infinity
+      ' >/tmp/linx-session.log 2>&1 &
+    else
+      # Fallback for the unlikely case dbus-run-session is missing.
+      xfwm4 --compositor=off >/tmp/linx-xfwm4.log 2>&1 &
+      xfce4-panel >/tmp/linx-panel.log 2>&1 &
+      xfdesktop >/tmp/linx-desktop.log 2>&1 &
+      thunar --daemon >/tmp/linx-thunar.log 2>&1 &
+    fi
     echo "DISPLAY_READY"
     exit 0
   fi

@@ -137,6 +137,13 @@ PY
   sleep 1
 done
 if [ "$rfb_ok" = "1" ]; then pass "the X server exports a framebuffer over RFB"; else fail "the X display did not come up"; fi
+
+# The display-start script also starts the XFCE desktop. Give the panel,
+# window manager and desktop wallpaper a moment to come up before checking.
+sleep 5
+out=$(guest 'ps aux | grep -E "xfwm4|xfce4-panel|xfdesktop" | grep -v grep | wc -l')
+if [ "$out" -ge 3 ]; then pass "the XFCE desktop is running"; else fail "the XFCE desktop did not start (found $out components)"; fi
+
 kill "$DISPLAY_PID" 2>/dev/null
 sleep 1
 pkill -f 'Xvnc :99' 2>/dev/null
