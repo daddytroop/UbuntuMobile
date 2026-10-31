@@ -35,6 +35,7 @@ import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
@@ -44,9 +45,12 @@ import androidx.compose.ui.graphics.asImageBitmap
 import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.platform.LocalConfiguration
 import androidx.compose.ui.platform.LocalDensity
+import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import com.ubuntumobile.ui.theme.UbuntuPalette
+import kotlinx.coroutines.delay
+import kotlinx.coroutines.launch
 
 /**
  * The Linux display: an X11 desktop running inside the Ubuntu container,
@@ -69,12 +73,29 @@ fun DisplayScreen(
     modifier: Modifier = Modifier,
 ) {
     var frameTick by remember { mutableStateOf(0) }
-    var started by remember { mutableStateOf(false) }
+    var connecting by remember { mutableStateOf(true) }
+    var attempt by remember { mutableStateOf(0) }
+    val scope = rememberCoroutineScope()
+
+    // The X server needs a moment before it accepts connections, and on a
+    // phone that can take a while - the desktop also has to start. Keep
+    // trying instead of giving up after the first refused connection.
+    suspend fun connect() {
+        connecting = true
+        var tries = 0
+        while (!session.connected && tries < 120) {
+            if (session.start()) break
+            tries++
+            attempt = tries
+            delay(1000)
+        }
+        connecting = !session.connected
+        if (session.connected) session.refresh()
+    }
 
     LaunchedEffect(Unit) {
-        started = session.start()
         session.onFrame = { frameTick++ }
-        session.refresh()
+        connect()
     }
 
     val bmp = session.bitmap
@@ -116,7 +137,7 @@ fun DisplayScreen(
             IconButton(onClick = onShowKeyboard) {
                 Icon(Icons.Default.Keyboard, contentDescription = "Keyboard", tint = Color.White)
             }
-            IconButton(onClick = { session.refresh() }) {
+            IconButton(onClick = { scope.launch { connect() } }) {
                 Icon(Icons.Default.Refresh, contentDescription = "Refresh", tint = Color.White)
             }
             IconButton(onClick = onClose) {
@@ -132,15 +153,29 @@ fun DisplayScreen(
             contentAlignment = Alignment.Center,
         ) {
             when {
-                !started -> {
+                connecting || !session.connected -> {
                     Column(horizontalAlignment = Alignment.CenterHorizontally) {
                         CircularProgressIndicator(color = UbuntuPalette.UbuntuOrange)
                         Spacer(Modifier.height(12.dp))
                         Text(
-                            session.error ?: "Starting the X displayâ€¦",
+                            if (connecting) {
+                                "Starting the Linux desktop\u2026"
+                            } else {
+                                session.error ?: "The desktop is not responding."
+                            },
                             color = Color.White.copy(alpha = 0.8f),
                             fontSize = 13.sp,
+                            textAlign = TextAlign.Center,
+                            modifier = Modifier.padding(horizontal = 24.dp),
                         )
+                        if (attempt > 0) {
+                            Spacer(Modifier.height(6.dp))
+                            Text(
+                                "attempt $attempt",
+                                color = Color.White.copy(alpha = 0.5f),
+                                fontSize = 11.sp,
+                            )
+                        }
                     }
                 }
 

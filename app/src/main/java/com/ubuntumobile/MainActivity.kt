@@ -89,6 +89,14 @@ class MainActivity : ComponentActivity() {
      */
     private var keyTarget: DisplaySession? = null
 
+    /**
+     * What the back button should do.
+     *
+     * The Linux desktop is the main screen, so the back button leaves it
+     * for the app launcher rather than closing the app.
+     */
+    private var backAction: (() -> Boolean)? = null
+
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
         enableEdgeToEdge()
@@ -96,7 +104,10 @@ class MainActivity : ComponentActivity() {
 
         setContent {
             UbuntuTheme {
-                UbuntuApp(keyTarget = { keyTarget = it })
+                UbuntuApp(
+                    keyTarget = { keyTarget = it },
+                    registerBack = { action -> backAction = action },
+                )
             }
         }
     }
@@ -118,6 +129,13 @@ class MainActivity : ComponentActivity() {
         }
         return super.dispatchKeyEvent(event)
     }
+
+    @Deprecated("the onBackPressedDispatcher is the modern way to do this")
+    override fun onBackPressed() {
+        if (backAction?.invoke() == true) return
+        @Suppress("DEPRECATION")
+        super.onBackPressed()
+    }
 }
 
 /** Which surface is currently on screen. */
@@ -132,6 +150,7 @@ private const val DISPLAY_NUM = 99
 @Composable
 fun UbuntuApp(
     keyTarget: (DisplaySession?) -> Unit = {},
+    registerBack: (() -> Boolean) -> Unit = {},
     vm: UbuntuViewModel = viewModel(),
 ) {
     val state by vm.state.collectAsStateWithLifecycle()
@@ -139,17 +158,46 @@ fun UbuntuApp(
     // available as an overlay/secondary screen.
     var screen by remember { mutableStateOf(Screen.DISPLAY) }
 
+    // What the back button does. The Linux desktop is the main screen, so
+    // the back button leaves it for the app launcher rather than closing
+    // the app.
+    LaunchedEffect(screen) {
+        registerBack {
+            when (screen) {
+                Screen.DISPLAY -> {
+                    screen = Screen.DESKTOP
+                    true
+                }
+                Screen.DESKTOP -> false
+                else -> {
+                    screen = Screen.DISPLAY
+                    true
+                }
+            }
+        }
+    }
+
     val context = LocalContext.current
     val config = LocalConfiguration.current
     val landscape = config.orientation == android.content.res.Configuration.ORIENTATION_LANDSCAPE
     val wide = config.screenWidthDp >= 600
 
-    // The in-container X display is sized to the phone screen. Using the
-    // real pixel dimensions avoids the stretched/compressed look of a fixed
-    // 1024x600 framebuffer on a modern phone.
+    // The in-container X display is not the phone's native resolution.
+    // The desktop is laid out in pixels - the panel is 30 pixels tall, the
+    // fonts are 10 points - so at a native resolution of a modern handset
+    // (1440x3120) the whole desktop would be far too small to tap. The
+    // display is therefore sized to a normal desktop screen with the
+    // phone's aspect ratio, and the phone scales it up.
     val geometry = remember {
         val metrics = context.resources.displayMetrics
-        "${metrics.widthPixels}x${metrics.heightPixels}"
+        val width = metrics.widthPixels
+        val height = metrics.heightPixels
+        val short = minOf(width, height)
+        val scale = if (short > 720) 720f / short else 1f
+        // Round to even numbers: X servers are happier with them.
+        val gw = ((width * scale).toInt() / 2) * 2
+        val gh = ((height * scale).toInt() / 2) * 2
+        "${gw}x$gh"
     }
 
     // Hidden text field used to raise the Android soft keyboard so it can
@@ -202,6 +250,7 @@ fun UbuntuApp(
     suspend fun startLinuxDisplay() {
         withContext(Dispatchers.IO) {
             displayProcess?.destroyForcibly()
+            vm.paths.appendLog("starting the Linux display ($geometry)")
             displayProcess = vm.runtime.startPersistent(
                 listOf(
                     "/bin/bash", "-c",
@@ -214,8 +263,22 @@ fun UbuntuApp(
                         "exec sleep infinity",
                 ),
             )
+            if (displayProcess == null) {
+                vm.paths.appendLog("the display process could not be started")
+                return@withContext
+            }
             // Give the server a moment to open the RFB port and start XFCE.
             delay(5000)
+            // If the port is not open yet, the server is still starting (or
+            // it failed); either way the diagnostics are worth having.
+            val port = vm.runtime.shell(
+                "(exec 3<>/dev/tcp/127.0.0.1/$DISPLAY_PORT) 2>/dev/null && echo OPEN || echo CLOSED",
+                30,
+            )
+            vm.paths.appendLog("the RFB port is ${port.output.trim()}")
+            if (!port.output.contains("OPEN")) {
+                vm.runtime.dumpDisplayDiagnostics()
+            }
         }
     }
 
@@ -421,8 +484,8 @@ fun UbuntuApp(
                     landscape = landscape,
                     onClose = { screen = Screen.DESKTOP },
                     onShowLauncher = { screen = Screen.DESKTOP },
-                    onOpenTerminal = { launchOnDisplay(listOf("/usr/bin/xfce4-terminal")) },
-                    onOpenFiles = { launchOnDisplay(listOf("/usr/bin/thunar")) },
+                    onOpenTerminal = { launchOnDisplay(listOf("/usr/bin/xterm")) },
+                    onOpenFiles = { launchOnDisplay(listOf("/usr/bin/xfe")) },
                     onOpenStore = { screen = Screen.STORE },
                     onOpenGamepad = { screen = Screen.GAMEPAD },
                     onShowKeyboard = { showSoftKeyboard(view, context) },

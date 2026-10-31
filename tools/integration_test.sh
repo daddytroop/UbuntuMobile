@@ -138,11 +138,31 @@ PY
 done
 if [ "$rfb_ok" = "1" ]; then pass "the X server exports a framebuffer over RFB"; else fail "the X display did not come up"; fi
 
-# The display-start script also starts the XFCE desktop. Give the panel,
-# window manager and desktop wallpaper a moment to come up before checking.
-sleep 5
-out=$(guest 'ps aux | grep -E "xfwm4|xfce4-panel|xfdesktop" | grep -v grep | wc -l')
-if [ "$out" -ge 3 ]; then pass "the XFCE desktop is running"; else fail "the XFCE desktop did not start (found $out components)"; fi
+# The display-start script also starts the desktop. Give the window manager,
+# panel and wallpaper a moment to come up before checking.
+sleep 12
+
+# A window manager has to be running: without one the X server does not map
+# the windows of the applications, so the display stays black.
+out=$(guest 'DISPLAY=:99 xprop -root _NET_SUPPORTING_WM_CHECK 2>/dev/null')
+if echo "$out" | grep -q 'window id'; then
+  pass "a window manager has taken over the display"
+else
+  fail "no window manager took over the display: $out"
+fi
+
+out=$(guest 'ps aux | grep -E "openbox|xfce4-panel|feh" | grep -v grep | wc -l')
+if [ "$out" -ge 3 ]; then pass "the desktop components are running"; else fail "the desktop did not start (found $out components)"; fi
+
+# The RFB handshake proves very little on its own: the server answers with a
+# black framebuffer when the desktop is broken. Look at the pixels.
+if out=$(python3 "$(dirname "${BASH_SOURCE[0]}")/check_desktop.py" 5901 4 2>&1); then
+  echo "$out" | sed 's/^/    /'
+  pass "the desktop is actually drawn"
+else
+  echo "$out" | sed 's/^/    /'
+  fail "the desktop is not drawn"
+fi
 
 kill "$DISPLAY_PID" 2>/dev/null
 sleep 1

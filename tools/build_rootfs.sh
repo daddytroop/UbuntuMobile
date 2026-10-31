@@ -102,6 +102,7 @@ flatpak flatpak-xdg-utils bubblewrap appstream appstream-util \
 xdg-user-dirs desktop-file-utils shared-mime-info \
     tigervnc-standalone-server xvfb x11vnc x11-utils x11-xserver-utils xdotool xterm xfonts-base \
     xfce4 xfce4-terminal xfce4-taskmanager mousepad \
+    openbox tint2 feh xfe \
     gnu-coreutils"
 else
 PKGS="ca-certificates locales tzdata sudo \
@@ -121,6 +122,7 @@ flatpak flatpak-xdg-utils bubblewrap appstream appstream-util \
 xdg-user-dirs desktop-file-utils shared-mime-info \
     tigervnc-standalone-server xvfb x11vnc x11-utils x11-xserver-utils xdotool xterm xfonts-base \
     xfce4 xfce4-terminal xfce4-taskmanager mousepad \
+    openbox tint2 feh xfe \
     gnu-coreutils"
 fi
 
@@ -527,15 +529,43 @@ fi
 
 cp "$SCRIPT_DIR/display-start.sh" "$WORK/usr/local/lib/linx/display-start.sh"
 chmod +x "$WORK/usr/local/lib/linx/display-start.sh"
-chmod +x "$WORK/usr/local/lib/linx/display-start.sh"
+
+cp "$SCRIPT_DIR/desktop-start.sh" "$WORK/usr/local/lib/linx/desktop-start.sh"
+chmod +x "$WORK/usr/local/lib/linx/desktop-start.sh"
+
+# The panel configuration for tint2.
+mkdir -p "$WORK/usr/local/share/linx"
+cp "$SCRIPT_DIR/tint2rc" "$WORK/usr/local/share/linx/tint2rc"
+
+# ---------------------------------------------------------------------------
+# Desktop wallpaper.
+#
+# XFCE's stock configuration points at
+# /usr/share/xfce4/backdrops/xubuntu-wallpaper.png, and no package we install
+# provides that file. Without it the desktop comes up with no background at
+# all, which looks broken. The file is generated here (a small PNG written
+# without an image library) and put exactly where XFCE looks for it.
+# ---------------------------------------------------------------------------
+mkdir -p "$WORK/usr/share/xfce4/backdrops"
+if python3 "$SCRIPT_DIR/make_wallpaper.py" "$WORK/usr/share/xfce4/backdrops/xubuntu-wallpaper.png" >/dev/null; then
+  echo "  wallpaper: $(du -h "$WORK/usr/share/xfce4/backdrops/xubuntu-wallpaper.png" | cut -f1)"
+else
+  echo "  WARNING: the wallpaper could not be generated"
+fi
 
 cat > "$WORK/usr/local/lib/linx/display-stop.sh" <<'DX'
 #!/bin/bash
 # Stop the X display started by display-start.sh.
 DISPLAY_NUM="${LINX_DISPLAY:-99}"
+pkill -f "Xvfb :$DISPLAY_NUM" 2>/dev/null
 pkill -f "Xvnc :$DISPLAY_NUM" 2>/dev/null
 pkill -f "Xtigervnc :$DISPLAY_NUM" 2>/dev/null
+pkill -f "x11vnc -rfbport" 2>/dev/null
+pkill -f "openbox" 2>/dev/null
+pkill -f "tint2" 2>/dev/null
+pkill -f "feh --no-fehbg" 2>/dev/null
 rm -f "/tmp/.X${DISPLAY_NUM}-lock" 2>/dev/null
+rm -f "/tmp/.X11-unix/X${DISPLAY_NUM}" 2>/dev/null
 echo "DISPLAY_STOPPED"
 DX
 chmod +x "$WORK/usr/local/lib/linx/display-stop.sh"
@@ -567,6 +597,7 @@ check usr/local/lib/linx/firstboot.sh
 check usr/local/lib/linx/flatpak-search.sh
 check usr/local/lib/linx/flatpak-install.sh
 check usr/local/lib/linx/display-start.sh
+check usr/local/lib/linx/desktop-start.sh
 check usr/local/lib/linx/display-stop.sh
 check usr/local/lib/linx/gamepad-helper.py
 check usr/local/share/linx/flathub.flatpakrepo
@@ -574,6 +605,10 @@ check usr/bin/xdpyinfo
 check usr/bin/xdotool
 check usr/bin/x11vnc
 check usr/bin/Xvfb
+check usr/bin/openbox
+check usr/bin/tint2
+check usr/bin/feh
+check usr/bin/xfe
 if [ -e "$WORK/usr/bin/Xvnc" ] || [ -e "$WORK/usr/bin/Xtigervnc" ]; then
   echo "  OK   X server binary present"
 else
@@ -601,6 +636,7 @@ checka ./usr/local/lib/linx/firstboot.sh
 checka ./usr/local/lib/linx/flatpak-search.sh
 checka ./usr/local/lib/linx/flatpak-install.sh
 checka ./usr/local/lib/linx/display-start.sh
+checka ./usr/local/lib/linx/desktop-start.sh
 checka ./usr/local/lib/linx/display-stop.sh
 checka ./usr/local/share/linx/flathub.flatpakrepo
 checka ./bin

@@ -1,0 +1,56 @@
+# UbuntuMobile panel for tint2.
+#
+# tint2 is used instead of the XFCE panel because it is a plain X11
+# program, and the GTK programs do not render inside the container.
+#
+# The panel sits along the bottom of the screen, the way a phone expects,
+# and carries the launcher, the window list, the clock and the systray.
+
+panel_items = LTSC
+monitor = all
+primary_monitor = 1
+screen_number = 1
+
+position = bottom
+horizontal = yes
+height = 30
+margin = 0
+padding = 2 0 2
+background_color = #000000 70
+border_width = 0
+
+# The launcher: the applications that are always one tap away.
+launcher_padding = 4 0 6
+launcher_background_color = #000000 0
+launcher_icon_size = 22
+launcher_icon_theme = Adwaita
+launcher_item_app = /usr/bin/xterm
+launcher_item_app = /usr/bin/xfe
+launcher_item_app = /usr/bin/feh
+launcher_item_app = /usr/bin/openbox
+
+# The task list: the windows that are open.
+taskbar_mode = single_desktop
+taskbar_padding = 4 0 4
+taskbar_background_color = #000000 0
+task_text = 1
+task_icon = 1
+task_maximum_size = 180 22
+task_padding = 6 2 6
+task_background_color = #2c001e 90
+task_active_background_color = #77216f 90
+task_font = Sans 9
+task_font_color = #ffffff 90
+task_active_font_color = #ffffff 100
+
+# The system tray.
+systray_padding = 4 2 4
+systray_background_color = #000000 0
+systray_icon_size = 16
+
+# The clock.
+time1_format = %H:%M
+time1_font = Sans 10
+clock_font_color = #ffffff 100
+clock_padding = 6 0
+clock_background_color = #000000 0

@@ -169,6 +169,7 @@ class LinuxRuntime(private val paths: LinuxPaths) {
             Result(proc.exitValue(), out.toString(), null)
         } catch (e: Exception) {
             Log.e(TAG, "run failed", e)
+            paths.appendLog("guest command failed: ${e.message}")
             Result(-1, "", e.message ?: "failed to start process")
         }
     }
@@ -190,8 +191,14 @@ class LinuxRuntime(private val paths: LinuxPaths) {
      * guest program is no longer wanted.
      */
     fun startPersistent(command: List<String>, env: Map<String, String> = emptyMap()): Process? {
-        if (!paths.isProotReady) return null
-        if (!paths.isInstalled) return null
+        if (!paths.isProotReady) {
+            paths.appendLog("proot is not installed")
+            return null
+        }
+        if (!paths.isInstalled) {
+            paths.appendLog("Ubuntu is not installed yet")
+            return null
+        }
         return try {
             val pb = ProcessBuilder(buildGuestCommand(command, env))
             pb.environment().apply {
@@ -203,14 +210,45 @@ class LinuxRuntime(private val paths: LinuxPaths) {
             val proc = pb.start()
             Thread({
                 try {
-                    proc.inputStream.bufferedReader().forEachLine { }
+                    proc.inputStream.bufferedReader().forEachLine { line ->
+                        // The guest's own log lines are the only clue about
+                        // what happens inside the container, so keep them.
+                        paths.appendLog("guest: $line")
+                    }
                 } catch (_: Exception) {
                 }
             }, "guest-output").apply { isDaemon = true }.start()
             proc
         } catch (e: Exception) {
             Log.e(TAG, "could not start a persistent guest command", e)
+            paths.appendLog("could not start a persistent guest command: ${e.message}")
             null
+        }
+    }
+
+    /**
+     * Copy the container's display logs into the on-device log.
+     *
+     * The display server and the XFCE components write their output into
+     * `/tmp` inside the container, which is where the app can read it from.
+     * When the desktop does not come up on the phone, this is the only
+     * place that says why.
+     */
+    fun dumpDisplayDiagnostics() {
+        val result = shell(
+            "for f in /tmp/linx-display.log /tmp/linx-session.log /tmp/linx-xtigervnc.log " +
+                "/tmp/linx-xfwm4.log /tmp/linx-panel.log /tmp/linx-desktop.log " +
+                "/tmp/linx-thunar.log; do " +
+                "  [ -f \"\$f\" ] && echo \"--- \$f ---\" && tail -12 \"\$f\"; " +
+                "done; echo '--- processes ---'; " +
+                "ps ax 2>/dev/null | grep -E 'Xvnc|Xtigervnc|xfwm4|xfce4-panel|xfdesktop' " +
+                "| grep -v grep",
+            60,
+        )
+        if (result.output.isBlank()) {
+            paths.appendLog("display diagnostics: nothing to report")
+        } else {
+            paths.appendLog("display diagnostics:\n${result.output}")
         }
     }
 

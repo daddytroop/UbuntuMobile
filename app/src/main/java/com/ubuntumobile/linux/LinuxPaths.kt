@@ -45,6 +45,17 @@ class LinuxPaths(context: Context) {
         listOf(root, binDir, homeDir, cacheDir, sharedTmpDir, sdcardDir).forEach { it.mkdirs() }
     }
 
+    init {
+        // The directories have to exist before proot is started: proot
+        // refuses to run when a binding points at a path that is not
+        // there, and the shared /tmp binding is what lets the display
+        // server and the apps it launches see the same X11 socket.
+        //
+        // This runs on every start, not only during the install, because
+        // an app that was already installed still starts proot.
+        ensureDirs()
+    }
+
     /** Where the rootfs tarball is unpacked to; also used to detect partial installs. */
     val installMarker: File get() = File(root, ".linx-installed")
 
@@ -62,7 +73,19 @@ class LinuxPaths(context: Context) {
     val installLog: File get() = File(app.filesDir, "install.log")
 
     /** Append a line to the install log. */
-    fun appendInstallLog(message: String) {
+    fun appendInstallLog(message: String) = appendLog(message)
+
+    /**
+     * Append a line to the on-device log.
+     *
+     * Everything is mirrored into `crash.log`, so a single command pulls
+     * the whole story - install, container and display - off the phone:
+     *
+     * ```
+     * adb shell run-as com.ubuntumobile cat files/crash.log
+     * ```
+     */
+    fun appendLog(message: String) {
         try {
             val stamp = java.text.SimpleDateFormat("HH:mm:ss", java.util.Locale.US)
                 .format(java.util.Date())
