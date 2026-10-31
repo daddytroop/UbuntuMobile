@@ -60,7 +60,6 @@ start_xtigervnc() {
     -rfbport "$RFB_PORT" \
     -AlwaysShared \
     -nolisten tcp \
-    -extension MIT-SHM \
     >/tmp/linx-xtigervnc.log 2>&1 &
   return 0
 }
@@ -69,12 +68,14 @@ start_x11vnc() {
   local xvfb
   xvfb="$(command -v Xvfb || echo /usr/bin/Xvfb)"
   [ -x "$xvfb" ] || return 1
-  # MIT-SHM is disabled: it lets a client draw straight into the X server's
-  # shared memory, and under proot the client and the server end up with
-  # different views of that memory, so the drawing goes nowhere. Without it
-  # every client falls back to a plain XPutImage, which works.
+  # MIT-SHM has to stay ENABLED. A client that draws into its window does
+  # so by writing straight into a shared memory segment the X server
+  # exports from /dev/shm, and that is the only path that works inside
+  # proot: the fallback (XPutImage, which sends the pixels through the
+  # socket) loses them. Every GTK application draws that way, so without
+  # shared memory the panel, the file manager and every Flatpak would
+  # come up as invisible windows.
   "$xvfb" ":$DISPLAY_NUM" -screen 0 "${GEOMETRY}x${DEPTH}" -nolisten tcp -ac \
-    -extension MIT-SHM \
     >/tmp/linx-xvfb.log 2>&1 &
   sleep 3
   command -v x11vnc >/dev/null 2>&1 || return 1
@@ -82,24 +83,24 @@ start_x11vnc() {
   # (it aborts with "unrecognized option"), so the loopback restriction
   # comes from -localhost and the encoding is left at the default.
   x11vnc -rfbport "$RFB_PORT" -localhost -forever -shared -nopw -noxdamage \
-          -noshm -quiet \
+          -quiet \
           >/tmp/linx-x11vnc.log 2>&1 &
   return 0
 }
 
 start_x11vnc_shm() {
-  # The same stack, but with MIT-SHM left enabled. It is the fallback for
-  # the case where turning the shared memory extension off keeps the server
-  # from starting at all.
+  # The same stack, but with the shared memory extension left off. It is
+  # only used as a last resort: without it the applications cannot draw.
   local xvfb
   xvfb="$(command -v Xvfb || echo /usr/bin/Xvfb)"
   [ -x "$xvfb" ] || return 1
   "$xvfb" ":$DISPLAY_NUM" -screen 0 "${GEOMETRY}x${DEPTH}" -nolisten tcp -ac \
+    -extension MIT-SHM \
     >/tmp/linx-xvfb.log 2>&1 &
   sleep 3
   command -v x11vnc >/dev/null 2>&1 || return 1
   x11vnc -rfbport "$RFB_PORT" -localhost -forever -shared -nopw -noxdamage \
-          -quiet \
+          -noshm -quiet \
           >/tmp/linx-x11vnc.log 2>&1 &
   return 0
 }
@@ -110,11 +111,11 @@ case "$MODE" in
     ;;
   *)
     start_x11vnc || { echo "DISPLAY_START_FAILED"; exit 1; }
-    # If the server did not open the RFB port, try again with the shared
-    # memory extension enabled.
+    # If the server did not open the RFB port, try again without the
+    # shared memory extension.
     sleep 4
     if ! port_open "$RFB_PORT"; then
-      echo "retrying with MIT-SHM enabled" >>/tmp/linx-display.log
+      echo "retrying without MIT-SHM" >>/tmp/linx-display.log
       rm -f "/tmp/.X${DISPLAY_NUM}-lock" "/tmp/.X11-unix/X${DISPLAY_NUM}"
       start_x11vnc_shm
     fi

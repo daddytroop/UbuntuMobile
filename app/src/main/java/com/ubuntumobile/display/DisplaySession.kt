@@ -115,6 +115,16 @@ class DisplaySession(
         client?.sendPointer(x, y, mask)
     }
 
+    /**
+     * Scroll the wheel at a position.
+     *
+     * A positive number of steps scrolls up, a negative one down.
+     */
+    fun scroll(x: Int, y: Int, steps: Int) {
+        if (steps == 0) return
+        client?.sendScroll(x, y, steps)
+    }
+
     /** Send a key event. */
     fun key(keysym: Int, down: Boolean) {
         client?.sendKey(keysym, down)

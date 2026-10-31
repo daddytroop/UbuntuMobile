@@ -33,16 +33,24 @@ start_openbox() {
   openbox >/tmp/linx-openbox.log 2>&1 &
 }
 
-# The panel and the wallpaper. Both are plain X11 programs.
+# The panel and the wallpaper.
 start_panel() {
+  xfce4-panel >/tmp/linx-panel.log 2>&1 &
+  # The wallpaper. feh is a plain X11 program, so it draws where the GTK
+  # ones cannot.
+  feh --no-fehbg --bg-fill /usr/share/xfce4/backdrops/xubuntu-wallpaper.png \
+      >/tmp/linx-feh.log 2>&1 &
+}
+
+# The fallback panel, for the case where the GTK one does not come up.
+start_plain_panel() {
   tint2 -c /usr/local/share/linx/tint2rc >/tmp/linx-tint2.log 2>&1 &
   feh --no-fehbg --bg-fill /usr/share/xfce4/backdrops/xubuntu-wallpaper.png \
       >/tmp/linx-feh.log 2>&1 &
 }
 
 # The XFCE programs are started as well. They add the desktop icons and
-# the file manager's menu integration, and they do work on a device that
-# renders GTK - they simply draw nothing where GTK does not.
+# the file manager's menu integration.
 start_xfce_extras() {
   xfdesktop >/tmp/linx-desktop.log 2>&1 &
   thunar --daemon >/tmp/linx-thunar.log 2>&1 &

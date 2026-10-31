@@ -104,8 +104,21 @@ def main():
         print("   rgb(%3d,%3d,%3d) %6.2f%%" % (r * 32, g * 32, b * 32, 100.0 * count / total))
 
     if len(buckets) < minimum:
-        print("FAIL: the frame is a flat colour - the desktop is not drawn")
+        print("FAIL: the frame has fewer than %d distinct colours - "
+              "the desktop is not drawn" % minimum)
         return 1
+
+    # An optional colour that has to be on the screen. It is how the test
+    # checks that an application really drew something: xlogo paints a
+    # white box, and the wallpaper gradient never has pure white in it.
+    if len(sys.argv) > 3:
+        want = tuple(int(part) for part in sys.argv[3].split(","))
+        key = (want[0] // 32, want[1] // 32, want[2] // 32)
+        if key not in buckets:
+            print("FAIL: the colour rgb%s is not on the screen" % (want,))
+            return 1
+        print("the colour rgb%s is on the screen" % (want,))
+
     print("OK: the desktop is drawn")
     return 0
 

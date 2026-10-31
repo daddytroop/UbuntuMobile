@@ -38,6 +38,12 @@ class VncClient(
         private const val MSG_KEY_EVENT = 4
         private const val MSG_POINTER_EVENT = 5
 
+        /** The button bit of "wheel up" in a pointer event's mask. */
+        const val BUTTON_WHEEL_UP = 8
+
+        /** The button bit of "wheel down" in a pointer event's mask. */
+        const val BUTTON_WHEEL_DOWN = 16
+
         /** Socket read timeout; the loop simply continues when it expires. */
         const val READ_TIMEOUT_MS = 1_000
 
@@ -438,6 +444,27 @@ class VncClient(
         writeShort(x.coerceIn(0, 65535))
         writeShort(y.coerceIn(0, 65535))
         out.flush()
+    }
+
+    /**
+     * Send wheel events.
+     *
+     * The RFB protocol has no wheel message: a notch is a pointer event
+     * with the button bit of button 4 (wheel up) or button 5 (wheel down)
+     * set in the mask.
+     */
+    fun sendScroll(x: Int, y: Int, steps: Int) {
+        val out = output ?: return
+        var remaining = steps
+        while (remaining != 0) {
+            val mask = if (remaining > 0) BUTTON_WHEEL_UP else BUTTON_WHEEL_DOWN
+            out.write(MSG_POINTER_EVENT)
+            out.write(mask)
+            writeShort(x.coerceIn(0, 65535))
+            writeShort(y.coerceIn(0, 65535))
+            out.flush()
+            if (remaining > 0) remaining-- else remaining++
+        }
     }
 
     /** Send a key event. */

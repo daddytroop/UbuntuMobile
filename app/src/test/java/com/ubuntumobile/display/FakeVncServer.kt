@@ -44,6 +44,13 @@ class FakeVncServer(
     var port: Int = 0
         private set
 
+    /**
+     * The pointer events the client sent, as
+     * [mask, x-high, x-low, y-high, y-low].
+     */
+    val pointerEvents: MutableList<ByteArray> =
+        java.util.Collections.synchronizedList(mutableListOf<ByteArray>())
+
     fun start() {
         val ss = ServerSocket(0)
         serverSocket = ss
@@ -115,6 +122,25 @@ class FakeVncServer(
                     input.readUnsignedShort(); input.readUnsignedShort()
                     trace("sending update (encoding=$encoding)")
                     sendUpdate(out)
+                }
+                4 -> { // KeyEvent
+                    input.readUnsignedByte()          // down flag
+                    input.readUnsignedShort()         // padding
+                    input.readInt()                    // keysym
+                    trace("key event")
+                }
+                5 -> { // PointerEvent
+                    val mask = input.readUnsignedByte()
+                    val x = input.readUnsignedShort()
+                    val y = input.readUnsignedShort()
+                    pointerEvents.add(
+                        byteArrayOf(
+                            mask.toByte(),
+                            (x shr 8).toByte(), x.toByte(),
+                            (y shr 8).toByte(), y.toByte(),
+                        )
+                    )
+                    trace("pointer event mask=$mask at $x,$y")
                 }
                 else -> {
                     trace("unexpected message $type, closing")

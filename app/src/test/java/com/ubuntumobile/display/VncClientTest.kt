@@ -120,4 +120,42 @@ class VncClientTest {
         Thread.sleep(500)
         client.close()
     }
+
+    /**
+     * The wheel has no message of its own in the RFB protocol: a notch is
+     * a pointer event with the button bit of button 4 (up) or button 5
+     * (down) set. This is what a two-finger scroll on the phone turns into.
+     */
+    @Test
+    fun theWheelIsSentAsPointerEventsWithTheWheelButtonBit() {
+        val server = FakeVncServer()
+        server.start()
+        try {
+            val client = VncClient("127.0.0.1", server.port)
+            client.connect()
+
+            client.sendScroll(10, 20, 3)
+            client.sendScroll(10, 20, -2)
+            Thread.sleep(500)
+
+            val events = server.pointerEvents.toList()
+            assertEquals("wrong number of wheel events", 5, events.size)
+
+            val up = events.take(3)
+            up.forEach {
+                assertEquals("wrong wheel-up mask", VncClient.BUTTON_WHEEL_UP, it[0].toInt() and 0xFF)
+                assertEquals("wrong x", 10, ((it[1].toInt() and 0xFF) shl 8) or (it[2].toInt() and 0xFF))
+                assertEquals("wrong y", 20, ((it[3].toInt() and 0xFF) shl 8) or (it[4].toInt() and 0xFF))
+            }
+
+            val down = events.drop(3)
+            down.forEach {
+                assertEquals("wrong wheel-down mask", VncClient.BUTTON_WHEEL_DOWN, it[0].toInt() and 0xFF)
+            }
+
+            client.close()
+        } finally {
+            server.stop()
+        }
+    }
 }

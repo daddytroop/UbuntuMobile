@@ -151,17 +151,42 @@ else
   fail "no window manager took over the display: $out"
 fi
 
-out=$(guest 'ps aux | grep -E "openbox|tint2|feh" | grep -v grep | wc -l')
+out=$(guest 'ps aux | grep -E "openbox|xfce4-panel|feh" | grep -v grep | wc -l')
 if [ "$out" -ge 3 ]; then pass "the desktop components are running"; else fail "the desktop did not start (found $out components)"; fi
 
 # The RFB handshake proves very little on its own: the server answers with a
 # black framebuffer when the desktop is broken. Look at the pixels.
-if out=$(python3 "$(dirname "${BASH_SOURCE[0]}")/check_desktop.py" 5901 4 2>&1); then
+#
+# The colours are bucketed, so a smooth gradient counts as a handful of
+# buckets. A working desktop has the wallpaper gradient plus the panel
+# (which is what a flat black frame is missing).
+if out=$(python3 "$(dirname "${BASH_SOURCE[0]}")/check_desktop.py" 5901 6 2>&1); then
   echo "$out" | sed 's/^/    /'
   pass "the desktop is actually drawn"
 else
   echo "$out" | sed 's/^/    /'
   fail "the desktop is not drawn"
+fi
+
+# An application that draws an image into a window must show up. xlogo is
+# a plain X11 program that uploads its image into the X server's shared
+# memory; that is the path every GTK application uses. Its logo is white
+# and the wallpaper gradient never is, so the white pixels prove that the
+# application drew.
+#
+# It runs in a container process of its own: proot waits for everything it
+# started, so a background job inside a guest command would keep the call
+# from ever returning.
+"$PROOT" "${GUEST_ARGS[@]}" /bin/bash -c \
+  'DISPLAY=:99 xlogo -geometry 200x200+120+120 >/dev/null 2>&1 & sleep 30' \
+  </dev/null >/dev/null 2>&1 &
+sleep 6
+if out=$(python3 "$(dirname "${BASH_SOURCE[0]}")/check_desktop.py" 5901 6 255,255,255 2>&1); then
+  echo "$out" | sed 's/^/    /'
+  pass "an application can draw into a window"
+else
+  echo "$out" | sed 's/^/    /'
+  fail "an application cannot draw into a window"
 fi
 
 kill "$DISPLAY_PID" 2>/dev/null

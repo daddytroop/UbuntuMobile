@@ -3,6 +3,8 @@ package com.ubuntumobile.display
 import android.view.KeyEvent
 import androidx.compose.foundation.Canvas
 import androidx.compose.foundation.background
+import androidx.compose.foundation.gestures.awaitEachGesture
+import androidx.compose.foundation.gestures.awaitFirstDown
 import androidx.compose.foundation.gestures.detectDragGestures
 import androidx.compose.foundation.gestures.detectTapGestures
 import androidx.compose.foundation.layout.Arrangement
@@ -240,6 +242,37 @@ fun DisplayScreen(
                                         session.pointer(0, 0, 0)
                                     },
                                 )
+                            }
+                            .pointerInput(Unit) {
+                                // Two fingers scrolling is the only way to
+                                // scroll a window on a touch screen.
+                                awaitEachGesture {
+                                    awaitFirstDown(requireUnconsumed = false)
+                                    var travelled = 0f
+                                    var last = 0f
+                                    do {
+                                        val event = awaitPointerEvent()
+                                        val pressed = event.changes.filter { it.pressed }
+                                        if (pressed.size >= 2) {
+                                            val centre =
+                                                (pressed[0].position.y + pressed[1].position.y) / 2f
+                                            if (last != 0f) {
+                                                travelled += last - centre
+                                                val steps = (travelled / 24f).toInt()
+                                                if (steps != 0) {
+                                                    travelled -= steps * 24f
+                                                    val x = (pressed[0].position.x / scale).toInt()
+                                                    val y = (centre / scale).toInt()
+                                                    session.scroll(x, y, steps)
+                                                }
+                                            }
+                                            last = centre
+                                        } else {
+                                            last = 0f
+                                        }
+                                        event.changes.forEach { it.consume() }
+                                    } while (event.changes.any { it.pressed })
+                                }
                             },
                     ) {
                         // `frameTick` forces a redraw when new pixels arrive.

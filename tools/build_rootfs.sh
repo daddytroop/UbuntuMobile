@@ -102,7 +102,7 @@ flatpak flatpak-xdg-utils bubblewrap appstream appstream-util \
 xdg-user-dirs desktop-file-utils shared-mime-info \
     tigervnc-standalone-server xvfb x11vnc x11-utils x11-xserver-utils xdotool xterm xfonts-base \
     xfce4 xfce4-terminal xfce4-taskmanager mousepad \
-    openbox tint2 feh xfe \
+    openbox tint2 feh xfe x11-apps \
     gnu-coreutils"
 else
 PKGS="ca-certificates locales tzdata sudo \
@@ -122,7 +122,7 @@ flatpak flatpak-xdg-utils bubblewrap appstream appstream-util \
 xdg-user-dirs desktop-file-utils shared-mime-info \
     tigervnc-standalone-server xvfb x11vnc x11-utils x11-xserver-utils xdotool xterm xfonts-base \
     xfce4 xfce4-terminal xfce4-taskmanager mousepad \
-    openbox tint2 feh xfe \
+    openbox tint2 feh xfe x11-apps \
     gnu-coreutils"
 fi
 
