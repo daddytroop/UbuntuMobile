@@ -151,7 +151,7 @@ else
   fail "no window manager took over the display: $out"
 fi
 
-out=$(guest 'ps aux | grep -E "openbox|xfce4-panel|feh" | grep -v grep | wc -l')
+out=$(guest 'ps aux | grep -E "openbox|tint2|feh" | grep -v grep | wc -l')
 if [ "$out" -ge 3 ]; then pass "the desktop components are running"; else fail "the desktop did not start (found $out components)"; fi
 
 # The RFB handshake proves very little on its own: the server answers with a
