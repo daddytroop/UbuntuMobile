@@ -4,3 +4,4 @@
 *.py      text eol=lf
 tools/tint2rc text eol=lf
 gradlew   text eol=lf
+tools/nosandbox-bwrap text eol=lf
