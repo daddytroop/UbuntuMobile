@@ -89,9 +89,10 @@ Browse and install from Flathub with a native UI. Backed by
 ### Linux Display — running real X11 apps
 This is the piece that turns the container into a usable desktop.
 
-Inside the container, **Xvnc** (TigerVNC) runs an X server *and* exports it
-over RFB in a single process. The app talks to it with a hand-written RFB
-client (`VncClient.kt`), decoding Raw, CopyRect and Hextile encodings.
+Inside the container, **Xvfb** runs the X server and **x11vnc** exports it
+over RFB, with an XFCE desktop (panel, xfdesktop, Thunar) on Openbox. The
+app talks to it with a hand-written RFB client (`VncClient.kt`), decoding
+Raw, CopyRect and Hextile encodings.
 
 Two properties make this work without any extra APK:
 
@@ -315,10 +316,46 @@ this bug.
 `ServerInit` is 16 bytes and has **no length prefix** (the 4-byte length
 only exists in the `SetPixelFormat` message), and its fields are mixed
 sizes: bits-per-pixel/depth/flags are 1 byte, colour maxima are 2 bytes,
-shifts are 1 byte. In `Hextile`, the sub-rectangle count lives in bits 3-7
-of the subencoding byte (0 means sixteen) and a sub-rect byte can
-legitimately be `0x00`, so the loop must use the count rather than looking
-for a terminator.
+shifts are 1 byte. In `Hextile` (RFC 6143 7.7.4) the tile is first filled
+with the background, the sub-rectangle count is a **byte of its own**, a
+`SubrectsColoured` tile puts a pixel before each sub-rectangle, and each
+sub-rectangle is two bytes of nibbles (x/y, then width-1/height-1).
+`ServerCutText` has three bytes of padding before its length, and a
+`KeyEvent` is eight bytes (two of padding). x11vnc sends `ServerCutText`
+whenever the clipboard changes, and drops a client whose key events are a
+byte short - each of these got the stream out of step on the phone.
+
+**Never touch a socket on Android's main thread.** Connecting, and writing
+input events, throw `NetworkOnMainThreadException`. The display connects
+on an IO dispatcher and every outgoing message goes through one sender
+thread, which also keeps them in order.
+
+**proot needs `--link2symlink` and `--sysvipc` on Android.** Android forbids
+hard links in app storage, and the X server takes its lock file with
+`link(2)` (`Linking lock file ... Permission denied`); dpkg needs them too.
+Android also has no System V IPC, so without the emulation MIT-SHM does not
+work. Note that the emulation is per proot process: a program in a second
+proot cannot share memory with the X server and falls back to sending
+pixels over the socket, which works.
+
+**GTK loads images through glycin, and glycin's sandbox cannot work under
+proot.** Its bwrap availability test passes under proot's fake root, then
+every real image load fails - no icons, no wallpaper, and `xfce4-panel`
+aborts on the first missing icon. A stand-in `bwrap` first on the desktop's
+`PATH` (`tools/nosandbox-bwrap`) answers the way bwrap does without
+namespace support, and glycin then loads images unsandboxed. Flatpak keeps
+the real one through `FLATPAK_BWRAP`.
+
+**D-Bus needs a machine id**, which only systemd creates, and the guest
+needs `TZ`, because the rootfs has no `/etc/localtime`. `display-start.sh`
+writes the former and the app passes the phone's time zone.
+
+**The guest scripts ship in the APK too.** `display-start.sh`,
+`desktop-start.sh`, `tint2rc`, `gamepad-helper.py` and `nosandbox-bwrap`
+are bundled as assets and copied into the rootfs before every display
+start, so a fix to one of them reaches existing installs with the next APK.
+`.gitattributes` keeps them LF on a Windows checkout - bash cannot run a
+CRLF script.
 
 **Two names for the same binary.** Ubuntu 26.04's
 `tigervnc-standalone-server` installs `/usr/bin/Xtigervnc`; the
@@ -376,6 +413,15 @@ helper unsets it before launching the server.
   handshake completes and the server reports a 1024x600 framebuffer.
 - The interactive login shell (`bash --login -i`) was started on a real pty
   and reports the right user, working directory and terminal type.
+- **The APK runs on Android.** On an Android 14 x86_64 emulator (Pixel 7
+  profile) a clean install unpacks Ubuntu, passes the first boot and comes up
+  on the XFCE desktop - panel, dock, wallpaper and icons - over the app's own
+  RFB client. Taps, drags and the soft keyboard reach X (typing a command
+  into xfce4-terminal runs it), apps open from the launcher, and Ubuntu
+  Software lists Flathub.
+- The decoder has been run against real x11vnc, both from the build machine
+  (`LiveVncProbe`) and by replaying a stream recorded on the phone
+  (`VncReplayTest`); see the comments in those tests for how.
 
 ## Not yet done
 
@@ -386,6 +432,10 @@ helper unsets it before launching the server.
   is fine; a 3D title is not.
 - **Audio.** The container has PulseAudio utilities, but there is no audio
   bridge from the container to the phone's audio stack yet.
-- **On-device verification.** The build host has no KVM, so no emulator was
-  available. Everything above was verified at the container, protocol and
-  unit-test level; the APK itself has not been run on hardware.
+- **A physical phone.** Everything has run on the x86_64 emulator; the arm64
+  APK has not been tried on real hardware yet.
+- **Running Flatpak apps.** Installing from Flathub is wired up, but Flatpak
+  starts every app inside bwrap, which needs user namespaces that proot
+  cannot provide, so an installed Flatpak is not expected to launch yet.
+- **Rotation.** The X screen is sized once, for the orientation the app
+  starts in; rotating letterboxes it until the app is restarted.

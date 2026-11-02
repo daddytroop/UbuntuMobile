@@ -1,0 +1,14 @@
+#!/bin/sh
+# Stand-in for bwrap, first on PATH for the desktop session.
+#
+# GTK decodes every image - icons, wallpapers, thumbnails - through glycin,
+# which runs its loaders inside a bwrap sandbox. bwrap needs user namespaces
+# and seccomp, neither of which exists under proot on Android. Under proot's
+# fake root glycin's availability test still passes, then every real load
+# fails and GTK aborts on the first missing icon.
+#
+# Answering the way bwrap does on a system without namespace support makes
+# glycin fall back to running its loaders unsandboxed. Flatpak is not
+# affected: it calls bwrap by its absolute path.
+echo "bwrap: No permissions to create a new namespace" >&2
+exit 1

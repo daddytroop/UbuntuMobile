@@ -21,6 +21,8 @@ class LinuxRuntime(private val paths: LinuxPaths) {
      *
      * -r <rootfs>          : the chroot root
      * -0                   : fake root uid inside the guest (apt/flatpak need it)
+     * --link2symlink       : emulate hard links (Android forbids them)
+     * --sysvipc            : emulate System V shared memory (MIT-SHM)
      * -b /dev /proc /sys   : kernel filesystems the guest expects
      * -b <sdcard>          : shared storage, mapped to /sdcard and /storage/emulated/0
      * -w /root             : initial working directory
@@ -49,6 +51,10 @@ class LinuxRuntime(private val paths: LinuxPaths) {
         put("XDG_RUNTIME_DIR", "/tmp/runtime-root")
         put("TMPDIR", "/tmp")
         put("DEBIAN_FRONTEND", "noninteractive")
+        // The rootfs has no /etc/localtime, so without this every clock in
+        // the guest shows UTC. The image ships tzdata, so the phone's own
+        // zone name resolves.
+        put("TZ", java.util.TimeZone.getDefault().id)
         putAll(extra)
     }
 
@@ -273,6 +279,14 @@ class LinuxRuntime(private val paths: LinuxPaths) {
         internal fun baseArgsFor(root: String, sdcard: String, sharedTmp: String): List<String> = listOf(
             "-r", root,
             "-0",
+            // Android forbids hard links in app storage. The X server takes
+            // its lock with link(2) and dies with "Linking lock file ...
+            // Permission denied"; dpkg needs them too. proot fakes them with
+            // symlinks.
+            "--link2symlink",
+            // Android has no System V IPC. Without the emulation shmget()
+            // fails, MIT-SHM is unusable, and GTK windows never paint.
+            "--sysvipc",
             "-b", "/dev",
             "-b", "/proc",
             "-b", "/sys",

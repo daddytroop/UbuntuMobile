@@ -78,6 +78,7 @@ import com.ubuntumobile.ui.theme.UbuntuPalette
 import com.ubuntumobile.ui.theme.UbuntuTheme
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.delay
+import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 
@@ -188,16 +189,21 @@ fun UbuntuApp(
     // (1440x3120) the whole desktop would be far too small to tap. The
     // display is therefore sized to a normal desktop screen with the
     // phone's aspect ratio, and the phone scales it up.
-    val geometry = remember {
+    //
+    // The shape comes from the area the desktop is actually drawn in (below
+    // the status bar and the toolbar), which the display screen measures.
+    // Anything else letterboxes the desktop with black bars.
+    var canvasSize by remember { mutableStateOf<androidx.compose.ui.unit.IntSize?>(null) }
+    fun geometryFor(size: androidx.compose.ui.unit.IntSize?): String {
         val metrics = context.resources.displayMetrics
-        val width = metrics.widthPixels
-        val height = metrics.heightPixels
+        val width = size?.width ?: metrics.widthPixels
+        val height = size?.height ?: metrics.heightPixels
         val short = minOf(width, height)
         val scale = if (short > 720) 720f / short else 1f
         // Round to even numbers: X servers are happier with them.
         val gw = ((width * scale).toInt() / 2) * 2
         val gh = ((height * scale).toInt() / 2) * 2
-        "${gw}x$gh"
+        return "${gw}x$gh"
     }
 
     // Hidden text field used to raise the Android soft keyboard so it can
@@ -248,8 +254,15 @@ fun UbuntuApp(
      * display is wanted.
      */
     suspend fun startLinuxDisplay() {
+        // The display screen is the first thing shown, so its size is known
+        // almost at once; fall back to the whole screen if it never is.
+        val measured = kotlinx.coroutines.withTimeoutOrNull(3000) {
+            androidx.compose.runtime.snapshotFlow { canvasSize }.first { it != null }
+        }
+        val geometry = geometryFor(measured)
         withContext(Dispatchers.IO) {
             displayProcess?.destroyForcibly()
+            com.ubuntumobile.linux.ContainerSetup.syncScripts(context, vm.paths)
             vm.paths.appendLog("starting the Linux display ($geometry)")
             displayProcess = vm.runtime.startPersistent(
                 listOf(
@@ -289,26 +302,21 @@ fun UbuntuApp(
         }
     }
 
-    // Launch a guest app in a PTY
-    fun launchInTerminal(entry: AppEntry) {
+    // A shell on a PTY, without the desktop. Useful when the display does
+    // not come up.
+    fun openConsole() {
         screen = Screen.TERMINAL
-        val runtime = vm.runtime
-        val paths = vm.paths
         if (pty?.isRunning == true) return
 
-        val session = Pty(runtime, paths)
+        val session = Pty(vm.runtime, vm.paths)
         try {
             session.startShell(rows = 40, cols = 120) { data, len ->
                 terminal.feed(data, len)
             }
             pty = session
-            // Send the app command once the shell is up.
-            Thread {
-                Thread.sleep(600)
-                session.write(entry.command.joinToString(" ") { quote(it) } + "\n")
-            }.apply { isDaemon = true }.start()
         } catch (e: Exception) {
-            terminal.feed("!! ${e.message}\n".toByteArray(), 0)
+            val message = "!! ${e.message}\n".toByteArray()
+            terminal.feed(message, message.size)
         }
     }
 
@@ -319,8 +327,22 @@ fun UbuntuApp(
         // still connect to the X11 unix socket started by the display
         // process.
         vm.runtime.startPersistent(
-            listOf("/bin/bash", "-lc", command.joinToString(" ") { quote(it) }),
-            mapOf("DISPLAY" to ":$DISPLAY_NUM"),
+            // A login shell resets PATH from /etc/profile, so the
+            // stand-in bwrap is put in front of it inside the command.
+            listOf(
+                "/bin/bash", "-lc",
+                "export PATH=/usr/local/lib/linx/nosandbox:\$PATH; exec " +
+                    command.joinToString(" ") { quote(it) },
+            ),
+            mapOf(
+                "DISPLAY" to ":$DISPLAY_NUM",
+                // The same scaling and image-loader set-up the desktop
+                // session gets (see display-start.sh).
+                "GDK_SCALE" to "2",
+                "GDK_DPI_SCALE" to "1",
+                "QT_SCALE_FACTOR" to "2",
+                "FLATPAK_BWRAP" to "/usr/bin/bwrap",
+            ),
         )
     }
 
@@ -353,14 +375,22 @@ fun UbuntuApp(
                     when (entry.id) {
                         "store" -> screen = Screen.STORE
                         "gamepad" -> screen = Screen.GAMEPAD
-                        "terminal" -> launchInTerminal(entry)
-                        else -> launchOnDisplay(entry.command)
+                        "console" -> openConsole()
+                        else -> {
+                            // Linux apps open as windows on the desktop, so
+                            // go there to see them.
+                            launchOnDisplay(entry.command)
+                            screen = Screen.DISPLAY
+                        }
                     }
                 },
                 onOpenStore = { screen = Screen.STORE },
                 onRefresh = { vm.refreshSystemInfo() },
                 onBack = { screen = Screen.DISPLAY },
-                modifier = Modifier.systemBarsPadding(),
+                // The launcher's gradient continues behind the system bars.
+                modifier = Modifier
+                    .background(UbuntuPalette.Aubergine)
+                    .systemBarsPadding(),
             )
         }
 
@@ -457,7 +487,15 @@ fun UbuntuApp(
         }
 
         Screen.DISPLAY -> {
-            val session = remember { DisplaySession("127.0.0.1", DISPLAY_PORT) }
+            val session = remember {
+                DisplaySession("127.0.0.1", DISPLAY_PORT).apply {
+                    // Debug builds can record the RFB stream for offline
+                    // replay: create files/vnc-capture to switch it on.
+                    if (BuildConfig.DEBUG && java.io.File(context.filesDir, "vnc-capture").exists()) {
+                        captureFile = java.io.File(context.cacheDir, "vnc-stream.bin")
+                    }
+                }
+            }
             DisposableEffect(Unit) {
                 keyTarget(session)
                 onDispose {
@@ -470,14 +508,21 @@ fun UbuntuApp(
             // touch, but it can receive focus when the keyboard button is
             // pressed.
             val view = LocalView.current
-            Box(Modifier.fillMaxSize()) {
+            // The toolbar colour continues behind the status bar.
+            Box(Modifier.fillMaxSize().background(UbuntuPalette.DarkSurface)) {
+                // Whatever the soft keyboard commits is typed into X and
+                // the field is left empty again.
                 androidx.compose.foundation.text.BasicTextField(
                     value = "",
-                    onValueChange = {},
+                    onValueChange = { typed -> if (typed.isNotEmpty()) session.type(typed) },
                     modifier = Modifier
                         .focusRequester(keyboardFocus)
                         .size(1.dp),
                     textStyle = androidx.compose.ui.text.TextStyle(color = Color.Transparent),
+                    keyboardOptions = androidx.compose.foundation.text.KeyboardOptions(
+                        autoCorrectEnabled = false,
+                        keyboardType = androidx.compose.ui.text.input.KeyboardType.Password,
+                    ),
                 )
                 DisplayScreen(
                     session = session,
@@ -489,6 +534,7 @@ fun UbuntuApp(
                     onOpenStore = { screen = Screen.STORE },
                     onOpenGamepad = { screen = Screen.GAMEPAD },
                     onShowKeyboard = { showSoftKeyboard(view, context) },
+                    onCanvasSize = { canvasSize = it },
                     modifier = Modifier.systemBarsPadding(),
                 )
             }
@@ -517,6 +563,8 @@ private fun SetupScreen(
             horizontalAlignment = Alignment.CenterHorizontally,
             verticalArrangement = Arrangement.Center,
         ) {
+            com.ubuntumobile.ui.UbuntuLogo(72.dp)
+            Spacer(Modifier.height(24.dp))
             Text("Ubuntu 26.04", color = Color.White, fontSize = 30.sp, fontWeight = FontWeight.Bold)
             Spacer(Modifier.height(6.dp))
             Text(
@@ -530,8 +578,9 @@ private fun SetupScreen(
             when (state.installPhase) {
                 RootfsInstaller.Progress.Phase.IDLE -> {
                     Text(
-                        "Set up Ubuntu with Flatpak and Flathub preinstalled.\n" +
-                            "This downloads ~330 MB and unpacks it on first launch.",
+                        "Ubuntu ships inside the app, with Flatpak and Flathub\n" +
+                            "ready to go. Setting it up unpacks about 1.2 GB\n" +
+                            "and takes a minute or two. No download needed.",
                         color = Color.White.copy(alpha = 0.8f),
                         fontSize = 13.sp,
                         textAlign = TextAlign.Center,

@@ -131,7 +131,7 @@ class UbuntuViewModel(app: Application) : AndroidViewModel(app) {
                     AppEntry(
                         id = parts[0],
                         name = parts[2].ifBlank { parts[0] },
-                        icon = "\uD83D\uDCE6",
+                        summary = "Flatpak",
                         command = listOf("/usr/bin/flatpak", "run", parts[0]),
                         category = AppEntry.Category.FLATPAK,
                         accent = 0xFF77216F,

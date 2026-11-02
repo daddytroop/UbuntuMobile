@@ -23,6 +23,8 @@ import java.net.Socket
 class VncClient(
     private val host: String = "127.0.0.1",
     private val port: Int = 5901,
+    /** Debugging aid: every byte the server sends is also written here. */
+    private val capture: java.io.OutputStream? = null,
 ) {
 
     companion object {
@@ -44,11 +46,26 @@ class VncClient(
         /** The button bit of "wheel down" in a pointer event's mask. */
         const val BUTTON_WHEEL_DOWN = 16
 
-        /** Socket read timeout; the loop simply continues when it expires. */
+        /**
+         * Read timeout while waiting for the next message; the loop simply
+         * continues when it expires.
+         */
         const val READ_TIMEOUT_MS = 1_000
+
+        /**
+         * Read timeout inside a message. A full frame is megabytes and the
+         * server is slow under proot, so a pause here is not an error.
+         */
+        const val MESSAGE_TIMEOUT_MS = 20_000
 
         /** Re-ask for the framebuffer if the server has not answered by then. */
         const val REQUEST_RETRY_MS = 2_000
+
+        /** Hextile subencoding flags. */
+        const val HEXTILE_BACKGROUND = 0x02
+        const val HEXTILE_FOREGROUND = 0x04
+        const val HEXTILE_ANY_SUBRECTS = 0x08
+        const val HEXTILE_SUBRECTS_COLOURED = 0x10
 
         /** Guard against a malformed ServerInit claiming an absurd size. */
         const val MAX_DIMENSION = 4096
@@ -124,11 +141,15 @@ class VncClient(
     fun connect() {
         val s = Socket(host, port)
         s.tcpNoDelay = true
-        // A read timeout keeps a malformed stream from blocking forever.
-        s.soTimeout = READ_TIMEOUT_MS
+        // The handshake gets a generous timeout: the server runs under
+        // proot, where everything is several times slower than native.
+        s.soTimeout = MESSAGE_TIMEOUT_MS
         socket = s
-        input = DataInputStream(BufferedInputStream(s.getInputStream(), 64 * 1024))
-        output = s.getOutputStream()
+        val raw = s.getInputStream().let { if (capture != null) TeeInputStream(it, capture) else it }
+        input = DataInputStream(BufferedInputStream(raw, 64 * 1024))
+        // Every message is written field by field and flushed once, so it
+        // leaves as one packet instead of one per byte.
+        output = java.io.BufferedOutputStream(s.getOutputStream(), 4096)
 
         // The protocol version is a fixed 12-byte string with no length prefix.
         val version = readAsciiLine(12)
@@ -183,7 +204,9 @@ class VncClient(
      */
     fun runLoop() {
         val stream = input ?: throw IllegalStateException("not connected")
+        val s = socket ?: throw IllegalStateException("not connected")
         while (isConnected) {
+            s.soTimeout = READ_TIMEOUT_MS
             val type = try {
                 stream.readUnsignedByte()
             } catch (_: java.net.SocketTimeoutException) {
@@ -191,9 +214,12 @@ class VncClient(
                 watchdog()
                 continue
             }
+            // The rest of the message follows, but maybe not at once.
+            s.soTimeout = MESSAGE_TIMEOUT_MS
             when (type) {
                 MSG_FRAMEBUFFER_UPDATE -> {
                     handleFramebufferUpdate()
+                    framesReceived++
                     // Keep exactly one request outstanding: the server sends
                     // damage updates while a request is pending. Sending a
                     // second request while one is still pending is a protocol
@@ -201,23 +227,40 @@ class VncClient(
                     requestIncrementalUpdate()
                 }
                 MSG_SET_COLOUR_MAP_ENTRIES -> {
+                    // RFC 6143 7.6.2: padding (1), first colour (2), count (2).
+                    skipFully(1)
                     stream.readUnsignedShort()
                     val count = stream.readUnsignedShort()
                     skipFully(count * 6L)
                 }
                 MSG_BELL -> { /* ignore */ }
                 MSG_SERVER_CUT_TEXT -> {
+                    // RFC 6143 7.6.4: padding (3), length (4), text. x11vnc
+                    // sends one whenever the clipboard changes; forgetting
+                    // the padding puts the client three bytes out of step.
+                    skipFully(3)
                     val length = stream.readInt()
                     skipFully(length.toLong())
                 }
-                else -> throw IllegalStateException("unexpected server message: $type")
+                else -> throw IllegalStateException(
+                    "unexpected server message: $type after ${recent.joinToString()}",
+                )
             }
         }
+    }
+
+    /** The last few things decoded, so a loss of sync can say where it happened. */
+    private val recent = ArrayDeque<String>()
+
+    private fun remember(what: String) {
+        if (recent.size >= 6) recent.removeFirst()
+        recent.addLast(what)
     }
 
     /** True while a framebuffer update request is outstanding. */
     private var requestOutstanding = false
     private var lastRequestAt = 0L
+    private var framesReceived = 0
 
     /**
      * Re-ask for the framebuffer if the server has not answered.
@@ -229,11 +272,15 @@ class VncClient(
      */
     private fun watchdog() {
         if (!requestOutstanding) return
+        // Once a frame has arrived, silence just means nothing changed: an
+        // idle desktop must not be re-sent in full (megabytes) every time.
+        if (framesReceived > 0) return
         if (System.currentTimeMillis() - lastRequestAt < REQUEST_RETRY_MS) return
         requestFullUpdate()
     }
 
     /** Request a full framebuffer refresh. */
+    @Synchronized
     fun requestFullUpdate() {
         val out = output ?: return
         out.write(3) // FramebufferUpdateRequest
@@ -254,6 +301,7 @@ class VncClient(
      * so keeping one outstanding is what keeps the stream alive. A server
      * that has nothing to send simply waits.
      */
+    @Synchronized
     fun requestIncrementalUpdate() {
         val out = output ?: return
         out.write(3) // FramebufferUpdateRequest
@@ -295,8 +343,11 @@ class VncClient(
                     readHextile(x, y, w, h)
                     changed += Rect(x, y, w, h)
                 }
-                else -> throw IllegalStateException("unsupported encoding: $encoding")
+                else -> throw IllegalStateException(
+                    "unsupported encoding: $encoding after ${recent.joinToString()}",
+                )
             }
+            remember("rect $x,$y ${w}x$h enc=$encoding")
         }
 
         if (changed.isNotEmpty()) onUpdate?.invoke(changed)
@@ -330,27 +381,30 @@ class VncClient(
                     stream.readFully(bytes, 0, n)
                     blit(bytes, tileX, tileY, tileWidth, tileHeight, bpp)
                 } else {
-                    if (subencoding and 0x02 != 0) {
+                    // RFC 6143 section 7.7.4. Background and foreground
+                    // carry over from the previous tile when not given.
+                    if (subencoding and HEXTILE_BACKGROUND != 0) {
                         lastBackground = readPixel()
                     }
-                    if (subencoding and 0x04 != 0) {
+                    if (subencoding and HEXTILE_FOREGROUND != 0) {
                         lastForeground = readPixel()
                     }
-                    if (subencoding and 0x08 != 0) {
-                        // The sub-rectangle count is in bits 3-7; a value of
-                        // zero means sixteen. A sub-rectangle byte can
-                        // legitimately be 0x00, so the count has to be used
-                        // rather than looking for a terminator.
-                        var count = (subencoding shr 3) and 0x0F
-                        if (count == 0) count = 16
+                    // The tile starts out as background...
+                    fillRect(tileX, tileY, tileWidth, tileHeight, lastBackground)
+                    // ...and sub-rectangles are painted over it.
+                    if (subencoding and HEXTILE_ANY_SUBRECTS != 0) {
+                        val coloured = subencoding and HEXTILE_SUBRECTS_COLOURED != 0
+                        // The count is a byte of its own.
+                        val count = stream.readUnsignedByte()
                         repeat(count) {
-                            val sub = stream.readUnsignedByte()
-                            val isFg = sub and 0x01 != 0
-                            val subX = (sub shr 1) and 0x0F
-                            val subY = (sub shr 4) and 0x0F
-                            val subW = ((sub shr 5) and 0x07) + 1
-                            val subH = ((sub shr 8) and 0x07) + 1
-                            val color = if (isFg) lastForeground else lastBackground
+                            val color = if (coloured) readPixel() else lastForeground
+                            // x and y share a byte, as do width-1 and height-1.
+                            val xy = stream.readUnsignedByte()
+                            val wh = stream.readUnsignedByte()
+                            val subX = xy shr 4
+                            val subY = xy and 0x0F
+                            val subW = (wh shr 4) + 1
+                            val subH = (wh and 0x0F) + 1
                             fillRect(
                                 tileX + subX, tileY + subY,
                                 minOf(subW, tileWidth - subX),
@@ -358,9 +412,6 @@ class VncClient(
                                 color,
                             )
                         }
-                    } else {
-                        // Nothing else specified: the tile is all background.
-                        fillRect(tileX, tileY, tileWidth, tileHeight, lastBackground)
                     }
                 }
                 tileX += 16
@@ -437,6 +488,7 @@ class VncClient(
     }
 
     /** Send a pointer (mouse / touch) event. */
+    @Synchronized
     fun sendPointer(x: Int, y: Int, mask: Int) {
         val out = output ?: return
         out.write(MSG_POINTER_EVENT)
@@ -453,6 +505,7 @@ class VncClient(
      * with the button bit of button 4 (wheel up) or button 5 (wheel down)
      * set in the mask.
      */
+    @Synchronized
     fun sendScroll(x: Int, y: Int, steps: Int) {
         val out = output ?: return
         var remaining = steps
@@ -468,11 +521,16 @@ class VncClient(
     }
 
     /** Send a key event. */
+    @Synchronized
     fun sendKey(keysym: Int, down: Boolean) {
         val out = output ?: return
+        // RFC 6143 7.5.4: type, down-flag, two bytes of padding, keysym.
+        // With one padding byte the server reads every key press a byte
+        // short and drops the connection.
         out.write(MSG_KEY_EVENT)
         out.write(if (down) 1 else 0)
         out.write(0) // padding
+        out.write(0)
         writeInt(keysym)
         out.flush()
     }
@@ -480,6 +538,7 @@ class VncClient(
 
 
     /** Close the connection. */
+    @Synchronized
     fun close() {
         try { output?.flush() } catch (_: Exception) {}
         try { socket?.close() } catch (_: Exception) {}
@@ -617,5 +676,21 @@ class VncClient(
                 remaining -= skipped
             }
         }
+    }
+}
+
+/** Copies everything read from [source] to [sink]. */
+private class TeeInputStream(
+    private val source: java.io.InputStream,
+    private val sink: java.io.OutputStream,
+) : java.io.InputStream() {
+    override fun read(): Int = source.read().also { if (it >= 0) sink.write(it) }
+
+    override fun read(b: ByteArray, off: Int, len: Int): Int =
+        source.read(b, off, len).also { if (it > 0) sink.write(b, off, it) }
+
+    override fun close() {
+        source.close()
+        sink.flush()
     }
 }

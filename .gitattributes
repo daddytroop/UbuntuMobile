@@ -1,0 +1,6 @@
+# Everything that runs inside the Linux container must keep Unix line
+# endings, even when the repository is checked out on Windows.
+*.sh      text eol=lf
+*.py      text eol=lf
+tools/tint2rc text eol=lf
+gradlew   text eol=lf

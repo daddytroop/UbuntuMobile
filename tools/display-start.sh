@@ -111,11 +111,20 @@ case "$MODE" in
     ;;
   *)
     start_x11vnc || { echo "DISPLAY_START_FAILED"; exit 1; }
-    # If the server did not open the RFB port, try again without the
-    # shared memory extension.
-    sleep 4
+    # x11vnc takes several seconds to come up on a phone, so give it time
+    # before deciding it failed. If it really did not open the RFB port,
+    # stop what was started and try again without the shared memory
+    # extension - starting a second server next to the first one only
+    # fails with "server already running".
+    for _ in $(seq 1 20); do
+      port_open "$RFB_PORT" && break
+      sleep 1
+    done
     if ! port_open "$RFB_PORT"; then
       echo "retrying without MIT-SHM" >>/tmp/linx-display.log
+      pkill -x x11vnc 2>/dev/null || true
+      pkill -x Xvfb 2>/dev/null || true
+      sleep 1
       rm -f "/tmp/.X${DISPLAY_NUM}-lock" "/tmp/.X11-unix/X${DISPLAY_NUM}"
       start_x11vnc_shm
     fi
@@ -133,6 +142,33 @@ for _ in 1 2 3 4 5 6 7 8 9 10 11 12 13 14 15; do
     export DESKTOP_SESSION="xfce"
     export XDG_CONFIG_DIRS="/etc/xdg/xdg-xfce4:/etc/xdg"
     mkdir -p "$XDG_RUNTIME_DIR"
+
+    # GTK loads images through glycin, whose bwrap sandbox cannot work
+    # under proot. The stand-in makes it load them unsandboxed instead; see
+    # nosandbox-bwrap.
+    export PATH="/usr/local/lib/linx/nosandbox:$PATH"
+    # Flatpak finds bwrap on PATH too; keep it on the real one.
+    export FLATPAK_BWRAP=/usr/bin/bwrap
+
+    # D-Bus refuses to start a session bus without a machine id, and the
+    # rootfs is built without one (systemd would normally create it).
+    if [ ! -s /etc/machine-id ]; then
+      dbus-uuidgen >/etc/machine-id 2>/dev/null || \
+        cat /proc/sys/kernel/random/uuid | tr -d '-' >/etc/machine-id
+    fi
+    mkdir -p /var/lib/dbus
+    [ -s /var/lib/dbus/machine-id ] || cp /etc/machine-id /var/lib/dbus/machine-id
+
+    # Without preferred applications XFCE asks "choose your terminal" the
+    # first time anything opens one. These are the ones the image ships.
+    HELPERS="$HOME/.config/xfce4/helpers.rc"
+    if [ ! -s "$HELPERS" ]; then
+      mkdir -p "$(dirname "$HELPERS")"
+      {
+        echo "TerminalEmulator=xfce4-terminal"
+        echo "FileManager=thunar"
+      } >"$HELPERS"
+    fi
 
     # The X screen is sized like a normal desktop screen (the phone's
     # aspect ratio, short side 720 pixels), not like the phone's display.

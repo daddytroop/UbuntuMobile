@@ -23,6 +23,15 @@ class FakeVncServer(
     /** The pixel format the server announces. */
     private val format: VncClient.PixelFormat =
         VncClient.PixelFormat(32, 24, false, true, 255, 255, 255, 16, 8, 0),
+    /**
+     * Send Hextile tiles as a background plus coloured sub-rectangles (and
+     * solid tiles) instead of raw pixels. This is what real servers send
+     * for desktop content, so the image is made of 4x4 blocks that can be
+     * encoded that way.
+     */
+    private val hextileSubrects: Boolean = false,
+    /** Send a clipboard update (ServerCutText) before every frame, as x11vnc does. */
+    private val sendCutText: Boolean = false,
 ) {
 
     private var serverSocket: ServerSocket? = null
@@ -33,6 +42,7 @@ class FakeVncServer(
     val source: IntArray = IntArray(width * height) { index ->
         val x = index % width
         val y = index / width
+        if (hextileSubrects) return@IntArray blockColour(x, y)
         // A deterministic gradient with a marker in the corner.
         val r = (x * 255) / (width - 1)
         val g = (y * 255) / (height - 1)
@@ -50,6 +60,10 @@ class FakeVncServer(
      */
     val pointerEvents: MutableList<ByteArray> =
         java.util.Collections.synchronizedList(mutableListOf<ByteArray>())
+
+    /** The keysyms of the key events the client sent. */
+    val keyEvents: MutableList<Int> =
+        java.util.Collections.synchronizedList(mutableListOf<Int>())
 
     fun start() {
         val ss = ServerSocket(0)
@@ -126,7 +140,7 @@ class FakeVncServer(
                 4 -> { // KeyEvent
                     input.readUnsignedByte()          // down flag
                     input.readUnsignedShort()         // padding
-                    input.readInt()                    // keysym
+                    keyEvents.add(input.readInt())     // keysym
                     trace("key event")
                 }
                 5 -> { // PointerEvent
@@ -151,6 +165,13 @@ class FakeVncServer(
     }
 
     private fun sendUpdate(out: OutputStream) {
+        if (sendCutText) {
+            val text = "clipboard".toByteArray()
+            out.write(3)                     // ServerCutText
+            out.write(byteArrayOf(0, 0, 0))  // padding
+            out.write(text.size.toBigEndian())
+            out.write(text)
+        }
         out.write(0)          // FramebufferUpdate
         out.write(0)          // padding
         out.write(1.toShortBigEndian()) // one rectangle
@@ -211,6 +232,7 @@ class FakeVncServer(
      * is what a real server does for content it cannot compress.
      */
     private fun hextileBytes(): ByteArray {
+        if (hextileSubrects) return hextileSubrectBytes()
         val bpp = (format.bitsPerPixel + 7) / 8
         val out = java.io.ByteArrayOutputStream()
         var ty = 0
@@ -227,6 +249,49 @@ class FakeVncServer(
                             val shift = if (format.bigEndian) (bpp - 1 - b) * 8 else b * 8
                             out.write((value shr shift) and 0xFF)
                         }
+                    }
+                }
+                tx += 16
+            }
+            ty += 16
+        }
+        return out.toByteArray()
+    }
+
+    /** Hextile with a background colour and coloured sub-rectangles per tile (RFC 6143 7.7.4). */
+    private fun hextileSubrectBytes(): ByteArray {
+        val out = java.io.ByteArrayOutputStream()
+        fun pixel(argb: Int) {
+            val bpp = (format.bitsPerPixel + 7) / 8
+            val value = encode(argb)
+            for (b in 0 until bpp) {
+                val shift = if (format.bigEndian) (bpp - 1 - b) * 8 else b * 8
+                out.write((value shr shift) and 0xFF)
+            }
+        }
+        var ty = 0
+        while (ty < height) {
+            val th = minOf(16, height - ty)
+            var tx = 0
+            while (tx < width) {
+                val tw = minOf(16, width - tx)
+                val background = source[ty * width + tx]
+                val subrects = mutableListOf<IntArray>()
+                for (by in 0 until th step 4) for (bx in 0 until tw step 4) {
+                    val c = source[(ty + by) * width + (tx + bx)]
+                    if (c != background) subrects += intArrayOf(c, bx, by, minOf(4, tw - bx), minOf(4, th - by))
+                }
+                if (subrects.isEmpty()) {
+                    out.write(0x02) // background only: a solid tile
+                    pixel(background)
+                } else {
+                    out.write(0x02 or 0x08 or 0x10)
+                    pixel(background)
+                    out.write(subrects.size)
+                    for (s in subrects) {
+                        pixel(s[0])
+                        out.write((s[1] shl 4) or s[2])
+                        out.write(((s[3] - 1) shl 4) or (s[4] - 1))
                     }
                 }
                 tx += 16
@@ -262,4 +327,18 @@ class FakeVncServer(
         format.blueShift.toByte(),
         0, 0, 0,
     )
+}
+
+/** The colour of the 4x4 block a pixel is in; every other tile row is solid. */
+private fun blockColour(x: Int, y: Int): Int {
+    val tileRow = y / 16
+    val r: Int
+    val g: Int
+    val b: Int
+    if (tileRow % 2 == 1) {
+        r = (x / 16) * 60 + 20; g = 200; b = 30
+    } else {
+        r = ((x / 4) * 37) and 0xFF; g = ((y / 4) * 53) and 0xFF; b = ((x / 4 + y / 4) % 2) * 0xFF
+    }
+    return (0xFF shl 24) or (r shl 16) or (g shl 8) or b
 }

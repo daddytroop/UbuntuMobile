@@ -1,17 +1,6 @@
 package com.ubuntumobile.ui
 
-import androidx.compose.animation.AnimatedVisibility
-import androidx.compose.animation.core.animateFloatAsState
-import androidx.compose.animation.fadeIn
-import androidx.compose.animation.fadeOut
-import androidx.compose.animation.slideInHorizontally
-import androidx.compose.animation.slideOutHorizontally
-import androidx.compose.animation.slideInVertically
-import androidx.compose.animation.slideOutVertically
 import androidx.compose.foundation.background
-import androidx.compose.foundation.border
-import androidx.compose.foundation.horizontalScroll
-import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
@@ -19,34 +8,36 @@ import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
-import androidx.compose.foundation.layout.fillMaxHeight
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
-import androidx.compose.foundation.layout.widthIn
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
-import androidx.compose.foundation.lazy.LazyColumn
+import androidx.compose.foundation.layout.widthIn
 import androidx.compose.foundation.lazy.grid.GridCells
+import androidx.compose.foundation.lazy.grid.GridItemSpan
 import androidx.compose.foundation.lazy.grid.LazyVerticalGrid
 import androidx.compose.foundation.lazy.grid.items
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
-import androidx.compose.foundation.text.KeyboardActions
-import androidx.compose.foundation.text.KeyboardOptions
+import androidx.compose.foundation.text.BasicTextField
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
+import androidx.compose.material.icons.filled.Close
+import androidx.compose.material.icons.filled.Code
+import androidx.compose.material.icons.filled.EditNote
+import androidx.compose.material.icons.filled.Folder
+import androidx.compose.material.icons.filled.Refresh
 import androidx.compose.material.icons.filled.Search
+import androidx.compose.material.icons.filled.Settings
+import androidx.compose.material.icons.filled.ShoppingBag
+import androidx.compose.material.icons.filled.Speed
+import androidx.compose.material.icons.filled.SportsEsports
 import androidx.compose.material.icons.filled.Terminal
-import androidx.compose.material3.CircularProgressIndicator
+import androidx.compose.material.icons.filled.Widgets
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
-import androidx.compose.material3.LinearProgressIndicator
-import androidx.compose.material3.MaterialTheme
-import androidx.compose.material3.OutlinedTextField
-import androidx.compose.material3.OutlinedTextFieldDefaults
-import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
@@ -58,9 +49,10 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
-import androidx.compose.ui.text.font.FontFamily
+import androidx.compose.ui.graphics.SolidColor
+import androidx.compose.ui.graphics.vector.ImageVector
+import androidx.compose.ui.text.TextStyle
 import androidx.compose.ui.text.font.FontWeight
-import androidx.compose.ui.text.input.ImeAction
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
@@ -68,11 +60,11 @@ import androidx.compose.ui.unit.sp
 import com.ubuntumobile.ui.theme.UbuntuPalette
 
 /**
- * The Ubuntu desktop shell.
+ * The application launcher, shown over the Linux desktop.
  *
- * Layout adapts to the available space:
- *  - portrait / compact : bottom dash, full-screen app grid
- *  - landscape / wide   : side dock, grid on the right
+ * A search field, the apps in a grid and a small card with what the
+ * container is running on. It is the Android side of the system, so it
+ * follows Android conventions: a back arrow returns to the desktop.
  */
 @Composable
 fun UbuntuShell(
@@ -85,173 +77,100 @@ fun UbuntuShell(
     onBack: () -> Unit = {},
     modifier: Modifier = Modifier,
 ) {
-    var overview by remember { mutableStateOf(false) }
     var query by remember { mutableStateOf("") }
-
     val filtered = remember(apps, query) {
         if (query.isBlank()) apps
-        else apps.filter { it.name.contains(query, ignoreCase = true) }
+        else apps.filter {
+            it.name.contains(query, ignoreCase = true) || it.summary.contains(query, ignoreCase = true)
+        }
     }
+    val linuxApps = filtered.filter { it.category != AppEntry.Category.FLATPAK }
+    val flatpaks = filtered.filter { it.category == AppEntry.Category.FLATPAK }
 
-    Box(
+    Column(
         modifier = modifier
             .fillMaxSize()
             .background(
                 Brush.verticalGradient(
-                    listOf(
-                        UbuntuPalette.Aubergine,
-                        UbuntuPalette.AubergineDark,
-                        Color(0xFF2A0B27),
-                    )
-                )
-            )
-    ) {
-        // ---- Top bar ----
-        TopBar(
-            clock = rememberClock(),
-            onActivities = { overview = !overview },
-            activitiesActive = overview,
-            wide = wide,
-            onBack = onBack,
-            modifier = Modifier.align(Alignment.TopCenter),
-        )
-
-        // ---- Main content ----
-        Column(
-            modifier = Modifier
-                .fillMaxSize()
-                .padding(top = 48.dp)
-                // Keep the content clear of the dash: in landscape the dash
-                // is a column on the left, in portrait a row at the bottom.
-                .padding(start = if (wide) 96.dp else 0.dp)
-                .padding(bottom = if (wide) 24.dp else 100.dp),
-        ) {
-            if (overview) {
-                SearchField(
-                    query = query,
-                    onQueryChange = { query = it },
-                    modifier = Modifier
-                        .fillMaxWidth()
-                        .padding(horizontal = 16.dp, vertical = 8.dp),
-                )
-                AppGrid(
-                    apps = filtered,
-                    onLaunch = onLaunchApp,
-                    wide = wide,
-                    modifier = Modifier.weight(1f),
-                )
-            } else {
-                WelcomePanel(
-                    state = state,
-                    onOpenStore = onOpenStore,
-                    onRefresh = onRefresh,
-                    modifier = Modifier
-                        // A phone in landscape is very wide; the panel
-                        // should not stretch across the whole screen.
-                        .widthIn(max = 720.dp)
-                        .fillMaxWidth()
-                        .padding(16.dp)
-                        .align(Alignment.CenterHorizontally),
-                )
-            }
-        }
-
-        // ---- Dash (a column on the left in landscape, a row at the
-        //      bottom in portrait) ----
-        AnimatedVisibility(
-            visible = !overview,
-            enter = if (wide) {
-                slideInHorizontally { -it } + fadeIn()
-            } else {
-                slideInVertically { it } + fadeIn()
-            },
-            exit = if (wide) {
-                slideOutHorizontally { -it } + fadeOut()
-            } else {
-                slideOutVertically { it } + fadeOut()
-            },
-            modifier = if (wide) {
-                Modifier.align(Alignment.BottomStart)
-            } else {
-                Modifier.align(Alignment.BottomCenter)
-            },
-        ) {
-            Dash(
-                apps = apps.filter { AppCatalog.dashFavorites.contains(it.id) },
-                onLaunch = onLaunchApp,
-                vertical = wide,
-            )
-        }
-    }
-}
-
-/** GNOME-style top bar with the Activities button and a clock. */
-@Composable
-private fun TopBar(
-    clock: String,
-    onActivities: () -> Unit,
-    activitiesActive: Boolean,
-    wide: Boolean,
-    onBack: () -> Unit,
-    modifier: Modifier = Modifier,
-) {
-    Surface(
-        modifier = modifier.fillMaxWidth(),
-        color = Color.Black.copy(alpha = 0.28f),
+                    listOf(UbuntuPalette.Aubergine, UbuntuPalette.AubergineDark, Color(0xFF2A0B27)),
+                ),
+            ),
     ) {
         Row(
             modifier = Modifier
                 .fillMaxWidth()
-                .height(48.dp)
-                .padding(horizontal = 8.dp),
+                .height(56.dp)
+                .padding(horizontal = 4.dp),
             verticalAlignment = Alignment.CenterVertically,
-            horizontalArrangement = Arrangement.SpaceBetween,
         ) {
-            Row(
-                verticalAlignment = Alignment.CenterVertically,
-                horizontalArrangement = Arrangement.spacedBy(4.dp),
-            ) {
-                IconButton(onClick = onBack) {
-                    Icon(Icons.AutoMirrored.Filled.ArrowBack, contentDescription = "Back", tint = Color.White)
-                }
-                // Activities
-                Row(
-                    modifier = Modifier
-                        .clip(RoundedCornerShape(12.dp))
-                        .clickable { onActivities() }
-                        .background(
-                            if (activitiesActive) Color.White.copy(alpha = 0.22f) else Color.Transparent
-                        )
-                        .padding(horizontal = 12.dp, vertical = 6.dp),
-                    verticalAlignment = Alignment.CenterVertically,
-                ) {
-                    Text(
-                        text = "Activities",
-                        color = Color.White,
-                        fontSize = 14.sp,
-                        fontWeight = FontWeight.Medium,
-                    )
+            IconButton(onClick = onBack) {
+                Icon(Icons.AutoMirrored.Filled.ArrowBack, contentDescription = "Back to the desktop", tint = Color.White)
+            }
+            Text(
+                "Applications",
+                color = Color.White,
+                fontSize = 20.sp,
+                fontWeight = FontWeight.Medium,
+                modifier = Modifier.weight(1f),
+            )
+            Text(
+                rememberClock(),
+                color = Color.White.copy(alpha = 0.85f),
+                fontSize = 15.sp,
+                fontWeight = FontWeight.Medium,
+                modifier = Modifier.padding(end = 16.dp),
+            )
+        }
+
+        SearchField(
+            query = query,
+            onQueryChange = { query = it },
+            modifier = Modifier
+                .widthIn(max = 720.dp)
+                .fillMaxWidth()
+                .padding(horizontal = 16.dp, vertical = 4.dp)
+                .align(Alignment.CenterHorizontally),
+        )
+
+        LazyVerticalGrid(
+            columns = GridCells.Adaptive(minSize = if (wide) 112.dp else 96.dp),
+            modifier = Modifier
+                .weight(1f)
+                .widthIn(max = 900.dp)
+                .align(Alignment.CenterHorizontally),
+            contentPadding = PaddingValues(start = 12.dp, end = 12.dp, top = 16.dp, bottom = 24.dp),
+            verticalArrangement = Arrangement.spacedBy(8.dp),
+        ) {
+            items(linuxApps, key = { it.id }) { app ->
+                AppTile(app = app, onClick = { onLaunchApp(app) })
+            }
+            if (flatpaks.isNotEmpty()) {
+                item(span = { GridItemSpan(maxLineSpan) }) { SectionLabel("Installed from Flathub") }
+                items(flatpaks, key = { it.id }) { app ->
+                    AppTile(app = app, onClick = { onLaunchApp(app) })
                 }
             }
-
-            // Clock
-            Text(
-                text = clock,
-                color = Color.White,
-                fontSize = 14.sp,
-                fontWeight = FontWeight.Medium,
-                modifier = Modifier.padding(horizontal = 8.dp),
-            )
-
-            // Status icons
-            Row(
-                verticalAlignment = Alignment.CenterVertically,
-                horizontalArrangement = Arrangement.spacedBy(10.dp),
-            ) {
-                StatusDot(UbuntuPalette.Success)
-                StatusDot(UbuntuPalette.LightOnSurface)
-                if (!wide) {
-                    Text("100%", color = Color.White, fontSize = 12.sp)
+            if (filtered.isEmpty()) {
+                item(span = { GridItemSpan(maxLineSpan) }) {
+                    Column(
+                        Modifier
+                            .fillMaxWidth()
+                            .padding(vertical = 32.dp),
+                        horizontalAlignment = Alignment.CenterHorizontally,
+                    ) {
+                        Text("Nothing matches “$query”", color = Color.White.copy(alpha = 0.8f))
+                        Spacer(Modifier.height(12.dp))
+                        PillButton("Search Flathub", onOpenStore)
+                    }
+                }
+            }
+            if (query.isBlank()) {
+                item(span = { GridItemSpan(maxLineSpan) }) {
+                    SystemCard(
+                        state = state,
+                        onRefresh = onRefresh,
+                        modifier = Modifier.padding(top = 20.dp, start = 4.dp, end = 4.dp),
+                    )
                 }
             }
         }
@@ -259,12 +178,13 @@ private fun TopBar(
 }
 
 @Composable
-private fun StatusDot(color: Color) {
-    Box(
-        modifier = Modifier
-            .size(10.dp)
-            .clip(CircleShape)
-            .background(color)
+private fun SectionLabel(text: String) {
+    Text(
+        text,
+        color = Color.White.copy(alpha = 0.7f),
+        fontSize = 13.sp,
+        fontWeight = FontWeight.Medium,
+        modifier = Modifier.padding(start = 8.dp, top = 16.dp, bottom = 4.dp),
     )
 }
 
@@ -275,104 +195,79 @@ private fun SearchField(
     onQueryChange: (String) -> Unit,
     modifier: Modifier = Modifier,
 ) {
-    OutlinedTextField(
-        value = query,
-        onValueChange = onQueryChange,
-        modifier = modifier,
-        placeholder = { Text("Type to search…") },
-        leadingIcon = { Icon(Icons.Default.Search, contentDescription = null) },
-        singleLine = true,
-        shape = RoundedCornerShape(28.dp),
-        colors = OutlinedTextFieldDefaults.colors(
-            focusedContainerColor = Color.White.copy(alpha = 0.16f),
-            unfocusedContainerColor = Color.White.copy(alpha = 0.10f),
-            focusedBorderColor = Color.White.copy(alpha = 0.5f),
-            unfocusedBorderColor = Color.White.copy(alpha = 0.25f),
-            focusedTextColor = Color.White,
-            unfocusedTextColor = Color.White,
-            focusedLeadingIconColor = Color.White,
-            unfocusedLeadingIconColor = Color.White.copy(alpha = 0.7f),
-            cursorColor = Color.White,
-            focusedPlaceholderColor = Color.White.copy(alpha = 0.6f),
-            unfocusedPlaceholderColor = Color.White.copy(alpha = 0.6f),
-        ),
-        keyboardOptions = KeyboardOptions(imeAction = ImeAction.Search),
-        keyboardActions = KeyboardActions(onSearch = { }),
-    )
-}
-
-/** The app grid shown in the overview. */
-@Composable
-private fun AppGrid(
-    apps: List<AppEntry>,
-    onLaunch: (AppEntry) -> Unit,
-    wide: Boolean,
-    modifier: Modifier = Modifier,
-) {
-    if (apps.isEmpty()) {
-        Box(modifier = modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
-            Text(
-                "No applications found",
-                color = Color.White.copy(alpha = 0.7f),
-                style = MaterialTheme.typography.bodyLarge,
+    Row(
+        modifier = modifier
+            .height(48.dp)
+            .clip(RoundedCornerShape(24.dp))
+            .background(Color.White.copy(alpha = 0.14f))
+            .padding(horizontal = 16.dp),
+        verticalAlignment = Alignment.CenterVertically,
+    ) {
+        Icon(Icons.Default.Search, contentDescription = null, tint = Color.White.copy(alpha = 0.8f))
+        Spacer(Modifier.width(12.dp))
+        Box(Modifier.weight(1f)) {
+            if (query.isEmpty()) {
+                Text("Search apps", color = Color.White.copy(alpha = 0.6f), fontSize = 16.sp)
+            }
+            BasicTextField(
+                value = query,
+                onValueChange = onQueryChange,
+                singleLine = true,
+                textStyle = TextStyle(color = Color.White, fontSize = 16.sp),
+                cursorBrush = SolidColor(Color.White),
+                modifier = Modifier.fillMaxWidth(),
             )
         }
-        return
-    }
-
-    val columns = if (wide) 5 else 3
-    LazyVerticalGrid(
-        columns = GridCells.Fixed(columns),
-        modifier = modifier.fillMaxSize(),
-        contentPadding = PaddingValues(16.dp),
-        horizontalArrangement = Arrangement.spacedBy(20.dp),
-        verticalArrangement = Arrangement.spacedBy(20.dp),
-    ) {
-        items(apps, key = { it.id }) { app ->
-            AppTile(app = app, onClick = { onLaunch(app) })
+        if (query.isNotEmpty()) {
+            IconButton(onClick = { onQueryChange("") }, modifier = Modifier.size(32.dp)) {
+                Icon(Icons.Default.Close, contentDescription = "Clear", tint = Color.White)
+            }
         }
     }
 }
 
-/** A single app icon in the grid. */
+/** The icon the launcher draws for an app. */
+private fun iconFor(app: AppEntry): ImageVector = when (app.id) {
+    "terminal" -> Icons.Default.Terminal
+    "files" -> Icons.Default.Folder
+    "text-editor" -> Icons.Default.EditNote
+    "system-info" -> Icons.Default.Speed
+    "settings" -> Icons.Default.Settings
+    "store" -> Icons.Default.ShoppingBag
+    "gamepad" -> Icons.Default.SportsEsports
+    "console" -> Icons.Default.Code
+    else -> Icons.Default.Widgets
+}
+
+/** A single app in the grid. */
 @Composable
 fun AppTile(app: AppEntry, onClick: () -> Unit, modifier: Modifier = Modifier) {
     Column(
         modifier = modifier
             .clip(RoundedCornerShape(16.dp))
             .clickable { onClick() }
-            .padding(6.dp),
+            .padding(vertical = 10.dp, horizontal = 4.dp),
         horizontalAlignment = Alignment.CenterHorizontally,
     ) {
         Box(
             modifier = Modifier
-                .size(64.dp)
-                .clip(RoundedCornerShape(16.dp))
+                .size(60.dp)
+                .clip(RoundedCornerShape(18.dp))
                 .background(
                     Brush.linearGradient(
-                        listOf(
-                            Color(app.accent),
-                            Color(app.accent).copy(alpha = 0.75f),
-                        )
-                    )
-                )
-                .border(1.dp, Color.White.copy(alpha = 0.18f), RoundedCornerShape(16.dp)),
+                        listOf(Color(app.accent), Color(app.accent).copy(alpha = 0.78f)),
+                    ),
+                ),
             contentAlignment = Alignment.Center,
         ) {
-            Text(
-                text = app.icon,
-                color = Color.White,
-                fontSize = if (app.icon.length <= 2) 24.sp else 28.sp,
-                fontFamily = if (app.icon.length <= 2) FontFamily.Monospace else FontFamily.Default,
-                fontWeight = FontWeight.Bold,
-                textAlign = TextAlign.Center,
-            )
+            Icon(iconFor(app), contentDescription = null, tint = Color.White, modifier = Modifier.size(30.dp))
         }
-        Spacer(Modifier.height(6.dp))
+        Spacer(Modifier.height(8.dp))
         Text(
             text = app.name,
             color = Color.White,
-            fontSize = 12.sp,
+            fontSize = 13.sp,
+            fontWeight = FontWeight.Medium,
             maxLines = 1,
             overflow = TextOverflow.Ellipsis,
             textAlign = TextAlign.Center,
@@ -380,107 +275,45 @@ fun AppTile(app: AppEntry, onClick: () -> Unit, modifier: Modifier = Modifier) {
     }
 }
 
-/** The dash (Ubuntu dock) with favourite apps. */
+/** What the container is running on, read from the guest. */
 @Composable
-private fun Dash(
-    apps: List<AppEntry>,
-    onLaunch: (AppEntry) -> Unit,
-    vertical: Boolean,
-) {
-    // A row of icons has to fit the width of a phone, so the icons are
-    // smaller when the dash is horizontal and the row can be scrolled if
-    // there are more favourites than fit.
-    val iconSize = if (vertical) 48.dp else 40.dp
-    val spacing = if (vertical) 8.dp else 6.dp
-
-    Surface(
-        color = Color.Black.copy(alpha = 0.30f),
-        shape = RoundedCornerShape(20.dp),
-        modifier = Modifier.padding(12.dp),
+private fun SystemCard(state: UbuntuState, onRefresh: () -> Unit, modifier: Modifier = Modifier) {
+    val info = state.guestInfo
+    Column(
+        modifier = modifier
+            .fillMaxWidth()
+            .clip(RoundedCornerShape(20.dp))
+            .background(Color.Black.copy(alpha = 0.22f))
+            .padding(18.dp),
     ) {
-        if (vertical) {
-            Column(
-                modifier = Modifier.padding(8.dp),
-                verticalArrangement = Arrangement.spacedBy(spacing),
-                horizontalAlignment = Alignment.CenterHorizontally,
-            ) {
-                apps.forEach { DashIcon(it, iconSize) { onLaunch(it) } }
+        Row(verticalAlignment = Alignment.CenterVertically) {
+            UbuntuLogo(28.dp)
+            Spacer(Modifier.width(12.dp))
+            Column(Modifier.weight(1f)) {
+                Text(info.prettyName, color = Color.White, fontSize = 16.sp, fontWeight = FontWeight.Medium)
+                Text(
+                    "Running under proot on Android",
+                    color = Color.White.copy(alpha = 0.65f),
+                    fontSize = 12.sp,
+                )
             }
-        } else {
-            Row(
-                modifier = Modifier
-                    .padding(8.dp)
-                    .horizontalScroll(rememberScrollState()),
-                horizontalArrangement = Arrangement.spacedBy(spacing),
-                verticalAlignment = Alignment.CenterVertically,
-            ) {
-                apps.forEach { DashIcon(it, iconSize) { onLaunch(it) } }
+            IconButton(onClick = onRefresh) {
+                Icon(Icons.Default.Refresh, contentDescription = "Refresh", tint = Color.White.copy(alpha = 0.8f))
             }
         }
+        Spacer(Modifier.height(10.dp))
+        InfoRow("Architecture", info.architecture)
+        InfoRow("Kernel", info.kernel.substringBefore('-'))
+        InfoRow("Flatpak", info.flatpakVersion.removePrefix("Flatpak "))
+        InfoRow("Flathub", if (info.flathubRemotes.isEmpty()) "not configured" else "configured")
+        InfoRow("Storage", diskSummary(info.diskUsage))
     }
 }
 
-@Composable
-private fun DashIcon(app: AppEntry, size: androidx.compose.ui.unit.Dp, onClick: () -> Unit) {
-    Box(
-        modifier = Modifier
-            .size(size)
-            .clip(RoundedCornerShape(14.dp))
-            .background(Color(app.accent))
-            .clickable { onClick() },
-        contentAlignment = Alignment.Center,
-    ) {
-        Text(
-            text = app.icon,
-            color = Color.White,
-            fontSize = 20.sp,
-            fontFamily = if (app.icon.length <= 2) FontFamily.Monospace else FontFamily.Default,
-            fontWeight = FontWeight.Bold,
-        )
-    }
-}
-
-/** The home screen shown when the overview is closed. */
-@Composable
-private fun WelcomePanel(
-    state: UbuntuState,
-    onOpenStore: () -> Unit,
-    onRefresh: () -> Unit,
-    modifier: Modifier = Modifier,
-) {
-    Surface(
-        modifier = modifier,
-        color = Color.White.copy(alpha = 0.10f),
-        shape = RoundedCornerShape(20.dp),
-    ) {
-        Column(Modifier.padding(20.dp)) {
-            Text(
-                "Ubuntu 26.04 LTS",
-                color = Color.White,
-                fontSize = 26.sp,
-                fontWeight = FontWeight.Bold,
-            )
-            Spacer(Modifier.height(6.dp))
-            Text(
-                "A complete Linux system running on your phone.",
-                color = Color.White.copy(alpha = 0.85f),
-                style = MaterialTheme.typography.bodyMedium,
-            )
-            Spacer(Modifier.height(16.dp))
-
-            InfoRow("Kernel", state.guestInfo.kernel)
-            InfoRow("Architecture", state.guestInfo.architecture)
-            InfoRow("Flatpak", state.guestInfo.flatpakVersion)
-            InfoRow("Flathub", state.guestInfo.flathubRemotes.joinToString(", ").ifEmpty { "not configured" })
-            InfoRow("Disk", state.guestInfo.diskUsage)
-
-            Spacer(Modifier.height(16.dp))
-            Row(horizontalArrangement = Arrangement.spacedBy(10.dp)) {
-                PillButton("Ubuntu Software", onOpenStore)
-                PillButton("Refresh", onRefresh)
-            }
-        }
-    }
+/** "/dev/block/dm-40 7.8G 2.5G 5.2G 33% /" becomes "5.2G free of 7.8G". */
+private fun diskSummary(df: String): String {
+    val fields = df.trim().split(Regex("\\s+"))
+    return if (fields.size >= 4) "${fields[3]} free of ${fields[1]}" else df.ifBlank { "-" }
 }
 
 @Composable
@@ -488,14 +321,10 @@ private fun InfoRow(label: String, value: String) {
     Row(
         modifier = Modifier
             .fillMaxWidth()
-            .padding(vertical = 3.dp),
+            .padding(vertical = 4.dp),
         horizontalArrangement = Arrangement.SpaceBetween,
     ) {
-        Text(
-            label,
-            color = Color.White.copy(alpha = 0.72f),
-            fontSize = 13.sp,
-        )
+        Text(label, color = Color.White.copy(alpha = 0.65f), fontSize = 13.sp)
         Text(
             value,
             color = Color.White,
@@ -504,11 +333,28 @@ private fun InfoRow(label: String, value: String) {
             maxLines = 1,
             overflow = TextOverflow.Ellipsis,
             textAlign = TextAlign.End,
-            // The value takes what is left of the row, so a long kernel
-            // string is shortened instead of pushing the label around.
             modifier = Modifier
                 .weight(1f, fill = false)
                 .padding(start = 12.dp),
+        )
+    }
+}
+
+/** The Ubuntu "circle of friends", drawn rather than shipped as an image. */
+@Composable
+fun UbuntuLogo(size: androidx.compose.ui.unit.Dp) {
+    Box(
+        Modifier
+            .size(size)
+            .clip(CircleShape)
+            .background(UbuntuPalette.UbuntuOrange),
+        contentAlignment = Alignment.Center,
+    ) {
+        Box(
+            Modifier
+                .size(size * 0.42f)
+                .clip(CircleShape)
+                .background(Color.White),
         )
     }
 }
@@ -531,11 +377,9 @@ fun PillButton(label: String, onClick: () -> Unit) {
 fun rememberClock(): String {
     var text by remember { mutableStateOf("") }
     androidx.compose.runtime.LaunchedEffect(Unit) {
+        val format = java.text.DateFormat.getTimeInstance(java.text.DateFormat.SHORT)
         while (true) {
-            val cal = java.util.Calendar.getInstance()
-            val h = cal.get(java.util.Calendar.HOUR_OF_DAY)
-            val m = cal.get(java.util.Calendar.MINUTE)
-            text = String.format("%02d:%02d", h, m)
+            text = format.format(java.util.Date())
             kotlinx.coroutines.delay(10_000)
         }
     }

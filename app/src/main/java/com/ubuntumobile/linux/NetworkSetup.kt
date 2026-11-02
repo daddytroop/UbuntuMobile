@@ -109,6 +109,46 @@ object ContainerSetup {
     fun prepare(context: Context, paths: LinuxPaths) {
         NetworkSetup.configureDns(context, paths)
         ensureRuntimeDir(paths)
+        syncScripts(context, paths)
+    }
+
+    /** Where each bundled script lives inside the container. */
+    private val SCRIPT_TARGETS = mapOf(
+        "display-start.sh" to "usr/local/lib/linx/display-start.sh",
+        "desktop-start.sh" to "usr/local/lib/linx/desktop-start.sh",
+        "gamepad-helper.py" to "usr/local/lib/linx/gamepad-helper.py",
+        "tint2rc" to "usr/local/share/linx/tint2rc",
+        "nosandbox-bwrap" to "usr/local/lib/linx/nosandbox/bwrap",
+    )
+
+    /**
+     * Copy the display and desktop scripts from the APK into the rootfs.
+     *
+     * The rootfs carries copies from when it was built, but the APK's are
+     * newer whenever the app has been updated since Ubuntu was installed.
+     * Running this before every display start keeps them in step.
+     */
+    @Synchronized
+    fun syncScripts(context: Context, paths: LinuxPaths) {
+        if (!paths.root.isDirectory) return
+        for ((asset, target) in SCRIPT_TARGETS) {
+            try {
+                val dest = File(paths.root, target)
+                dest.parentFile?.mkdirs()
+                val bytes = context.assets.open("linx/$asset").use { it.readBytes() }
+                if (dest.isFile && dest.readBytes().contentEquals(bytes)) continue
+                val tmp = File(dest.parentFile, ".${dest.name}.new")
+                tmp.writeBytes(bytes)
+                android.system.Os.chmod(tmp.absolutePath, if (asset == "tint2rc") 0x1A4 else 0x1ED)
+                if (!tmp.renameTo(dest)) {
+                    dest.delete()
+                    tmp.renameTo(dest)
+                }
+                Log.i(TAG, "updated $target from the APK")
+            } catch (e: Exception) {
+                Log.w(TAG, "could not update $target", e)
+            }
+        }
     }
 
     /**

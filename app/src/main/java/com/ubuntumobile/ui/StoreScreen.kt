@@ -14,14 +14,19 @@ import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
+import androidx.compose.foundation.layout.widthIn
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.foundation.text.BasicTextField
+import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.automirrored.filled.ArrowBack
+import androidx.compose.material.icons.filled.Close
+import androidx.compose.material.icons.filled.Search
 import androidx.compose.material3.CircularProgressIndicator
+import androidx.compose.material3.Icon
+import androidx.compose.material3.IconButton
 import androidx.compose.material3.LinearProgressIndicator
-import androidx.compose.material3.MaterialTheme
-import androidx.compose.material3.OutlinedTextField
-import androidx.compose.material3.OutlinedTextFieldDefaults
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
@@ -34,11 +39,14 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.SolidColor
+import androidx.compose.ui.text.TextStyle
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import com.ubuntumobile.ui.theme.UbuntuPalette
+import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
 
 /**
@@ -61,24 +69,16 @@ fun StoreScreen(
     var message by remember { mutableStateOf<String?>(null) }
     val scope = rememberCoroutineScope()
 
-    LaunchedEffect(Unit) {
+    // Every search runs flatpak inside the container, which takes a while,
+    // so wait for the typing to pause instead of searching per keystroke.
+    // An empty query lists the catalogue.
+    LaunchedEffect(query) {
+        if (query.isNotBlank()) delay(450)
         loading = true
         results = try {
-            searchRemote("")
+            searchRemote(query.trim())
         } catch (e: Exception) {
             message = e.message ?: "Could not reach Flathub"
-            emptyList()
-        }
-        loading = false
-    }
-
-    LaunchedEffect(query) {
-        if (query.isBlank()) return@LaunchedEffect
-        loading = true
-        results = try {
-            searchRemote(query)
-        } catch (e: Exception) {
-            message = e.message ?: "Search failed"
             emptyList()
         }
         loading = false
@@ -89,73 +89,106 @@ fun StoreScreen(
             .fillMaxSize()
             .background(UbuntuPalette.LightBackground),
     ) {
-        // Header
-        Row(
-            modifier = Modifier
+        Column(
+            Modifier
                 .fillMaxWidth()
                 .background(UbuntuPalette.Aubergine)
-                .padding(horizontal = 16.dp, vertical = 14.dp),
-            verticalAlignment = Alignment.CenterVertically,
+                .padding(bottom = 16.dp),
         ) {
-            Text(
-                "Ubuntu Software",
-                color = Color.White,
-                fontSize = 20.sp,
-                fontWeight = FontWeight.Bold,
-                modifier = Modifier.weight(1f),
+            Row(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .height(56.dp)
+                    .padding(horizontal = 4.dp),
+                verticalAlignment = Alignment.CenterVertically,
+            ) {
+                IconButton(onClick = onClose) {
+                    Icon(Icons.AutoMirrored.Filled.ArrowBack, contentDescription = "Back", tint = Color.White)
+                }
+                Column(Modifier.weight(1f)) {
+                    Text("Ubuntu Software", color = Color.White, fontSize = 20.sp, fontWeight = FontWeight.Medium)
+                    Text("Apps from Flathub", color = Color.White.copy(alpha = 0.7f), fontSize = 12.sp)
+                }
+            }
+            StoreSearchField(
+                query = query,
+                onQueryChange = { query = it },
+                modifier = Modifier
+                    .widthIn(max = 720.dp)
+                    .fillMaxWidth()
+                    .padding(horizontal = 16.dp)
+                    .align(Alignment.CenterHorizontally),
             )
-            PillButton("Close", onClose)
         }
 
-        OutlinedTextField(
-            value = query,
-            onValueChange = { query = it },
-            modifier = Modifier
-                .fillMaxWidth()
-                .padding(16.dp),
-            placeholder = { Text("Search Flathub…") },
-            singleLine = true,
-            shape = RoundedCornerShape(12.dp),
-            colors = OutlinedTextFieldDefaults.colors(
-                focusedContainerColor = UbuntuPalette.LightSurface,
-                unfocusedContainerColor = UbuntuPalette.LightSurface,
-            ),
-        )
-
         if (loading) {
-            Box(Modifier.fillMaxWidth(), contentAlignment = Alignment.Center) {
-                CircularProgressIndicator(modifier = Modifier.padding(16.dp))
-            }
+            LinearProgressIndicator(
+                modifier = Modifier.fillMaxWidth(),
+                color = UbuntuPalette.UbuntuOrange,
+                trackColor = UbuntuPalette.LightSurfaceVariant,
+            )
         }
 
         message?.let { msg ->
+            Row(
+                Modifier
+                    .widthIn(max = 720.dp)
+                    .fillMaxWidth()
+                    .padding(start = 16.dp, end = 16.dp, top = 12.dp)
+                    .clip(RoundedCornerShape(12.dp))
+                    .background(UbuntuPalette.LightSurfaceVariant)
+                    .padding(start = 14.dp, top = 6.dp, bottom = 6.dp, end = 4.dp)
+                    .align(Alignment.CenterHorizontally),
+                verticalAlignment = Alignment.CenterVertically,
+            ) {
+                Text(
+                    msg,
+                    fontSize = 13.sp,
+                    color = UbuntuPalette.LightOnSurface,
+                    modifier = Modifier.weight(1f),
+                    maxLines = 4,
+                    overflow = TextOverflow.Ellipsis,
+                )
+                IconButton(onClick = { message = null }) {
+                    Icon(Icons.Default.Close, contentDescription = "Dismiss", tint = UbuntuPalette.LightOnSurfaceVariant)
+                }
+            }
+        }
+
+        if (!loading && results.isEmpty()) {
             Box(
                 Modifier
                     .fillMaxWidth()
-                    .padding(horizontal = 16.dp)
-                    .clip(RoundedCornerShape(10.dp))
-                    .background(UbuntuPalette.LightSurfaceVariant)
-                    .padding(12.dp)
+                    .padding(top = 48.dp),
+                contentAlignment = Alignment.Center,
             ) {
-                Text(msg, fontSize = 13.sp, color = UbuntuPalette.LightOnSurface)
+                Text(
+                    if (query.isBlank()) "Flathub could not be reached." else "No apps match “$query”.",
+                    color = UbuntuPalette.LightOnSurfaceVariant,
+                )
             }
         }
 
         LazyColumn(
-            modifier = Modifier.fillMaxSize(),
-            contentPadding = PaddingValues(horizontal = 16.dp, vertical = 4.dp),
+            modifier = Modifier
+                .fillMaxSize()
+                .widthIn(max = 720.dp)
+                .align(Alignment.CenterHorizontally),
+            contentPadding = PaddingValues(horizontal = 16.dp, vertical = 12.dp),
             verticalArrangement = Arrangement.spacedBy(8.dp),
         ) {
             items(results, key = { it.id }) { app ->
                 StoreRow(
                     app = app,
                     busy = installing == app.id,
+                    enabled = installing == null,
                     onInstall = {
                         scope.launch {
                             installing = app.id
-                            message = "Installing ${app.name}…"
+                            message = "Installing ${app.name}… this can take several minutes."
                             val out = installApp(app.id)
-                            message = out.trim().takeLast(220).ifEmpty { "Done" }
+                            message = out.trim().lines().lastOrNull { it.isNotBlank() }
+                                ?.take(220) ?: "${app.name} is installed."
                             installing = null
                         }
                     },
@@ -166,37 +199,85 @@ fun StoreScreen(
 }
 
 @Composable
-private fun StoreRow(app: FlatpakApp, busy: Boolean, onInstall: () -> Unit) {
+private fun StoreSearchField(
+    query: String,
+    onQueryChange: (String) -> Unit,
+    modifier: Modifier = Modifier,
+) {
+    Row(
+        modifier = modifier
+            .height(48.dp)
+            .clip(RoundedCornerShape(24.dp))
+            .background(Color.White)
+            .padding(horizontal = 16.dp),
+        verticalAlignment = Alignment.CenterVertically,
+    ) {
+        Icon(Icons.Default.Search, contentDescription = null, tint = UbuntuPalette.LightOnSurfaceVariant)
+        Spacer(Modifier.width(12.dp))
+        Box(Modifier.weight(1f)) {
+            if (query.isEmpty()) {
+                Text("Search Flathub", color = UbuntuPalette.LightOnSurfaceVariant, fontSize = 16.sp)
+            }
+            BasicTextField(
+                value = query,
+                onValueChange = onQueryChange,
+                singleLine = true,
+                textStyle = TextStyle(color = UbuntuPalette.LightOnSurface, fontSize = 16.sp),
+                cursorBrush = SolidColor(UbuntuPalette.UbuntuOrange),
+                modifier = Modifier.fillMaxWidth(),
+            )
+        }
+        if (query.isNotEmpty()) {
+            IconButton(onClick = { onQueryChange("") }, modifier = Modifier.size(32.dp)) {
+                Icon(Icons.Default.Close, contentDescription = "Clear", tint = UbuntuPalette.LightOnSurfaceVariant)
+            }
+        }
+    }
+}
+
+/** A stable colour per app, so the letter tiles are told apart at a glance. */
+private val AVATAR_COLOURS = listOf(
+    0xFFE95420, 0xFF77216F, 0xFF3584E4, 0xFF26A269, 0xFFC64600, 0xFF9141AC, 0xFF1C71D8, 0xFF5E5C64,
+)
+
+@Composable
+private fun StoreRow(app: FlatpakApp, busy: Boolean, enabled: Boolean, onInstall: () -> Unit) {
+    val colour = Color(AVATAR_COLOURS[Math.floorMod(app.id.hashCode(), AVATAR_COLOURS.size)])
     Row(
         modifier = Modifier
             .fillMaxWidth()
-            .clip(RoundedCornerShape(14.dp))
+            .clip(RoundedCornerShape(16.dp))
             .background(UbuntuPalette.LightSurface)
             .padding(12.dp),
         verticalAlignment = Alignment.CenterVertically,
     ) {
         Box(
             modifier = Modifier
-                .size(44.dp)
-                .clip(RoundedCornerShape(12.dp))
-                .background(UbuntuPalette.Aubergine),
+                .size(48.dp)
+                .clip(RoundedCornerShape(14.dp))
+                .background(colour),
             contentAlignment = Alignment.Center,
         ) {
-            Text("📦", fontSize = 20.sp)
+            Text(
+                app.name.firstOrNull { it.isLetterOrDigit() }?.uppercase() ?: "?",
+                color = Color.White,
+                fontSize = 22.sp,
+                fontWeight = FontWeight.Bold,
+            )
         }
-        Spacer(Modifier.width(12.dp))
+        Spacer(Modifier.width(14.dp))
         Column(Modifier.weight(1f)) {
             Text(
                 app.name,
-                fontSize = 15.sp,
+                fontSize = 16.sp,
                 fontWeight = FontWeight.Medium,
                 color = UbuntuPalette.LightOnSurface,
                 maxLines = 1,
                 overflow = TextOverflow.Ellipsis,
             )
             Text(
-                app.id,
-                fontSize = 11.sp,
+                listOf(app.version, app.id).filter { it.isNotBlank() && it != "-" }.joinToString(" · "),
+                fontSize = 12.sp,
                 color = UbuntuPalette.LightOnSurfaceVariant,
                 maxLines = 1,
                 overflow = TextOverflow.Ellipsis,
@@ -206,9 +287,16 @@ private fun StoreRow(app: FlatpakApp, busy: Boolean, onInstall: () -> Unit) {
         Box(
             modifier = Modifier
                 .clip(RoundedCornerShape(20.dp))
-                .background(if (busy) UbuntuPalette.LightSurfaceVariant else UbuntuPalette.UbuntuOrange)
-                .clickable(enabled = !busy) { onInstall() }
-                .padding(horizontal = 16.dp, vertical = 8.dp),
+                .background(
+                    when {
+                        busy -> UbuntuPalette.LightSurfaceVariant
+                        enabled -> UbuntuPalette.UbuntuOrange
+                        else -> UbuntuPalette.LightOutline
+                    },
+                )
+                .clickable(enabled = enabled && !busy) { onInstall() }
+                .padding(horizontal = 18.dp, vertical = 9.dp),
+            contentAlignment = Alignment.Center,
         ) {
             if (busy) {
                 CircularProgressIndicator(

@@ -156,6 +156,41 @@ android {
     }
 }
 
+// The display and desktop scripts also ship inside the APK, and the app
+// copies them into the container every time it starts the display. A fix to
+// one of them then reaches the phone with the next APK, without rebuilding
+// the 400 MB rootfs or reinstalling Ubuntu.
+abstract class BundleLinxScripts : DefaultTask() {
+    @get:InputFiles
+    abstract val scripts: ConfigurableFileCollection
+
+    @get:OutputDirectory
+    abstract val outputDir: DirectoryProperty
+
+    @TaskAction
+    fun copy() {
+        val dir = outputDir.get().asFile.resolve("linx")
+        dir.deleteRecursively()
+        dir.mkdirs()
+        // A Windows checkout may have given them CRLF line endings, which
+        // bash inside the container cannot run.
+        scripts.files.forEach { dir.resolve(it.name).writeText(it.readText().replace("\r\n", "\n")) }
+    }
+}
+
+val linxScripts = tasks.register<BundleLinxScripts>("bundleLinxScripts") {
+    scripts.from(
+        listOf("display-start.sh", "desktop-start.sh", "tint2rc", "gamepad-helper.py", "nosandbox-bwrap")
+            .map { rootProject.file("tools/$it") }
+    )
+}
+
+androidComponents {
+    onVariants { variant ->
+        variant.sources.assets?.addGeneratedSourceDirectory(linxScripts, BundleLinxScripts::outputDir)
+    }
+}
+
 dependencies {
     implementation(libs.androidx.core.ktx)
     implementation(libs.androidx.lifecycle.runtime.ktx)

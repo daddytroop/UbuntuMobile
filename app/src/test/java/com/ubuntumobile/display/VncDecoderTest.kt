@@ -19,8 +19,9 @@ class VncDecoderTest {
         encoding: Int,
         format: VncClient.PixelFormat =
             VncClient.PixelFormat(32, 24, false, true, 255, 255, 255, 16, 8, 0),
+        hextileSubrects: Boolean = false,
     ): Pair<IntArray, IntArray> {
-        val server = FakeVncServer(encoding = encoding, format = format)
+        val server = FakeVncServer(encoding = encoding, format = format, hextileSubrects = hextileSubrects)
         server.start()
         try {
             val client = VncClient("127.0.0.1", server.port)
@@ -45,8 +46,13 @@ class VncDecoderTest {
         }
     }
 
-    private fun assertMatches(label: String, encoding: Int, format: VncClient.PixelFormat) {
-        val (decoded, expected) = decodeWith(encoding, format)
+    private fun assertMatches(
+        label: String,
+        encoding: Int,
+        format: VncClient.PixelFormat,
+        hextileSubrects: Boolean = false,
+    ) {
+        val (decoded, expected) = decodeWith(encoding, format, hextileSubrects)
         assertEquals("$label: framebuffer size", expected.size, decoded.size)
         var mismatches = 0
         for (i in expected.indices) {
@@ -73,6 +79,17 @@ class VncDecoderTest {
     }
 
     @Test
+    fun decodesHextileSubrectanglesExactly() {
+        // Background, solid tiles and coloured sub-rectangles: the count is
+        // a byte of its own and each sub-rectangle is two bytes of nibbles.
+        assertMatches(
+            "hextile-subrects/32bpp-bgrx", 5,
+            VncClient.PixelFormat(32, 24, false, true, 255, 255, 255, 16, 8, 0),
+            hextileSubrects = true,
+        )
+    }
+
+    @Test
     fun decodesBigEndianFormat() {
         assertMatches(
             "raw/32bpp-bigendian", 0,
@@ -94,6 +111,61 @@ class VncDecoderTest {
             "raw/32bpp-rgbx", 0,
             VncClient.PixelFormat(32, 24, false, true, 255, 255, 255, 0, 8, 16),
         )
+    }
+
+    @Test
+    fun skipsClipboardMessagesWithoutLosingSync() {
+        // x11vnc sends ServerCutText whenever the clipboard changes. It has
+        // three bytes of padding before its length; missing them shifts
+        // every following message.
+        val server = FakeVncServer(sendCutText = true)
+        server.start()
+        try {
+            val client = VncClient("127.0.0.1", server.port)
+            client.connect()
+            val frames = CountDownLatch(3)
+            client.onUpdate = { frames.countDown() }
+            var failure: Throwable? = null
+            Thread {
+                try { client.runLoop() } catch (e: Throwable) { failure = e }
+            }.apply { isDaemon = true; start() }
+            client.requestFullUpdate()
+            assertTrue(
+                "frames stopped after a clipboard message: $failure",
+                frames.await(10, TimeUnit.SECONDS),
+            )
+            assertEquals(server.expectedDecoded().toList(), client.framebuffer.toList())
+            client.close()
+        } finally {
+            server.stop()
+        }
+    }
+
+    @Test
+    fun keyEventsHaveTheRightLengthSoLaterMessagesStillParse() {
+        // A key event is 8 bytes. One byte short and the server reads the
+        // next message from the wrong place (x11vnc drops the client).
+        val server = FakeVncServer()
+        server.start()
+        try {
+            val client = VncClient("127.0.0.1", server.port)
+            client.connect()
+            client.sendKey(0x6c, true)
+            client.sendKey(0x6c, false)
+            client.sendPointer(10, 20, 1)
+            val deadline = System.currentTimeMillis() + 5000
+            while (server.pointerEvents.isEmpty() && System.currentTimeMillis() < deadline) {
+                Thread.sleep(20)
+            }
+            assertEquals(listOf(0x6c, 0x6c), server.keyEvents.toList())
+            val pointer = server.pointerEvents.single()
+            assertEquals(1, pointer[0].toInt())
+            assertEquals(10, ((pointer[1].toInt() and 0xFF) shl 8) or (pointer[2].toInt() and 0xFF))
+            assertEquals(20, ((pointer[3].toInt() and 0xFF) shl 8) or (pointer[4].toInt() and 0xFF))
+            client.close()
+        } finally {
+            server.stop()
+        }
     }
 
     @Test
