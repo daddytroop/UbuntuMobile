@@ -5,3 +5,5 @@
 tools/tint2rc text eol=lf
 gradlew   text eol=lf
 tools/nosandbox-bwrap text eol=lf
+tools/firefox text eol=lf
+tools/*.xml text eol=lf

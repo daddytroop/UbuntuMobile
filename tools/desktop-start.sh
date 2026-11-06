@@ -19,7 +19,7 @@ DESKTOP="${1:-xfce}"
 
 # The panel layout ships with the app; it is installed over the user's once
 # per version, so an update can change it. Bump this when it changes.
-PANEL_VERSION=1
+PANEL_VERSION=2
 
 wm_is_running() {
   # A window manager that has taken over sets this on the root window.

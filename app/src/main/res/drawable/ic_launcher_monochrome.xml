@@ -1,0 +1,28 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- The terminal window in one colour, for Android's themed icons. -->
+<vector xmlns:android="http://schemas.android.com/apk/res/android"
+    android:width="108dp"
+    android:height="108dp"
+    android:viewportWidth="108"
+    android:viewportHeight="108">
+
+    <!-- window outline -->
+    <path
+        android:pathData="M35,34h38a6,6 0,0 1,6 6v28a6,6 0,0 1,-6 6h-38a6,6 0,0 1,-6 -6v-28a6,6 0,0 1,6 -6z"
+        android:strokeColor="#FF000000"
+        android:strokeWidth="3" />
+
+    <!-- title bar -->
+    <path
+        android:pathData="M29,44h50"
+        android:strokeColor="#FF000000"
+        android:strokeWidth="3" />
+
+    <!-- prompt -->
+    <path
+        android:pathData="M37,51.5l7,5.5l-7,5.5M49,63h12"
+        android:strokeColor="#FF000000"
+        android:strokeWidth="3.2"
+        android:strokeLineCap="round"
+        android:strokeLineJoin="round" />
+</vector>

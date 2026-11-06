@@ -1,0 +1,211 @@
+package com.ubuntumobile.ui
+
+import androidx.compose.foundation.background
+import androidx.compose.foundation.border
+import androidx.compose.foundation.clickable
+import androidx.compose.foundation.layout.Arrangement
+import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.Row
+import androidx.compose.foundation.layout.Spacer
+import androidx.compose.foundation.layout.fillMaxSize
+import androidx.compose.foundation.layout.fillMaxWidth
+import androidx.compose.foundation.layout.height
+import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.layout.width
+import androidx.compose.foundation.layout.widthIn
+import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.foundation.verticalScroll
+import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.automirrored.filled.ArrowBack
+import androidx.compose.material3.CircularProgressIndicator
+import androidx.compose.material3.Icon
+import androidx.compose.material3.IconButton
+import androidx.compose.material3.Switch
+import androidx.compose.material3.SwitchDefaults
+import androidx.compose.material3.Text
+import androidx.compose.runtime.Composable
+import androidx.compose.ui.Alignment
+import androidx.compose.ui.Modifier
+import androidx.compose.ui.draw.clip
+import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.unit.dp
+import androidx.compose.ui.unit.sp
+import androidx.compose.foundation.layout.size
+import com.ubuntumobile.ui.theme.UbuntuPalette
+
+/**
+ * How big the desktop is drawn on the phone. The X screen's short side is
+ * this many pixels, with everything doubled; more pixels means smaller
+ * text and windows, and more room.
+ */
+enum class DesktopSize(val label: String, val detail: String, val shortSide: Int) {
+    COMPACT("Compact", "Most room; small text", 1080),
+    STANDARD("Standard", "Sized for a 6-inch phone", 900),
+    LARGE("Large", "Biggest text and buttons", 720),
+}
+
+/** The app's own settings, outside the Linux desktop. */
+@Composable
+fun SettingsScreen(
+    desktopSize: DesktopSize,
+    onDesktopSize: (DesktopSize) -> Unit,
+    fullScreen: Boolean,
+    onFullScreen: (Boolean) -> Unit,
+    /** Firefox's state: null while unknown. */
+    browserInstalled: Boolean?,
+    browserBusy: Boolean,
+    browserNote: String?,
+    onInstallBrowser: () -> Unit,
+    versionName: String,
+    ubuntuVersion: String,
+    onClose: () -> Unit,
+    modifier: Modifier = Modifier,
+) {
+    Column(
+        modifier
+            .fillMaxSize()
+            .background(UbuntuPalette.LightBackground),
+    ) {
+        Row(
+            Modifier
+                .fillMaxWidth()
+                .background(UbuntuPalette.Aubergine)
+                .height(64.dp)
+                .padding(horizontal = 4.dp),
+            verticalAlignment = Alignment.CenterVertically,
+        ) {
+            IconButton(onClick = onClose) {
+                Icon(Icons.AutoMirrored.Filled.ArrowBack, contentDescription = "Back", tint = Color.White)
+            }
+            Text("Settings", color = Color.White, fontSize = 20.sp, fontWeight = FontWeight.Medium)
+        }
+
+        Column(
+            Modifier
+                .fillMaxWidth()
+                .verticalScroll(rememberScrollState())
+                .padding(16.dp)
+                .widthIn(max = 720.dp)
+                .align(Alignment.CenterHorizontally),
+            verticalArrangement = Arrangement.spacedBy(16.dp),
+        ) {
+            Card("Desktop size", "How big the Linux desktop is drawn on the phone. A monitor always gets a normal desktop.") {
+                DesktopSize.entries.forEach { size ->
+                    val selected = size == desktopSize
+                    Row(
+                        Modifier
+                            .fillMaxWidth()
+                            .padding(vertical = 4.dp)
+                            .clip(RoundedCornerShape(12.dp))
+                            .border(
+                                if (selected) 2.dp else 1.dp,
+                                if (selected) UbuntuPalette.UbuntuOrange else UbuntuPalette.LightOutline,
+                                RoundedCornerShape(12.dp),
+                            )
+                            .clickable { onDesktopSize(size) }
+                            .padding(horizontal = 14.dp, vertical = 12.dp),
+                        verticalAlignment = Alignment.CenterVertically,
+                    ) {
+                        Column(Modifier.weight(1f)) {
+                            Text(size.label, fontSize = 15.sp, fontWeight = FontWeight.Medium, color = UbuntuPalette.LightOnSurface)
+                            Text(size.detail, fontSize = 12.sp, color = UbuntuPalette.LightOnSurfaceVariant)
+                        }
+                        if (selected) {
+                            Text("✓", color = UbuntuPalette.UbuntuOrange, fontSize = 18.sp, fontWeight = FontWeight.Bold)
+                        }
+                    }
+                }
+            }
+
+            Card("Screen", null) {
+                Row(verticalAlignment = Alignment.CenterVertically) {
+                    Column(Modifier.weight(1f)) {
+                        Text("Full screen", fontSize = 15.sp, fontWeight = FontWeight.Medium, color = UbuntuPalette.LightOnSurface)
+                        Text(
+                            "Hide the status and navigation bars on the desktop. Swipe from an edge to see them.",
+                            fontSize = 12.sp,
+                            color = UbuntuPalette.LightOnSurfaceVariant,
+                        )
+                    }
+                    Spacer(Modifier.width(12.dp))
+                    Switch(
+                        checked = fullScreen,
+                        onCheckedChange = onFullScreen,
+                        colors = SwitchDefaults.colors(checkedTrackColor = UbuntuPalette.UbuntuOrange),
+                    )
+                }
+            }
+
+            Card("Web browser", null) {
+                Row(verticalAlignment = Alignment.CenterVertically) {
+                    Column(Modifier.weight(1f)) {
+                        Text("Firefox", fontSize = 15.sp, fontWeight = FontWeight.Medium, color = UbuntuPalette.LightOnSurface)
+                        Text(
+                            browserNote ?: when (browserInstalled) {
+                                true -> "Installed, and the desktop's default browser"
+                                false -> "Not installed yet - about 80 MB to download"
+                                null -> "Checking…"
+                            },
+                            fontSize = 12.sp,
+                            color = UbuntuPalette.LightOnSurfaceVariant,
+                        )
+                    }
+                    if (browserBusy) {
+                        CircularProgressIndicator(
+                            modifier = Modifier.size(24.dp),
+                            strokeWidth = 2.dp,
+                            color = UbuntuPalette.UbuntuOrange,
+                        )
+                    } else if (browserInstalled == false) {
+                        Text(
+                            "Install",
+                            color = Color.White,
+                            fontSize = 13.sp,
+                            fontWeight = FontWeight.Medium,
+                            modifier = Modifier
+                                .clip(RoundedCornerShape(20.dp))
+                                .background(UbuntuPalette.UbuntuOrange)
+                                .clickable(onClick = onInstallBrowser)
+                                .padding(horizontal = 18.dp, vertical = 9.dp),
+                        )
+                    }
+                }
+            }
+
+            Card("About", null) {
+                AboutLine("UbuntuMobile", versionName)
+                AboutLine("Linux", ubuntuVersion)
+                AboutLine("Desktop", "XFCE on Xvnc")
+            }
+        }
+    }
+}
+
+@Composable
+private fun Card(title: String, subtitle: String?, content: @Composable () -> Unit) {
+    Column(
+        Modifier
+            .fillMaxWidth()
+            .clip(RoundedCornerShape(16.dp))
+            .background(UbuntuPalette.LightSurface)
+            .padding(16.dp),
+    ) {
+        Text(title, fontSize = 13.sp, fontWeight = FontWeight.Medium, color = UbuntuPalette.UbuntuOrange)
+        if (subtitle != null) {
+            Spacer(Modifier.height(4.dp))
+            Text(subtitle, fontSize = 12.sp, color = UbuntuPalette.LightOnSurfaceVariant)
+        }
+        Spacer(Modifier.height(10.dp))
+        content()
+    }
+}
+
+@Composable
+private fun AboutLine(label: String, value: String) {
+    Row(Modifier.fillMaxWidth().padding(vertical = 4.dp)) {
+        Text(label, fontSize = 14.sp, color = UbuntuPalette.LightOnSurfaceVariant, modifier = Modifier.weight(1f))
+        Text(value, fontSize = 14.sp, color = UbuntuPalette.LightOnSurface)
+    }
+}

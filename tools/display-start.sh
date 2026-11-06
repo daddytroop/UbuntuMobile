@@ -204,6 +204,15 @@ for _ in 1 2 3 4 5 6 7 8 9 10 11 12 13 14 15; do
         echo "FileManager=thunar"
       } >"$HELPERS"
     fi
+    # The web browser: Firefox (or GNOME Web on 32-bit ARM), once the app
+    # has installed it. "Open link" and the panel's browser button use it.
+    BROWSER=""
+    [ -x /usr/lib/firefox/firefox ] && BROWSER=firefox
+    [ -z "$BROWSER" ] && command -v epiphany >/dev/null 2>&1 && BROWSER=epiphany
+    if [ -n "$BROWSER" ] && ! grep -q "^WebBrowser=$BROWSER$" "$HELPERS"; then
+      sed -i '/^WebBrowser=/d' "$HELPERS"
+      echo "WebBrowser=$BROWSER" >>"$HELPERS"
+    fi
 
     # The X screen is sized like a normal desktop screen (the phone's
     # aspect ratio, short side 720 pixels), not like the phone's display.

@@ -15,6 +15,8 @@ It talks to X through ctypes, so it needs nothing beyond Python and libX11,
 and it waits for X events rather than polling.
 """
 import ctypes
+import select
+import time
 import sys
 
 SCALE_FILE = "/tmp/linx-ui-scale"
@@ -152,10 +154,30 @@ if "--all" in sys.argv:
             maximize(w)
     sys.exit(0)
 
+x11.XConnectionNumber.argtypes = [ctypes.c_void_p]
+x11.XPending.argtypes = [ctypes.c_void_p]
+
+# Some applications (Firefox) size their window again just after it
+# appears, which undoes the maximize; so new windows are maximized once
+# more a little later.
+AGAIN_AFTER = (0.8, 2.5)
+
 known = set(clients())
 x11.XSelectInput(display, root, PROPERTY_CHANGE_MASK)
 event = Event()
+fd = x11.XConnectionNumber(display)
+pending = []  # (when, window)
 while True:
+    now = time.monotonic()
+    due = [w for when, w in pending if when <= now]
+    pending = [(when, w) for when, w in pending if when > now]
+    for w in due:
+        if w in known and on_phone():
+            maximize(w)
+    if not x11.XPending(display):
+        timeout = min((when for when, _ in pending), default=now + 3600) - now
+        select.select([fd], [], [], max(timeout, 0))
+        continue
     x11.XNextEvent(display, ctypes.byref(event))
     if event.type != PROPERTY_NOTIFY or event.property.atom != CLIENT_LIST:
         continue
@@ -166,3 +188,4 @@ while True:
         for w in new:
             if is_app_window(w):
                 maximize(w)
+                pending += [(time.monotonic() + delay, w) for delay in AGAIN_AFTER]

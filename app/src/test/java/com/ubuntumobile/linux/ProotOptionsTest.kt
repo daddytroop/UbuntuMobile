@@ -63,7 +63,7 @@ class ProotOptionsTest {
         val files = payloadFiles()
         assumeTrue("no proot payload found in the source tree", files.isNotEmpty())
 
-        val args = LinuxRuntime.baseArgsFor("/data/data/com.ubuntumobile/files/linux", "/shared", "/data/data/com.ubuntumobile/files/tmp")
+        val args = LinuxRuntime.baseArgsFor("/data/data/com.ubuntumobile/files/linux", "/shared", "/data/data/com.ubuntumobile/files/tmp", "/data/data/com.ubuntumobile/files/shm")
 
         for ((abi, file) in files) {
             val strings = stringsOf(file)
@@ -88,7 +88,7 @@ class ProotOptionsTest {
     fun theCommandLineNeverUsesABareDoubleDash() {
         // proot has no end-of-options marker. The Termux build treats a bare
         // "--" as an unknown option and refuses to start.
-        val args = LinuxRuntime.baseArgsFor("/data/data/com.ubuntumobile/files/linux", "/shared", "/data/data/com.ubuntumobile/files/tmp")
+        val args = LinuxRuntime.baseArgsFor("/data/data/com.ubuntumobile/files/linux", "/shared", "/data/data/com.ubuntumobile/files/tmp", "/data/data/com.ubuntumobile/files/shm")
         assertTrue(
             "a bare '--' must not be passed to proot",
             args.none { it == "--" },

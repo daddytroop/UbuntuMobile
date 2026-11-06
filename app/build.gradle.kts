@@ -182,7 +182,8 @@ val linxScripts = tasks.register<BundleLinxScripts>("bundleLinxScripts") {
     scripts.from(
         listOf(
             "display-start.sh", "desktop-start.sh", "display-scale.sh", "tint2rc", "gamepad-helper.py",
-            "nosandbox-bwrap", "linx-windows.py", "xfce4-panel.xml",
+            "nosandbox-bwrap", "linx-windows.py", "xfce4-panel.xml", "apt-install.sh",
+            "install-firefox.sh", "firefox",
         )
             .map { rootProject.file("tools/$it") }
     )

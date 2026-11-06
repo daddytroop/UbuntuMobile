@@ -28,6 +28,7 @@ import androidx.compose.material.icons.filled.Close
 import androidx.compose.material.icons.filled.Code
 import androidx.compose.material.icons.filled.EditNote
 import androidx.compose.material.icons.filled.Folder
+import androidx.compose.material.icons.filled.Public
 import androidx.compose.material.icons.filled.Refresh
 import androidx.compose.material.icons.filled.Search
 import androidx.compose.material.icons.filled.Settings
@@ -229,6 +230,7 @@ private fun SearchField(
 /** The icon the launcher draws for an app. */
 private fun iconFor(app: AppEntry): ImageVector = when (app.id) {
     "terminal" -> Icons.Default.Terminal
+    "browser" -> Icons.Default.Public
     "files" -> Icons.Default.Folder
     "text-editor" -> Icons.Default.EditNote
     "system-info" -> Icons.Default.Speed

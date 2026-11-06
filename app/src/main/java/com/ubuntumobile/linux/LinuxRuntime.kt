@@ -31,7 +31,10 @@ class LinuxRuntime(private val paths: LinuxPaths) {
      * the Termux build rejects it with "unknown option '--'".
      */
     internal fun baseArgs(): List<String> =
-        baseArgsFor(paths.root.absolutePath, paths.sdcardDir.absolutePath, paths.sharedTmpDir.absolutePath)
+        baseArgsFor(
+            paths.root.absolutePath, paths.sdcardDir.absolutePath,
+            paths.sharedTmpDir.absolutePath, paths.shmDir.absolutePath,
+        )
 
 
     /** Environment passed to guest processes. */
@@ -280,7 +283,7 @@ class LinuxRuntime(private val paths: LinuxPaths) {
          * bare "--" for instance). A mismatch is invisible on the host and
          * fatal on the phone.
          */
-        internal fun baseArgsFor(root: String, sdcard: String, sharedTmp: String): List<String> = listOf(
+        internal fun baseArgsFor(root: String, sdcard: String, sharedTmp: String, shm: String): List<String> = listOf(
             "-r", root,
             "-0",
             // Android forbids hard links in app storage. The X server takes
@@ -292,6 +295,10 @@ class LinuxRuntime(private val paths: LinuxPaths) {
             // fails, MIT-SHM is unusable, and GTK windows never paint.
             "--sysvipc",
             "-b", "/dev",
+            // Android has no /dev/shm, where programs make the shared memory
+            // they pass between processes (shm_open). Firefox's parent
+            // process crashes without it. A folder of the app's stands in.
+            "-b", "$shm:/dev/shm",
             "-b", "/proc",
             "-b", "/sys",
             "-b", "/data",

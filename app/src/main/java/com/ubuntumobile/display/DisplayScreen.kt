@@ -86,37 +86,43 @@ class DisplayActions(
     val onReconnect: () -> Unit = {},
     /** Move the desktop to the external monitor; null when there is none. */
     val onUseMonitor: (() -> Unit)? = null,
+    val onOpenBrowser: () -> Unit = {},
+    val onOpenSettings: () -> Unit = {},
+    /** What is happening with the browser, e.g. "Installing Firefox…"; null when it is ready. */
+    val browserNote: String? = null,
 )
 
 /**
  * The Linux display: an X11 desktop running inside the Ubuntu container,
  * streamed to the phone over the RFB protocol.
  *
- * In portrait the actions sit in a bar above the desktop; in landscape,
- * where height is short, they move to a rail at the side.
+ * The desktop takes the whole screen. Everything that belongs to the app
+ * rather than to Linux - the app grid, the store, the keyboard, settings -
+ * sits behind one small floating button, which opens a side menu.
  */
 @Composable
 fun DisplayScreen(
     session: DisplaySession,
-    landscape: Boolean,
     actions: DisplayActions,
     /** Reports the size, in pixels, of the area the desktop is drawn in. */
     onCanvasSize: (IntSize) -> Unit = {},
     modifier: Modifier = Modifier,
 ) {
-    val surface: @Composable (Modifier) -> Unit = { m ->
-        DesktopSurface(session = session, onCanvasSize = onCanvasSize, modifier = m, showHint = true)
-    }
-    if (landscape) {
-        Row(modifier.fillMaxSize().background(UbuntuPalette.DarkBackground)) {
-            DisplayRail(session.connected, actions)
-            surface(Modifier.weight(1f).fillMaxHeight())
-        }
-    } else {
-        Column(modifier.fillMaxSize().background(UbuntuPalette.DarkBackground)) {
-            DisplayToolbar(session.connected, actions)
-            surface(Modifier.weight(1f).fillMaxWidth())
-        }
+    var menuOpen by remember { mutableStateOf(false) }
+    Box(modifier.fillMaxSize().background(Color.Black)) {
+        DesktopSurface(
+            session = session,
+            onCanvasSize = onCanvasSize,
+            modifier = Modifier.fillMaxSize(),
+            showHint = true,
+        )
+        MenuHandle(connected = session.connected, onClick = { menuOpen = true })
+        DesktopMenu(
+            open = menuOpen,
+            connected = session.connected,
+            actions = actions,
+            onDismiss = { menuOpen = false },
+        )
     }
 }
 
@@ -132,9 +138,12 @@ fun DesktopSurface(
     modifier: Modifier = Modifier,
     showHint: Boolean = false,
 ) {
-    var hintVisible by remember { mutableStateOf(showHint) }
+    // The gesture hint is shown once per run, not every time the desktop
+    // comes back from another screen.
+    var hintVisible by remember { mutableStateOf(showHint && !hintShown) }
     LaunchedEffect(session.connected) {
-        if (session.connected) {
+        if (session.connected && hintVisible) {
+            hintShown = true
             delay(6000)
             hintVisible = false
         }
@@ -318,74 +327,14 @@ fun DesktopSurface(
     }
 }
 
+/** Whether the gesture hint has been shown in this run of the app. */
+private var hintShown = false
+
 /** The RFB button mask for the mouse buttons that are down. */
 fun buttonMask(buttons: PointerButtons): Int =
     (if (buttons.isPrimaryPressed) 1 else 0) or
         (if (buttons.isTertiaryPressed) 2 else 0) or
         (if (buttons.isSecondaryPressed) 4 else 0)
-
-/**
- * The strip above the Linux desktop (portrait).
- *
- * A phone is too narrow for every action, so the ones used all the time
- * stay visible and the rest live in an overflow menu.
- */
-@Composable
-private fun DisplayToolbar(connected: Boolean, actions: DisplayActions) {
-    Row(
-        modifier = Modifier
-            .fillMaxWidth()
-            .height(48.dp)
-            .background(UbuntuPalette.DarkSurface)
-            .padding(horizontal = 4.dp),
-        verticalAlignment = Alignment.CenterVertically,
-    ) {
-        ToolbarButton(Icons.Default.Apps, "Apps", actions.onShowLauncher)
-        StatusDot(connected)
-        Spacer(Modifier.width(8.dp))
-        Text(
-            "Ubuntu",
-            color = Color.White,
-            fontSize = 15.sp,
-            fontWeight = FontWeight.Medium,
-            maxLines = 1,
-            overflow = TextOverflow.Ellipsis,
-            modifier = Modifier.weight(1f),
-        )
-        actions.onUseMonitor?.let { ToolbarButton(Icons.Default.Cast, "Use the monitor", it) }
-        ToolbarButton(Icons.Default.Terminal, "Terminal", actions.onOpenTerminal)
-        ToolbarButton(Icons.Default.Keyboard, "Keyboard", actions.onShowKeyboard)
-        OverflowMenu(actions)
-    }
-}
-
-/** The same actions as a rail down the side (landscape). */
-@Composable
-private fun DisplayRail(connected: Boolean, actions: DisplayActions) {
-    Column(
-        modifier = Modifier
-            .fillMaxHeight()
-            .width(52.dp)
-            .background(UbuntuPalette.DarkSurface)
-            .padding(vertical = 4.dp),
-        horizontalAlignment = Alignment.CenterHorizontally,
-    ) {
-        ToolbarButton(Icons.Default.Apps, "Apps", actions.onShowLauncher)
-        StatusDot(connected)
-        Spacer(Modifier.weight(1f))
-        actions.onUseMonitor?.let { ToolbarButton(Icons.Default.Cast, "Use the monitor", it) }
-        ToolbarButton(Icons.Default.Terminal, "Terminal", actions.onOpenTerminal)
-        ToolbarButton(Icons.Default.Keyboard, "Keyboard", actions.onShowKeyboard)
-        OverflowMenu(actions)
-    }
-}
-
-@Composable
-private fun ToolbarButton(icon: ImageVector, label: String, onClick: () -> Unit) {
-    IconButton(onClick = onClick) {
-        Icon(icon, contentDescription = label, tint = Color.White)
-    }
-}
 
 @Composable
 fun StatusDot(connected: Boolean) {
@@ -395,20 +344,6 @@ fun StatusDot(connected: Boolean) {
             .clip(CircleShape)
             .background(if (connected) UbuntuPalette.Success else UbuntuPalette.Warning),
     )
-}
-
-@Composable
-private fun OverflowMenu(actions: DisplayActions) {
-    var menu by remember { mutableStateOf(false) }
-    Box {
-        ToolbarButton(Icons.Default.MoreVert, "More") { menu = true }
-        DropdownMenu(expanded = menu, onDismissRequest = { menu = false }) {
-            MenuEntry("Files", Icons.Default.Folder) { menu = false; actions.onOpenFiles() }
-            MenuEntry("Ubuntu Software", Icons.Default.ShoppingBag) { menu = false; actions.onOpenStore() }
-            MenuEntry("Gamepad", Icons.Default.Gamepad) { menu = false; actions.onOpenGamepad() }
-            MenuEntry("Reconnect display", Icons.Default.Refresh) { menu = false; actions.onReconnect() }
-        }
-    }
 }
 
 @Composable

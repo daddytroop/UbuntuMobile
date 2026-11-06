@@ -25,7 +25,8 @@ data class AppEntry(
  * The applications the shell knows about out of the box.
  *
  * Every Linux entry is a program that ships in the rootfs, so it works
- * straight after the first-boot install.
+ * straight after the first-boot install - except Firefox, which the app
+ * installs from Mozilla's repository once the desktop is up.
  */
 object AppCatalog {
 
@@ -37,6 +38,13 @@ object AppCatalog {
             command = listOf("/usr/bin/xfce4-terminal"),
             category = AppEntry.Category.TERMINAL,
             accent = 0xFF3D3846,
+        ),
+        AppEntry(
+            id = "browser",
+            name = "Firefox",
+            summary = "Browse the web",
+            command = listOf("firefox"),
+            accent = 0xFFE66000,
         ),
         AppEntry(
             id = "files",
@@ -71,7 +79,7 @@ object AppCatalog {
         AppEntry(
             id = "store",
             name = "Ubuntu Software",
-            summary = "Apps from Flathub",
+            summary = "Install desktop apps",
             command = emptyList(),
             category = AppEntry.Category.SYSTEM,
             accent = 0xFFE95420,

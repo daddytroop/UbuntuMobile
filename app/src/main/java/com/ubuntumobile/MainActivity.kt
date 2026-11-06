@@ -80,7 +80,8 @@ import com.ubuntumobile.linux.RootfsInstaller
 import com.ubuntumobile.ui.AnsiTerminal
 import com.ubuntumobile.ui.AppCatalog
 import com.ubuntumobile.ui.AppEntry
-import com.ubuntumobile.ui.FlatpakApp
+import com.ubuntumobile.ui.DesktopSize
+import com.ubuntumobile.ui.SettingsScreen
 import com.ubuntumobile.ui.StoreScreen
 import com.ubuntumobile.ui.TerminalScreen
 import com.ubuntumobile.ui.UbuntuShell
@@ -181,7 +182,7 @@ class MainActivity : ComponentActivity() {
 }
 
 /** Which surface is currently on screen. */
-private enum class Screen { DESKTOP, TERMINAL, STORE, GAMEPAD, DISPLAY }
+private enum class Screen { DESKTOP, TERMINAL, STORE, GAMEPAD, DISPLAY, SETTINGS }
 
 /** Port the in-container X display exports its RFB stream on. */
 private const val DISPLAY_PORT = 5901
@@ -230,6 +231,17 @@ fun UbuntuApp(
     // desktop with black bars. When the area changes (the phone rotates,
     // the app is docked or resized) the X screen is resized to match.
     var canvasSize by remember { mutableStateOf<androidx.compose.ui.unit.IntSize?>(null) }
+
+    // The app's own settings (see SettingsScreen).
+    val prefs = remember { context.getSharedPreferences("settings", android.content.Context.MODE_PRIVATE) }
+    var desktopSize by remember {
+        mutableStateOf(
+            DesktopSize.entries.firstOrNull { it.name == prefs.getString("desktop_size", null) }
+                ?: DesktopSize.STANDARD,
+        )
+    }
+    var fullScreen by remember { mutableStateOf(prefs.getBoolean("full_screen", true)) }
+
     var monitorSize by remember { mutableStateOf<androidx.compose.ui.unit.IntSize?>(null) }
 
     // A monitor connected over USB-C or HDMI. The desktop moves there and
@@ -240,9 +252,11 @@ fun UbuntuApp(
     LaunchedEffect(externalDisplay) { if (externalDisplay != null) preferMonitor = true }
 
     val target: DisplayTarget? = if (docked) {
-        monitorSize?.let { displayTargetFor(it, density = 1f, monitor = true) }
+        monitorSize?.let { displayTargetFor(it, density = 1f, monitor = true, desktopSize.shortSide) }
     } else {
-        canvasSize?.let { displayTargetFor(it, context.resources.displayMetrics.density, monitor = false) }
+        canvasSize?.let {
+            displayTargetFor(it, context.resources.displayMetrics.density, monitor = false, desktopSize.shortSide)
+        }
     }
     // The start-up code waits on this, so it has to be state: a plain
     // value is captured once and never seen to change.
@@ -324,7 +338,10 @@ fun UbuntuApp(
         val start = kotlinx.coroutines.withTimeoutOrNull(3000) {
             androidx.compose.runtime.snapshotFlow { currentTarget }.first { it != null }
         } ?: context.resources.displayMetrics.let {
-            displayTargetFor(androidx.compose.ui.unit.IntSize(it.widthPixels, it.heightPixels), it.density, monitor = false)
+            displayTargetFor(
+                androidx.compose.ui.unit.IntSize(it.widthPixels, it.heightPixels),
+                it.density, monitor = false, desktopSize.shortSide,
+            )
         }
         val geometry = "${start.width}x${start.height}"
         appliedScale = start.scale
@@ -386,6 +403,36 @@ fun UbuntuApp(
         }
     }
 
+    // Firefox is the desktop's browser. It is not in the image (Ubuntu's
+    // package is a snap, which cannot run here), so it is installed from
+    // Mozilla's repository the first time the desktop is up.
+    val firefoxBinary = remember { java.io.File(vm.paths.root, "usr/lib/firefox/firefox") }
+    var browserInstalled by remember { mutableStateOf<Boolean?>(null) }
+    var browserBusy by remember { mutableStateOf(false) }
+    var browserNote by remember { mutableStateOf<String?>(null) }
+    suspend fun installBrowser() {
+        if (browserBusy) return
+        browserBusy = true
+        browserNote = "Installing Firefox…"
+        vm.paths.appendLog("installing Firefox")
+        val out = withContext(Dispatchers.IO) {
+            vm.runtime.shell("/usr/local/lib/linx/install-firefox.sh 2>&1 | tail -n 3", 1800).output
+        }
+        browserInstalled = firefoxBinary.exists()
+        browserNote = when {
+            browserInstalled == true -> null
+            out.contains("BROWSER_READY") -> "This phone gets GNOME Web instead (no Firefox for 32-bit ARM)"
+            else -> "Could not install Firefox; check the connection and try again"
+        }
+        vm.paths.appendLog("Firefox: ${out.trim().lines().lastOrNull()}")
+        browserBusy = false
+    }
+    LaunchedEffect(session.connected) {
+        if (!session.connected) return@LaunchedEffect
+        browserInstalled = firefoxBinary.exists()
+        if (browserInstalled == false) installBrowser()
+    }
+
     // On a monitor, the desktop.
     if (state.isInstalled && docked && externalDisplay != null) {
         PresentationOn(externalDisplay) {
@@ -397,15 +444,15 @@ fun UbuntuApp(
         }
     }
 
-    // In landscape the desktop gets the whole screen: the status and
-    // navigation bars hide until swiped in.
+    // The desktop gets the whole screen: the status and navigation bars
+    // hide until swiped in (unless switched off in Settings).
     val activityWindow = (context as? android.app.Activity)?.window
     val rootView = LocalView.current
-    LaunchedEffect(landscape, screen, docked, state.isInstalled) {
+    LaunchedEffect(fullScreen, screen, docked, state.isInstalled) {
         val window = activityWindow ?: return@LaunchedEffect
         val controller = androidx.core.view.WindowCompat.getInsetsController(window, rootView)
         val bars = androidx.core.view.WindowInsetsCompat.Type.systemBars()
-        if (state.isInstalled && landscape && screen == Screen.DISPLAY && !docked) {
+        if (state.isInstalled && fullScreen && screen == Screen.DISPLAY && !docked) {
             controller.systemBarsBehavior =
                 androidx.core.view.WindowInsetsControllerCompat.BEHAVIOR_SHOW_TRANSIENT_BARS_BY_SWIPE
             controller.hide(bars)
@@ -449,7 +496,9 @@ fun UbuntuApp(
             mapOf(
                 "DISPLAY" to ":$DISPLAY_NUM",
                 // GTK applications take the scale from the desktop's
-                // XSETTINGS; Qt ones only read it when they start.
+                // XSETTINGS; Qt ones only read it when they start. Firefox
+                // starts through /usr/local/bin/firefox, which sets up what
+                // it needs under proot.
                 "QT_SCALE_FACTOR" to appliedScale.toString(),
                 "FLATPAK_BWRAP" to "/usr/bin/bwrap",
             ),
@@ -487,6 +536,12 @@ fun UbuntuApp(
                         "store" -> screen = Screen.STORE
                         "gamepad" -> screen = Screen.GAMEPAD
                         "console" -> openConsole()
+                        "browser" -> if (firefoxBinary.exists()) {
+                            launchOnDisplay(listOf("firefox"))
+                            screen = Screen.DISPLAY
+                        } else {
+                            screen = Screen.STORE
+                        }
                         else -> {
                             // Linux apps open as windows on the desktop, so
                             // go there to see them.
@@ -520,27 +575,34 @@ fun UbuntuApp(
 
         Screen.STORE -> {
             StoreScreen(
-                searchRemote = { query ->
-                    val out = vm.guestCommand(
-                        "/usr/local/lib/linx/flatpak-search.sh ${quote(query)}",
-                        timeout = 180,
-                    )
-                    out.lines().filter { it.isNotBlank() }.mapNotNull { line ->
-                        val p = line.split("|")
-                        if (p.isEmpty()) return@mapNotNull null
-                        FlatpakApp(
-                            id = p[0].trim(),
-                            name = p.getOrNull(2)?.takeIf { it.isNotBlank() && it != "-" } ?: p[0].trim(),
-                            version = p.getOrNull(1)?.trim() ?: "",
-                        )
-                    }
+                runGuest = { cmd, timeout -> vm.guestCommand(cmd, timeout) },
+                openApp = { command ->
+                    launchOnDisplay(command)
+                    screen = Screen.DISPLAY
                 },
-                installApp = { appId ->
-                    vm.guestCommand(
-                        "/usr/local/lib/linx/flatpak-install.sh ${quote(appId)}",
-                        timeout = 900,
-                    )
+                onClose = { screen = Screen.DISPLAY },
+                modifier = Modifier.systemBarsPadding(),
+            )
+        }
+
+        Screen.SETTINGS -> {
+            SettingsScreen(
+                desktopSize = desktopSize,
+                onDesktopSize = {
+                    desktopSize = it
+                    prefs.edit().putString("desktop_size", it.name).apply()
                 },
+                fullScreen = fullScreen,
+                onFullScreen = {
+                    fullScreen = it
+                    prefs.edit().putBoolean("full_screen", it).apply()
+                },
+                browserInstalled = browserInstalled ?: firefoxBinary.exists(),
+                browserBusy = browserBusy,
+                browserNote = browserNote,
+                onInstallBrowser = { scope.launch { installBrowser() } },
+                versionName = BuildConfig.VERSION_NAME,
+                ubuntuVersion = state.guestInfo.prettyName,
                 onClose = { screen = Screen.DISPLAY },
                 modifier = Modifier.systemBarsPadding(),
             )
@@ -616,9 +678,17 @@ fun UbuntuApp(
                 onShowKeyboard = { showSoftKeyboard(view, context) },
                 onReconnect = { session.retry() },
                 onUseMonitor = if (externalDisplay != null && !docked) ({ preferMonitor = true }) else null,
+                onOpenBrowser = {
+                    if (firefoxBinary.exists()) {
+                        launchOnDisplay(listOf("firefox"))
+                    } else if (!browserBusy) {
+                        scope.launch { installBrowser() }
+                    }
+                },
+                onOpenSettings = { screen = Screen.SETTINGS },
+                browserNote = browserNote,
             )
-            // The toolbar colour continues behind the status bar.
-            Box(Modifier.fillMaxSize().background(UbuntuPalette.DarkSurface)) {
+            Box(Modifier.fillMaxSize().background(Color.Black)) {
                 // Whatever the soft keyboard commits is typed into X and
                 // the field is left empty again.
                 androidx.compose.foundation.text.BasicTextField(
@@ -647,7 +717,6 @@ fun UbuntuApp(
                 } else {
                     DisplayScreen(
                         session = session,
-                        landscape = landscape,
                         actions = actions,
                         onCanvasSize = { canvasSize = it },
                         modifier = insets,
@@ -667,8 +736,9 @@ private data class DisplayTarget(val width: Int, val height: Int, val scale: Int
  * The desktop is laid out in pixels - the panel is 30 pixels tall, the
  * fonts are 10 points - so at the native resolution of a modern handset
  * (1440x3120) it would be far too small to tap. On a phone the X screen is
- * therefore a normal desktop screen with the phone's shape (short side 720
- * pixels) with everything doubled (scale 2), and the phone scales it up.
+ * therefore a normal desktop screen with the phone's shape (short side 900
+ * pixels by default, see DesktopSize) with everything doubled (scale 2),
+ * and the phone scales it to fit.
  *
  * A monitor gets its own resolution at scale 1, a plain desktop; a tablet
  * (or a large window) one pixel per dp, also at scale 1. Either is capped
@@ -679,6 +749,8 @@ private fun displayTargetFor(
     size: androidx.compose.ui.unit.IntSize,
     density: Float,
     monitor: Boolean,
+    /** The phone's short side in X pixels (the Settings' desktop size). */
+    phoneShortSide: Int,
 ): DisplayTarget {
     // Round to even numbers: X servers are happier with them.
     fun even(v: Float) = maxOf(2, (v.toInt() / 2) * 2)
@@ -691,7 +763,7 @@ private fun displayTargetFor(
         return DisplayTarget(even(dw * fit), even(dh * fit), 1)
     }
     val short = minOf(w, h)
-    val fit = if (short > 720) 720f / short else 1f
+    val fit = if (short > phoneShortSide) phoneShortSide / short else 1f
     return DisplayTarget(even(w * fit), even(h * fit), 2)
 }
 

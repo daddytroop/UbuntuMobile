@@ -21,6 +21,7 @@
       <property name="leave-opacity" type="uint" value="100"/>
       <property name="plugin-ids" type="array">
         <value type="int" value="1"/>
+        <value type="int" value="10"/>
         <value type="int" value="2"/>
         <value type="int" value="3"/>
         <value type="int" value="4"/>
@@ -36,6 +37,12 @@
     <property name="plugin-1" type="string" value="applicationsmenu">
       <property name="button-icon" type="string" value="view-app-grid-symbolic"/>
       <property name="show-button-title" type="bool" value="false"/>
+    </property>
+    <property name="plugin-10" type="string" value="launcher">
+      <!-- The preferred browser (Firefox, see install-firefox.sh). -->
+      <property name="items" type="array">
+        <value type="string" value="xfce4-web-browser.desktop"/>
+      </property>
     </property>
     <property name="plugin-2" type="string" value="launcher">
       <property name="items" type="array">

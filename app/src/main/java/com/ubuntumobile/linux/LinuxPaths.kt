@@ -27,6 +27,9 @@ class LinuxPaths(context: Context) {
     val cacheDir: File = File(app.filesDir, ".cache")
     /** Shared /tmp so every proot process sees the same X11 unix socket. */
     val sharedTmpDir: File = File(app.filesDir, "tmp")
+
+    /** Bound over /dev/shm in the container; Android has none. */
+    val shmDir: File = File(app.filesDir, "shm")
     val sdcardDir: File get() = File(app.getExternalFilesDir(null) ?: app.filesDir, "shared")
 
     /** proot executable for the current ABI. */
@@ -42,7 +45,7 @@ class LinuxPaths(context: Context) {
         get() = proot.exists() && proot.canExecute()
 
     fun ensureDirs() {
-        listOf(root, binDir, homeDir, cacheDir, sharedTmpDir, sdcardDir).forEach { it.mkdirs() }
+        listOf(root, binDir, homeDir, cacheDir, sharedTmpDir, shmDir, sdcardDir).forEach { it.mkdirs() }
     }
 
     init {

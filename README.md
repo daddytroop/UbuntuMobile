@@ -3,9 +3,9 @@
 [![Build APK](https://github.com/daddytroop/UbuntuMobile/actions/workflows/build-apk.yml/badge.svg)](https://github.com/daddytroop/UbuntuMobile/actions/workflows/build-apk.yml)
 **A complete Ubuntu 26.04 Linux system that runs on an Android phone.**
 
-One APK gives you a real Linux userland — bash, apt, GCC, Python, Git, Flatpak
-and the whole Flathub catalogue — driven from a native desktop shell that looks
-and behaves like Ubuntu 26.04.
+One APK gives you a real Linux userland — bash, apt, GCC, Python, Git — and a
+full-screen XFCE desktop with Firefox and an app store for Ubuntu's desktop
+applications, driven from a native Android shell.
 
 ```
 dist/
@@ -26,7 +26,7 @@ phone and open it (enable "install from unknown sources").
 │  Android app (Kotlin + Jetpack Compose)       │
 │  • Ubuntu 26.04 desktop shell (GNOME 50 feel) │
 │  • Terminal backed by a real PTY               │
-│  • Ubuntu Software — browse/install Flathub   │
+│  • Ubuntu Software — install apps with apt    │
 │  • Linux Display — X11 apps, streamed in      │
 │  • Virtual gamepad (Xbox layout)              │
 └───────────────┬──────────────────────────────┘
@@ -83,8 +83,33 @@ behave normally. A small ANSI parser handles SGR colour, erase and cursor
 sequences.
 
 ### Ubuntu Software
-Browse and install from Flathub with a native UI. Backed by
-`flatpak remote-ls` and `flatpak install` inside the container.
+A native store for desktop applications that run in the container: a
+featured page (Firefox, LibreOffice, GIMP, Inkscape, VLC, Geany, ...) and a
+search of the Ubuntu archive, with Install and Open. Backed by
+`apt-install.sh`, which fetches apt's package lists the first time (the
+image ships without them) and installs with `apt-get`. Installed apps also
+appear in the desktop's Applications menu.
+
+Flathub stays configured in the image, but the store no longer offers
+Flatpak apps: they install, then cannot start, because Flatpak runs every
+app in a bwrap sandbox that needs user namespaces proot cannot provide.
+
+### Firefox
+Firefox is the desktop's browser, installed the first time the desktop comes
+up (about 80 MB; Settings can retry it). Ubuntu's own `firefox` package only
+installs the snap, which cannot run here, so it comes from Mozilla's apt
+repository (`install-firefox.sh`), pinned above Ubuntu's. Mozilla builds it
+for amd64 and arm64; on 32-bit ARM the app installs GNOME Web instead.
+
+### The app around the desktop
+The desktop fills the screen; the status and navigation bars hide until
+swiped in. A small floating button at the right edge (drag it up or down)
+opens a side menu with everything that is the app's rather than Linux's: the
+app grid, Firefox, Terminal, Files, Ubuntu Software, the keyboard, the
+gamepad, docking, reconnecting and **Settings**. Settings has the desktop
+size (Compact, Standard - the default, sized for a 6-inch phone - and
+Large; the desktop resizes as soon as it is changed), full screen on or off,
+the browser, and version details.
 
 ### Linux Display — running real X11 apps
 This is the piece that turns the container into a usable desktop.
@@ -447,6 +472,21 @@ starts loader processes - which can take twenty seconds on a phone. Killing
 it for being slow leaves the screen claimed and Openbox refuses to start,
 so desktop-start.sh waits for as long as xfwm4 is alive.
 
+**Firefox needs a /dev/shm, and no seals.** Android has no `/dev/shm`, so
+Firefox's parent process crashes as soon as it starts; the app binds a
+folder of its own there in every proot process. Then every tab died with
+"Shared memory PlatformHandle is not safe to map": Gecko seals the shared
+memory it hands a tab, and the seal does not survive proot.
+`MOZ_SHM_NO_SEALS=1` (set by `/usr/local/bin/firefox`, with the sandbox
+switches) skips it. DroidDeck and proot-distro hit the same thing.
+
+**Firefox is wider than a phone.** Its window is at least 500 points wide,
+which at the phone's 2x scale is wider than the screen in portrait, so it
+could not be maximized and hung off the side. The launcher sets Firefox's
+zoom to fit the screen's width on the phone, and leaves it alone on a
+monitor. Firefox also sizes its window again just after mapping it, so
+`linx-windows.py` maximizes new windows a second time shortly after.
+
 **Xvnc is not black.** The display once used Xvnc, and every window came
 through black while the root window was fine, so it was replaced with Xvfb
 plus x11vnc. The real cause was the client's Hextile decoder, which lost
@@ -515,9 +555,12 @@ asked for it.
   bridge from the container to the phone's audio stack yet.
 - **A physical phone.** Everything has run on the x86_64 emulator; the arm64
   APK has not been tried on real hardware yet.
-- **Running Flatpak apps.** Installing from Flathub is wired up, but Flatpak
-  starts every app inside bwrap, which needs user namespaces that proot
-  cannot provide, so an installed Flatpak is not expected to launch yet.
+- **Flatpak apps.** Flatpak starts every app inside bwrap, which needs user
+  namespaces that proot cannot provide, so the store offers apt packages
+  instead.
+- **Snaps.** Ubuntu ships some apps (Chromium, Thunderbird) only as snaps,
+  which need snapd and mounts; they are not available.
+- **Audio in Firefox and VLC.** There is no audio bridge yet (see Audio).
 - **Docking on real hardware.** Docking has run against the emulator's
   simulated monitor only. Whether a given phone offers its USB-C video
   output as a presentation display (rather than only mirroring) varies.

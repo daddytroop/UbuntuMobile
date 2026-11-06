@@ -1,0 +1,39 @@
+#!/bin/sh
+# Start Firefox inside the container. This sits in /usr/local/bin, ahead of
+# /usr/bin on PATH, so the menu entry, the panel and "open link" all use it.
+#
+# Firefox sandboxes its child processes with namespaces and seccomp, which
+# proot cannot provide; with the sandbox on, every tab crashes. The
+# container itself is the boundary here, as it is for every other app.
+export MOZ_FAKE_NO_SANDBOX=1
+export MOZ_DISABLE_CONTENT_SANDBOX=1
+export MOZ_DISABLE_GMP_SANDBOX=1
+export MOZ_DISABLE_RDD_SANDBOX=1
+export MOZ_DISABLE_SOCKET_PROCESS_SANDBOX=1
+export MOZ_DISABLE_UTILITY_SANDBOX=1
+export MOZ_DISABLE_GPU_SANDBOX=1
+# Gecko seals the shared memory it hands to a tab and the tab checks the
+# seal; proot cannot pass that through, so every tab would die with
+# "Shared memory PlatformHandle is not safe to map". This skips the seal.
+export MOZ_SHM_NO_SEALS=1
+# This is an X11 desktop.
+export MOZ_ENABLE_WAYLAND=0
+
+# Firefox's window is at least 500 points wide, which at the phone's 2x
+# scale is wider than the screen in portrait; the window would hang off
+# the side and could not be maximized. On the phone Firefox therefore
+# gets a zoom that fits it in the screen's width; on a monitor (scale 1)
+# it uses its own. Read when Firefox starts, so after docking or
+# undocking it applies from the next start.
+SCALE="$(cat /tmp/linx-ui-scale 2>/dev/null || echo 2)"
+ZOOM="-1.0"
+if [ "$SCALE" -ge 2 ]; then
+  WIDTH="$(xdpyinfo 2>/dev/null | awk '/dimensions:/ { split($2, d, "x"); print d[1] < d[2] ? d[1] : d[2]; exit }')"
+  if [ -n "$WIDTH" ]; then
+    ZOOM="$(awk -v w="$WIDTH" 'BEGIN { z = w / 530; if (z > 2) z = 2; printf "%.2f", z }')"
+  fi
+fi
+echo "pref(\"layout.css.devPixelsPerPx\", \"$ZOOM\");" \
+  >/usr/lib/firefox/defaults/pref/linx-zoom.js 2>/dev/null
+
+exec /usr/lib/firefox/firefox "$@"

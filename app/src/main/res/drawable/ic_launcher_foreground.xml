@@ -1,46 +1,53 @@
 <?xml version="1.0" encoding="utf-8"?>
-<!-- Ubuntu "circle of friends" mark, centred in the adaptive-icon safe zone. -->
+<!--
+  A terminal window: a white title bar with window dots over an aubergine
+  console with a prompt. Everything sits inside the adaptive icon's safe
+  zone (the middle 66dp), so no launcher mask clips it.
+-->
 <vector xmlns:android="http://schemas.android.com/apk/res/android"
     android:width="108dp"
     android:height="108dp"
     android:viewportWidth="108"
     android:viewportHeight="108">
 
-    <!-- head -->
+    <!-- shadow -->
     <path
-        android:pathData="M54,26m-11,0a11,11 0,1 1,22 0a11,11 0,1 1,-22 0"
-        android:fillColor="#E95420" />
+        android:pathData="M37,37h38a6,6 0,0 1,6 6v28a6,6 0,0 1,-6 6h-38a6,6 0,0 1,-6 -6v-28a6,6 0,0 1,6 -6z"
+        android:fillColor="#33000000" />
 
-    <!-- body -->
+    <!-- window: title bar -->
     <path
-        android:pathData="M54,42c-9,0 -16,6 -16,14v6h32v-6c0,-8 -7,-14 -16,-14z"
-        android:fillColor="#E95420" />
+        android:pathData="M35,34h38a6,6 0,0 1,6 6v4h-50v-4a6,6 0,0 1,6 -6z"
+        android:fillColor="#FFFFFFFF" />
 
-    <!-- left arm -->
+    <!-- window: console -->
     <path
-        android:pathData="M36,44c-6,1 -10,6 -10,12v4h7v-4c0,-3 1,-5 4,-6z"
-        android:fillColor="#E95420" />
+        android:pathData="M29,44h50v24a6,6 0,0 1,-6 6h-38a6,6 0,0 1,-6 -6z"
+        android:fillColor="#FF2C0A26" />
 
-    <!-- right arm -->
+    <!-- window dots -->
     <path
-        android:pathData="M72,44c6,1 10,6 10,12v4h-7v-4c0,-3 -1,-5 -4,-6z"
-        android:fillColor="#E95420" />
+        android:pathData="M36,39m-1.8,0a1.8,1.8 0,1 1,3.6 0a1.8,1.8 0,1 1,-3.6 0"
+        android:fillColor="#FFE95420" />
+    <path
+        android:pathData="M41.5,39m-1.8,0a1.8,1.8 0,1 1,3.6 0a1.8,1.8 0,1 1,-3.6 0"
+        android:fillColor="#FFD9D2D6" />
+    <path
+        android:pathData="M47,39m-1.8,0a1.8,1.8 0,1 1,3.6 0a1.8,1.8 0,1 1,-3.6 0"
+        android:fillColor="#FFD9D2D6" />
 
-    <!-- legs -->
+    <!-- prompt: > -->
     <path
-        android:pathData="M44,64h7v20h-7z"
-        android:fillColor="#E95420" />
-    <path
-        android:pathData="M57,64h7v20h-7z"
-        android:fillColor="#E95420" />
+        android:pathData="M37,51.5l7,5.5l-7,5.5"
+        android:strokeColor="#FFFFFFFF"
+        android:strokeWidth="3.2"
+        android:strokeLineCap="round"
+        android:strokeLineJoin="round" />
 
-    <!-- left foot -->
+    <!-- prompt: _ -->
     <path
-        android:pathData="M38,84h13v6h-15a2,2 0,0 1,0,-4z"
-        android:fillColor="#E95420" />
-
-    <!-- right foot -->
-    <path
-        android:pathData="M70,84h-13v6h15a2,2 0,0 0,0,-4z"
-        android:fillColor="#E95420" />
+        android:pathData="M49,63h12"
+        android:strokeColor="#FFF26B2E"
+        android:strokeWidth="3.2"
+        android:strokeLineCap="round" />
 </vector>
