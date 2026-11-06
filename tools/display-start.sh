@@ -3,14 +3,19 @@
 #
 #   LINX_DISPLAY=99 LINX_RFB_PORT=5901 LINX_GEOMETRY=1024x600 display-start.sh
 #
-# The backend is Xvfb plus x11vnc:
+# The backend is TigerVNC's Xvnc, with Xvfb plus x11vnc as the fallback:
 #
-#   * TigerVNC's Xvnc was the original choice, because it is one process.
-#     It exports a BLACK framebuffer for anything a client draws: the root
-#     window's background comes through, but no client-rendered content
-#     does. Xvfb plus x11vnc has no such problem.
-#   * x11vnc polls the framebuffer with XGetImage and pushes it, which is
-#     the same approach Termux:X11 uses.
+#   * Xvnc is the X server and the RFB server in one process, and it can
+#     change the size of the screen while the desktop runs (the client asks
+#     with SetDesktopSize). That is what lets the desktop follow the phone
+#     when it rotates or is docked to a monitor.
+#   * It was once dropped because windows came through black. That was the
+#     app's Hextile decoder, not Xvnc: it lost every tile with detail in
+#     it, which is all of the drawn content.
+#   * Xvfb cannot change size (its RandR only knows the starting size), so
+#     with the fallback the desktop keeps the shape it started with. x11vnc
+#     polls the framebuffer with XGetImage and pushes it, which is the same
+#     approach Termux:X11 uses.
 #
 # Prints DISPLAY_READY once the RFB port accepts connections.
 set -u
@@ -19,7 +24,7 @@ DISPLAY_NUM="${LINX_DISPLAY:-99}"
 RFB_PORT="${LINX_RFB_PORT:-5901}"
 GEOMETRY="${LINX_GEOMETRY:-1024x600}"
 DEPTH="${LINX_DEPTH:-24}"
-MODE="${LINX_DISPLAY_MODE:-x11vnc}"
+MODE="${LINX_DISPLAY_MODE:-xvnc}"
 
 export DISPLAY=":$DISPLAY_NUM"
 
@@ -46,6 +51,12 @@ fi
 mkdir -p /tmp/.X11-unix
 chmod 1777 /tmp/.X11-unix
 rm -f "/tmp/.X${DISPLAY_NUM}-lock" "/tmp/.X11-unix/X${DISPLAY_NUM}"
+# The desktop session writes its bus address when it starts; one left from
+# an earlier run points at a bus that is gone.
+rm -f /tmp/linx-session-bus
+# The starting scale. display-scale.sh replaces it if the app changes its
+# mind while the desktop is still starting.
+echo "${LINX_UI_SCALE:-2}" >/tmp/linx-ui-scale
 
 start_xtigervnc() {
   # Ubuntu ships the binary as Xtigervnc; the Xvnc alias may not exist.
@@ -60,8 +71,19 @@ start_xtigervnc() {
     -rfbport "$RFB_PORT" \
     -AlwaysShared \
     -nolisten tcp \
+    -ac \
+    -dpi 96 \
+    -desktop Ubuntu \
     >/tmp/linx-xtigervnc.log 2>&1 &
   return 0
+}
+
+wait_for_port() {
+  for _ in $(seq 1 "$2"); do
+    port_open "$1" && return 0
+    sleep 1
+  done
+  return 1
 }
 
 start_x11vnc() {
@@ -105,28 +127,40 @@ start_x11vnc_shm() {
   return 0
 }
 
-case "$MODE" in
-  xtigervnc)
-    start_xtigervnc || { echo "DISPLAY_START_FAILED"; exit 1; }
-    ;;
-  *)
-    start_x11vnc || { echo "DISPLAY_START_FAILED"; exit 1; }
+start_x11vnc_with_fallback() {
+    start_x11vnc || return 1
     # x11vnc takes several seconds to come up on a phone, so give it time
     # before deciding it failed. If it really did not open the RFB port,
     # stop what was started and try again without the shared memory
     # extension - starting a second server next to the first one only
     # fails with "server already running".
-    for _ in $(seq 1 20); do
-      port_open "$RFB_PORT" && break
-      sleep 1
-    done
-    if ! port_open "$RFB_PORT"; then
+    if ! wait_for_port "$RFB_PORT" 20; then
       echo "retrying without MIT-SHM" >>/tmp/linx-display.log
       pkill -x x11vnc 2>/dev/null || true
       pkill -x Xvfb 2>/dev/null || true
       sleep 1
       rm -f "/tmp/.X${DISPLAY_NUM}-lock" "/tmp/.X11-unix/X${DISPLAY_NUM}"
       start_x11vnc_shm
+    fi
+    return 0
+}
+
+case "$MODE" in
+  x11vnc)
+    start_x11vnc_with_fallback || { echo "DISPLAY_START_FAILED"; exit 1; }
+    ;;
+  *)
+    # Xvnc, unless it is missing or does not open the port; then the
+    # fixed-size stack.
+    if start_xtigervnc && wait_for_port "$RFB_PORT" 20; then
+      echo "the display is Xvnc" >>/tmp/linx-display.log
+    else
+      echo "Xvnc did not start; using Xvfb and x11vnc" >>/tmp/linx-display.log
+      pkill -f Xtigervnc 2>/dev/null || true
+      pkill -x Xvnc 2>/dev/null || true
+      sleep 1
+      rm -f "/tmp/.X${DISPLAY_NUM}-lock" "/tmp/.X11-unix/X${DISPLAY_NUM}"
+      start_x11vnc_with_fallback || { echo "DISPLAY_START_FAILED"; exit 1; }
     fi
     ;;
 esac
@@ -175,12 +209,13 @@ for _ in 1 2 3 4 5 6 7 8 9 10 11 12 13 14 15; do
     # The desktop is laid out in pixels, so the panel and the fonts have to
     # be the size they are on a desktop for them to be tappable.
     #
-    # GDK_SCALE doubles every GTK widget (and the fonts with it) so the
-    # GTK applications use a phone-sized logical screen; QT_SCALE_FACTOR
-    # does the same for the Qt ones.
-    SCALE="${LINX_UI_SCALE:-2}"
-    export GDK_SCALE="$SCALE"
-    export GDK_DPI_SCALE=1
+    # On the phone every GTK widget (and the fonts with it) is doubled so
+    # the applications use a phone-sized logical screen; on a monitor it
+    # is not. desktop-start.sh sets that up through XSETTINGS, which the
+    # running applications follow, so it can change when the phone is
+    # docked (display-scale.sh). QT_SCALE_FACTOR does the same for Qt
+    # applications, but only for those started afterwards.
+    SCALE="$(cat /tmp/linx-ui-scale 2>/dev/null || echo "${LINX_UI_SCALE:-2}")"
     export QT_SCALE_FACTOR="$SCALE"
     export QT_ENABLE_HIGHDPI_SCALING=1
 

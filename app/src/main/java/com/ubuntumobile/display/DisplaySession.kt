@@ -3,8 +3,12 @@ package com.ubuntumobile.display
 import android.graphics.Bitmap
 import android.util.Log
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableIntStateOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.setValue
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.delay
+import kotlinx.coroutines.withContext
 
 /**
  * Owns the connection to the in-container display and keeps a [Bitmap] that
@@ -20,6 +24,9 @@ class DisplaySession(
 
     companion object {
         private const val TAG = "DisplaySession"
+
+        /** Connection attempts, a second apart, before giving up. */
+        const val MAX_ATTEMPTS = 120
     }
 
     /** Current frame size. */
@@ -45,6 +52,33 @@ class DisplaySession(
 
     var error: String? by mutableStateOf(null)
         private set
+
+    /** True while (re)connecting; [attempt] counts the tries so far. */
+    var connecting: Boolean by mutableStateOf(true)
+        private set
+
+    var attempt: Int by mutableIntStateOf(0)
+        private set
+
+    /**
+     * Counts the frames received. Anything that draws [bitmap] reads it,
+     * so it is redrawn when new pixels arrive - the phone's screen and an
+     * external monitor alike.
+     */
+    var frames: Int by mutableIntStateOf(0)
+        private set
+
+    /** Where the X pointer is, for input that moves it relatively (a trackpad). */
+    @Volatile
+    var pointerX = 0
+        private set
+
+    @Volatile
+    var pointerY = 0
+        private set
+
+    @Volatile
+    private var retryRequested = false
 
     /** Debugging aid: when set, each connection's byte stream is saved next to it, timestamped. */
     var captureFile: java.io.File? = null
@@ -82,18 +116,21 @@ class DisplaySession(
     fun start(): Boolean {
         if (connected) return true
         return try {
+            requested = null
             val c = VncClient(host, port, captureFile?.let { java.io.FileOutputStream(java.io.File(it.parentFile, "${it.nameWithoutExtension}-${System.currentTimeMillis()}.bin")) })
             c.connect()
             client = c
             width = c.width
             height = c.height
+            pointerX = c.width / 2
+            pointerY = c.height / 2
             bitmap = Bitmap.createBitmap(c.width, c.height, Bitmap.Config.ARGB_8888)
             error = null
 
             c.onUpdate = { rects ->
                 // Copy the changed regions into the bitmap.
                 val bmp = bitmap
-                if (bmp != null) {
+                if (bmp != null && bmp.width == c.width && bmp.height == c.height) {
                     val fb = c.framebuffer
                     synchronized(bmp) {
                         for (r in rects) {
@@ -104,8 +141,19 @@ class DisplaySession(
                             bmp.setPixels(fb, start, c.width, r.x, r.y, r.width, r.height)
                         }
                     }
+                    frames++
                     onFrame?.invoke()
                 }
+                // The first update says whether the server can resize.
+                applyWantedSize()
+            }
+            c.onResize = { w, h ->
+                // A new bitmap rather than a resized one: the UI thread may
+                // be drawing the old one right now.
+                width = w
+                height = h
+                bitmap = Bitmap.createBitmap(w, h, Bitmap.Config.ARGB_8888)
+                Log.i(TAG, "the display is now ${w}x$h")
             }
 
             val t = Thread({
@@ -150,9 +198,59 @@ class DisplaySession(
         reader = null
     }
 
+    /**
+     * Connect, and connect again whenever the stream drops (the server
+     * restarted, the phone was asleep). Runs until it is cancelled.
+     *
+     * The X server needs a while before it accepts connections, and on a
+     * phone that can be long - the desktop has to start as well - so a
+     * refused connection is retried for a couple of minutes before giving
+     * up until [retry].
+     */
+    suspend fun keepConnected() {
+        var gaveUp = false
+        while (true) {
+            if (!connected && (!gaveUp || retryRequested)) {
+                retryRequested = false
+                // Whatever is left of the last connection goes first.
+                withContext(Dispatchers.IO) { stop() }
+                connecting = true
+                attempt = 0
+                while (!connected && attempt < MAX_ATTEMPTS) {
+                    // Network I/O, which Android refuses on the main thread.
+                    if (withContext(Dispatchers.IO) { start() }) break
+                    attempt++
+                    delay(1000)
+                }
+                connecting = false
+                gaveUp = !connected
+                if (connected) refresh()
+            }
+            delay(1000)
+        }
+    }
+
+    /** Drop the connection and make a new one (or try again after giving up). */
+    fun retry() {
+        retryRequested = true
+        if (connected) stop()
+    }
+
     /** Send a pointer event (mouse move / button). */
     fun pointer(x: Int, y: Int, mask: Int) {
+        pointerX = x
+        pointerY = y
         send { it.sendPointer(x, y, mask) }
+    }
+
+    /**
+     * Move the pointer by an offset, as a trackpad or a captured mouse
+     * does, keeping it on the screen.
+     */
+    fun movePointer(dx: Int, dy: Int, mask: Int) {
+        val x = (pointerX + dx).coerceIn(0, maxOf(width - 1, 0))
+        val y = (pointerY + dy).coerceIn(0, maxOf(height - 1, 0))
+        pointer(x, y, mask)
     }
 
     /**
@@ -193,6 +291,37 @@ class DisplaySession(
                 it.sendKey(keysym, false)
             }
         }
+    }
+
+    /** True when the server can change size on request (Xvnc can, x11vnc cannot). */
+    val canResize: Boolean get() = client?.canResize == true
+
+    /**
+     * Ask the X server to change the size of the screen, for instance after
+     * the phone rotated. The desktop rearranges itself for the new size.
+     */
+    fun resize(w: Int, h: Int) {
+        if (w <= 0 || h <= 0) return
+        wanted = w to h
+        applyWantedSize()
+    }
+
+    /** The size the screen should have, and the last size asked for. */
+    @Volatile
+    private var wanted: Pair<Int, Int>? = null
+
+    @Volatile
+    private var requested: Pair<Int, Int>? = null
+
+    private fun applyWantedSize() {
+        val want = wanted ?: return
+        val c = client ?: return
+        // Until the server's first update it is unknown whether it can.
+        if (!c.canResize) return
+        // Asking again for a size the server refused would loop.
+        if (want == (width to height) || want == requested) return
+        requested = want
+        send { it.requestDesktopSize(want.first, want.second) }
     }
 
     /** Ask the server for a complete repaint. */

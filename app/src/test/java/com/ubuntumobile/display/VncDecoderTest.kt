@@ -169,6 +169,65 @@ class VncDecoderTest {
     }
 
     @Test
+    fun asksTheServerForANewSizeAndFollowsIt() {
+        // How the desktop follows a rotation: the client asks Xvnc for a
+        // new size (SetDesktopSize) and switches to the size it answers with.
+        val server = FakeVncServer(width = 64, height = 48, resizable = true)
+        server.start()
+        try {
+            val client = VncClient("127.0.0.1", server.port)
+            client.connect()
+            val resized = CountDownLatch(1)
+            val repainted = CountDownLatch(1)
+            client.onResize = { _, _ -> resized.countDown() }
+            client.onUpdate = { if (client.width == 48) repainted.countDown() }
+            var failure: Throwable? = null
+            Thread {
+                try { client.runLoop() } catch (e: Throwable) { failure = e }
+            }.apply { isDaemon = true; start() }
+            client.requestFullUpdate()
+
+            val deadline = System.currentTimeMillis() + 5000
+            while (!client.canResize && System.currentTimeMillis() < deadline) Thread.sleep(20)
+            assertTrue("the server's resize support was not noticed: $failure", client.canResize)
+            assertTrue(client.requestDesktopSize(48, 64))
+
+            assertTrue("the new size never arrived: $failure", resized.await(5, TimeUnit.SECONDS))
+            assertTrue("the new size was never painted: $failure", repainted.await(5, TimeUnit.SECONDS))
+            assertEquals(listOf(48 to 64), server.desktopSizeRequests.toList())
+            assertEquals(48, client.width)
+            assertEquals(64, client.height)
+            assertEquals(48 * 64, client.framebuffer.size)
+            assertTrue(client.framebuffer.all { it == FakeVncServer.RESIZED_COLOUR })
+            client.close()
+        } finally {
+            server.stop()
+        }
+    }
+
+    @Test
+    fun doesNotAskAServerThatCannotResize() {
+        // x11vnc never announces ExtendedDesktopSize; a SetDesktopSize it
+        // does not understand would end the connection.
+        val server = FakeVncServer()
+        server.start()
+        try {
+            val client = VncClient("127.0.0.1", server.port)
+            client.connect()
+            val frame = CountDownLatch(1)
+            client.onUpdate = { frame.countDown() }
+            Thread { try { client.runLoop() } catch (_: Exception) {} }.apply { isDaemon = true; start() }
+            client.requestFullUpdate()
+            assertTrue(frame.await(5, TimeUnit.SECONDS))
+            assertEquals(false, client.canResize)
+            assertEquals(false, client.requestDesktopSize(48, 64))
+            client.close()
+        } finally {
+            server.stop()
+        }
+    }
+
+    @Test
     fun reportsTheDesktopSize() {
         val server = FakeVncServer(width = 320, height = 240)
         server.start()

@@ -20,8 +20,8 @@ android {
         // stay below API 29. This is exactly what Termux does, and it is why
         // the app cannot go to the Play Store as it stands.
         targetSdk = 28
-        versionCode = 40
-        versionName = "0.4.0"
+        versionCode = 50
+        versionName = "0.5.0"
         resourceConfigurations += listOf("en")
     }
 
@@ -180,7 +180,7 @@ abstract class BundleLinxScripts : DefaultTask() {
 
 val linxScripts = tasks.register<BundleLinxScripts>("bundleLinxScripts") {
     scripts.from(
-        listOf("display-start.sh", "desktop-start.sh", "tint2rc", "gamepad-helper.py", "nosandbox-bwrap")
+        listOf("display-start.sh", "desktop-start.sh", "display-scale.sh", "tint2rc", "gamepad-helper.py", "nosandbox-bwrap")
             .map { rootProject.file("tools/$it") }
     )
 }

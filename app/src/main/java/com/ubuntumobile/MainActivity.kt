@@ -13,6 +13,11 @@ import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
+import androidx.compose.foundation.layout.WindowInsets
+import androidx.compose.foundation.layout.displayCutout
+import androidx.compose.foundation.layout.systemBars
+import androidx.compose.foundation.layout.union
+import androidx.compose.foundation.layout.windowInsetsPadding
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
@@ -44,6 +49,7 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.focus.FocusRequester
+import androidx.compose.ui.focus.focusProperties
 import androidx.compose.ui.focus.focusRequester
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.platform.LocalConfiguration
@@ -56,9 +62,14 @@ import androidx.compose.ui.unit.sp
 import androidx.core.content.ContextCompat
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import androidx.lifecycle.viewmodel.compose.viewModel
+import com.ubuntumobile.display.DesktopSurface
+import com.ubuntumobile.display.DisplayActions
 import com.ubuntumobile.display.DisplayScreen
 import com.ubuntumobile.display.DisplaySession
+import com.ubuntumobile.display.PresentationOn
+import com.ubuntumobile.display.TrackpadScreen
 import com.ubuntumobile.display.androidKeyToX11
+import com.ubuntumobile.display.rememberExternalDisplay
 import com.ubuntumobile.gamepad.GamepadBridge
 import com.ubuntumobile.gamepad.GamepadState
 import com.ubuntumobile.gamepad.VirtualGamepad
@@ -122,13 +133,43 @@ class MainActivity : ComponentActivity() {
     override fun dispatchKeyEvent(event: android.view.KeyEvent): Boolean {
         val session = keyTarget
         if (session != null && session.connected) {
-            val keysym = androidKeyToX11(event.keyCode)
+            val down = event.action == android.view.KeyEvent.ACTION_DOWN
+            // The release must name the key the press did, even if Shift
+            // changed in between, or X keeps the key held down.
+            val keysym = if (down) {
+                keysymFor(event)?.also { pressedKeys[event.keyCode] = it }
+            } else {
+                pressedKeys.remove(event.keyCode) ?: keysymFor(event)
+            }
             if (keysym != null) {
-                session.key(keysym, event.action == android.view.KeyEvent.ACTION_DOWN)
+                session.key(keysym, down)
                 return true
             }
         }
         return super.dispatchKeyEvent(event)
+    }
+
+    /** The keysym each key currently held down was sent as. */
+    private val pressedKeys = HashMap<Int, Int>()
+
+    /**
+     * The keysym for a key event.
+     *
+     * A printable key is sent as the character it types, with Shift and the
+     * keyboard layout applied: Android may report Shift only in the event's
+     * meta state (no Shift key event of its own), and X would then type the
+     * unshifted character. Ctrl and Alt are left out, so Ctrl+C is still C.
+     * Everything else (Enter, the arrows, F1...) has a fixed keysym.
+     */
+    private fun keysymFor(event: android.view.KeyEvent): Int? {
+        val meta = event.metaState and
+            (android.view.KeyEvent.META_CTRL_MASK or android.view.KeyEvent.META_ALT_MASK or
+                android.view.KeyEvent.META_META_MASK).inv()
+        val char = event.getUnicodeChar(meta)
+        if (char > 0x20 && char and android.view.KeyCharacterMap.COMBINING_ACCENT == 0) {
+            return if (char <= 0xFF) char else 0x01000000 or char
+        }
+        return androidKeyToX11(event.keyCode)
     }
 
     @Deprecated("the onBackPressedDispatcher is the modern way to do this")
@@ -183,32 +224,40 @@ fun UbuntuApp(
     val landscape = config.orientation == android.content.res.Configuration.ORIENTATION_LANDSCAPE
     val wide = config.screenWidthDp >= 600
 
-    // The in-container X display is not the phone's native resolution.
-    // The desktop is laid out in pixels - the panel is 30 pixels tall, the
-    // fonts are 10 points - so at a native resolution of a modern handset
-    // (1440x3120) the whole desktop would be far too small to tap. The
-    // display is therefore sized to a normal desktop screen with the
-    // phone's aspect ratio, and the phone scales it up.
-    //
-    // The shape comes from the area the desktop is actually drawn in (below
-    // the status bar and the toolbar), which the display screen measures.
-    // Anything else letterboxes the desktop with black bars.
+    // The X screen takes the shape of the area the desktop is drawn in -
+    // on the phone (below the status bar and the toolbar) or on a monitor -
+    // which the display surfaces measure. Anything else letterboxes the
+    // desktop with black bars. When the area changes (the phone rotates,
+    // the app is docked or resized) the X screen is resized to match.
     var canvasSize by remember { mutableStateOf<androidx.compose.ui.unit.IntSize?>(null) }
-    fun geometryFor(size: androidx.compose.ui.unit.IntSize?): String {
-        val metrics = context.resources.displayMetrics
-        val width = size?.width ?: metrics.widthPixels
-        val height = size?.height ?: metrics.heightPixels
-        val short = minOf(width, height)
-        val scale = if (short > 720) 720f / short else 1f
-        // Round to even numbers: X servers are happier with them.
-        val gw = ((width * scale).toInt() / 2) * 2
-        val gh = ((height * scale).toInt() / 2) * 2
-        return "${gw}x$gh"
+    var monitorSize by remember { mutableStateOf<androidx.compose.ui.unit.IntSize?>(null) }
+
+    // A monitor connected over USB-C or HDMI. The desktop moves there and
+    // the phone becomes its trackpad, unless asked to stay on the phone.
+    val externalDisplay = rememberExternalDisplay()
+    var preferMonitor by remember { mutableStateOf(true) }
+    val docked = externalDisplay != null && preferMonitor
+    LaunchedEffect(externalDisplay) { if (externalDisplay != null) preferMonitor = true }
+
+    val target: DisplayTarget? = if (docked) {
+        monitorSize?.let { displayTargetFor(it, density = 1f, monitor = true) }
+    } else {
+        canvasSize?.let { displayTargetFor(it, context.resources.displayMetrics.density, monitor = false) }
     }
+    // The start-up code waits on this, so it has to be state: a plain
+    // value is captured once and never seen to change.
+    val currentTarget by androidx.compose.runtime.rememberUpdatedState(target)
+    // The UI scale the desktop is running with right now.
+    var appliedScale by remember { mutableStateOf(2) }
 
     // Hidden text field used to raise the Android soft keyboard so it can
     // send key events to the VNC session.
     val keyboardFocus = remember { FocusRequester() }
+    // The field can only take the focus once the keyboard button asked for
+    // it. With a physical keyboard Android leaves touch mode, and Compose
+    // then focuses the first thing that can be focused - this field - which
+    // brings up the soft keyboard nobody asked for.
+    var keyboardWanted by remember { mutableStateOf(false) }
 
     // Terminal state
     val terminal = remember { AnsiTerminal() }
@@ -219,8 +268,24 @@ fun UbuntuApp(
     var displayProcess by remember { mutableStateOf<Process?>(null) }
     val scope = rememberCoroutineScope()
 
+    // The connection to the desktop. It belongs to the app rather than to
+    // a screen, because the phone and a monitor can both show it.
+    val session = remember {
+        DisplaySession("127.0.0.1", DISPLAY_PORT).apply {
+            // Debug builds can record the RFB stream for offline
+            // replay: create files/vnc-capture to switch it on.
+            if (BuildConfig.DEBUG && java.io.File(context.filesDir, "vnc-capture").exists()) {
+                captureFile = java.io.File(context.cacheDir, "vnc-stream.bin")
+            }
+        }
+    }
+    LaunchedEffect(state.isInstalled) {
+        if (state.isInstalled) session.keepConnected()
+    }
+
     DisposableEffect(Unit) {
         onDispose {
+            session.stop()
             // Stop the X server first: killing the proot process that hosts
             // it does not stop the server itself, and a leftover server
             // would hold the RFB port.
@@ -256,10 +321,13 @@ fun UbuntuApp(
     suspend fun startLinuxDisplay() {
         // The display screen is the first thing shown, so its size is known
         // almost at once; fall back to the whole screen if it never is.
-        val measured = kotlinx.coroutines.withTimeoutOrNull(3000) {
-            androidx.compose.runtime.snapshotFlow { canvasSize }.first { it != null }
+        val start = kotlinx.coroutines.withTimeoutOrNull(3000) {
+            androidx.compose.runtime.snapshotFlow { currentTarget }.first { it != null }
+        } ?: context.resources.displayMetrics.let {
+            displayTargetFor(androidx.compose.ui.unit.IntSize(it.widthPixels, it.heightPixels), it.density, monitor = false)
         }
-        val geometry = geometryFor(measured)
+        val geometry = "${start.width}x${start.height}"
+        appliedScale = start.scale
         withContext(Dispatchers.IO) {
             displayProcess?.destroyForcibly()
             com.ubuntumobile.linux.ContainerSetup.syncScripts(context, vm.paths)
@@ -268,7 +336,7 @@ fun UbuntuApp(
                 listOf(
                     "/bin/bash", "-c",
                     "export LINX_DISPLAY=$DISPLAY_NUM LINX_RFB_PORT=$DISPLAY_PORT; " +
-                        "export LINX_GEOMETRY=$geometry LINX_DEPTH=24; " +
+                        "export LINX_GEOMETRY=$geometry LINX_DEPTH=24 LINX_UI_SCALE=${start.scale}; " +
                         "/usr/local/lib/linx/display-start.sh; " +
                         // Keep the container alive: the X server is a child
                         // of this shell, and proot kills its children when
@@ -299,6 +367,50 @@ fun UbuntuApp(
     LaunchedEffect(state.isInstalled) {
         if (state.isInstalled && displayProcess == null) {
             startLinuxDisplay()
+        }
+    }
+
+    // Follow the drawing area: resize the X screen and, between the phone
+    // and a monitor, change the UI scale. A rotation passes through
+    // in-between sizes, so wait for it to settle first.
+    LaunchedEffect(target, displayProcess) {
+        val t = target ?: return@LaunchedEffect
+        delay(400)
+        session.resize(t.width, t.height)
+        if (displayProcess != null && t.scale != appliedScale) {
+            appliedScale = t.scale
+            vm.paths.appendLog("the desktop is now ${t.width}x${t.height} at scale ${t.scale}")
+            withContext(Dispatchers.IO) {
+                vm.runtime.shell("/usr/local/lib/linx/display-scale.sh ${t.scale}", 30)
+            }
+        }
+    }
+
+    // On a monitor, the desktop.
+    if (state.isInstalled && docked && externalDisplay != null) {
+        PresentationOn(externalDisplay) {
+            DesktopSurface(
+                session = session,
+                onCanvasSize = { monitorSize = it },
+                modifier = Modifier.fillMaxSize(),
+            )
+        }
+    }
+
+    // In landscape the desktop gets the whole screen: the status and
+    // navigation bars hide until swiped in.
+    val activityWindow = (context as? android.app.Activity)?.window
+    val rootView = LocalView.current
+    LaunchedEffect(landscape, screen, docked, state.isInstalled) {
+        val window = activityWindow ?: return@LaunchedEffect
+        val controller = androidx.core.view.WindowCompat.getInsetsController(window, rootView)
+        val bars = androidx.core.view.WindowInsetsCompat.Type.systemBars()
+        if (state.isInstalled && landscape && screen == Screen.DISPLAY && !docked) {
+            controller.systemBarsBehavior =
+                androidx.core.view.WindowInsetsControllerCompat.BEHAVIOR_SHOW_TRANSIENT_BARS_BY_SWIPE
+            controller.hide(bars)
+        } else {
+            controller.show(bars)
         }
     }
 
@@ -336,11 +448,9 @@ fun UbuntuApp(
             ),
             mapOf(
                 "DISPLAY" to ":$DISPLAY_NUM",
-                // The same scaling and image-loader set-up the desktop
-                // session gets (see display-start.sh).
-                "GDK_SCALE" to "2",
-                "GDK_DPI_SCALE" to "1",
-                "QT_SCALE_FACTOR" to "2",
+                // GTK applications take the scale from the desktop's
+                // XSETTINGS; Qt ones only read it when they start.
+                "QT_SCALE_FACTOR" to appliedScale.toString(),
                 "FLATPAK_BWRAP" to "/usr/bin/bwrap",
             ),
         )
@@ -348,6 +458,7 @@ fun UbuntuApp(
 
     /** Show the Android soft keyboard so key events reach the VNC session. */
     fun showSoftKeyboard(view: android.view.View, ctx: android.content.Context) {
+        keyboardWanted = true
         keyboardFocus.requestFocus()
         val imm = ContextCompat.getSystemService(ctx, InputMethodManager::class.java)
         imm?.showSoftInput(view, InputMethodManager.SHOW_IMPLICIT)
@@ -487,27 +598,25 @@ fun UbuntuApp(
         }
 
         Screen.DISPLAY -> {
-            val session = remember {
-                DisplaySession("127.0.0.1", DISPLAY_PORT).apply {
-                    // Debug builds can record the RFB stream for offline
-                    // replay: create files/vnc-capture to switch it on.
-                    if (BuildConfig.DEBUG && java.io.File(context.filesDir, "vnc-capture").exists()) {
-                        captureFile = java.io.File(context.cacheDir, "vnc-stream.bin")
-                    }
-                }
-            }
             DisposableEffect(Unit) {
                 keyTarget(session)
-                onDispose {
-                    keyTarget(null)
-                    session.stop()
-                }
+                onDispose { keyTarget(null) }
             }
             // An invisible text field that captures key events for the VNC
             // session. It is shown behind the display so it never blocks
             // touch, but it can receive focus when the keyboard button is
             // pressed.
             val view = LocalView.current
+            val actions = DisplayActions(
+                onShowLauncher = { screen = Screen.DESKTOP },
+                onOpenTerminal = { launchOnDisplay(listOf("/usr/bin/xfce4-terminal")) },
+                onOpenFiles = { launchOnDisplay(listOf("/usr/bin/thunar")) },
+                onOpenStore = { screen = Screen.STORE },
+                onOpenGamepad = { screen = Screen.GAMEPAD },
+                onShowKeyboard = { showSoftKeyboard(view, context) },
+                onReconnect = { session.retry() },
+                onUseMonitor = if (externalDisplay != null && !docked) ({ preferMonitor = true }) else null,
+            )
             // The toolbar colour continues behind the status bar.
             Box(Modifier.fillMaxSize().background(UbuntuPalette.DarkSurface)) {
                 // Whatever the soft keyboard commits is typed into X and
@@ -516,6 +625,7 @@ fun UbuntuApp(
                     value = "",
                     onValueChange = { typed -> if (typed.isNotEmpty()) session.type(typed) },
                     modifier = Modifier
+                        .focusProperties { canFocus = keyboardWanted }
                         .focusRequester(keyboardFocus)
                         .size(1.dp),
                     textStyle = androidx.compose.ui.text.TextStyle(color = Color.Transparent),
@@ -524,22 +634,65 @@ fun UbuntuApp(
                         keyboardType = androidx.compose.ui.text.input.KeyboardType.Password,
                     ),
                 )
-                DisplayScreen(
-                    session = session,
-                    landscape = landscape,
-                    onClose = { screen = Screen.DESKTOP },
-                    onShowLauncher = { screen = Screen.DESKTOP },
-                    onOpenTerminal = { launchOnDisplay(listOf("/usr/bin/xfce4-terminal")) },
-                    onOpenFiles = { launchOnDisplay(listOf("/usr/bin/thunar")) },
-                    onOpenStore = { screen = Screen.STORE },
-                    onOpenGamepad = { screen = Screen.GAMEPAD },
-                    onShowKeyboard = { showSoftKeyboard(view, context) },
-                    onCanvasSize = { canvasSize = it },
-                    modifier = Modifier.systemBarsPadding(),
+                val insets = Modifier.windowInsetsPadding(
+                    WindowInsets.systemBars.union(WindowInsets.displayCutout),
                 )
+                if (docked) {
+                    TrackpadScreen(
+                        session = session,
+                        actions = actions,
+                        onShowOnPhone = { preferMonitor = false },
+                        modifier = insets,
+                    )
+                } else {
+                    DisplayScreen(
+                        session = session,
+                        landscape = landscape,
+                        actions = actions,
+                        onCanvasSize = { canvasSize = it },
+                        modifier = insets,
+                    )
+                }
             }
         }
     }
+}
+
+/** The size and UI scale the X screen should have. */
+private data class DisplayTarget(val width: Int, val height: Int, val scale: Int)
+
+/**
+ * The X screen for a drawing area of [size] pixels.
+ *
+ * The desktop is laid out in pixels - the panel is 30 pixels tall, the
+ * fonts are 10 points - so at the native resolution of a modern handset
+ * (1440x3120) it would be far too small to tap. On a phone the X screen is
+ * therefore a normal desktop screen with the phone's shape (short side 720
+ * pixels) with everything doubled (scale 2), and the phone scales it up.
+ *
+ * A monitor gets its own resolution at scale 1, a plain desktop; a tablet
+ * (or a large window) one pixel per dp, also at scale 1. Either is capped
+ * at about 1080p worth of pixels: every pixel is streamed and decoded, and
+ * more of them only makes the desktop slower.
+ */
+private fun displayTargetFor(
+    size: androidx.compose.ui.unit.IntSize,
+    density: Float,
+    monitor: Boolean,
+): DisplayTarget {
+    // Round to even numbers: X servers are happier with them.
+    fun even(v: Float) = maxOf(2, (v.toInt() / 2) * 2)
+    val w = size.width.toFloat().coerceAtLeast(1f)
+    val h = size.height.toFloat().coerceAtLeast(1f)
+    if (monitor || minOf(w, h) / density >= 600f) {
+        val dw = if (monitor) w else w / density
+        val dh = if (monitor) h else h / density
+        val fit = minOf(1f, kotlin.math.sqrt(1920f * 1200f / (dw * dh)))
+        return DisplayTarget(even(dw * fit), even(dh * fit), 1)
+    }
+    val short = minOf(w, h)
+    val fit = if (short > 720) 720f / short else 1f
+    return DisplayTarget(even(w * fit), even(h * fit), 2)
 }
 
 private fun quote(s: String): String = "'" + s.replace("'", "'\\''") + "'"

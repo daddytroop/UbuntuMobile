@@ -44,6 +44,20 @@ class LiveVncProbe {
         reader.start()
         client.requestFullUpdate()
 
+        // LINX_LIVE_RESIZE=1466x720 asks Xvnc for a new size first, as the
+        // app does when the phone rotates.
+        System.getenv("LINX_LIVE_RESIZE")?.split("x")?.map { it.toInt() }?.let { (w, h) ->
+            val deadline = System.currentTimeMillis() + 10_000
+            while (!client.canResize && System.currentTimeMillis() < deadline) Thread.sleep(50)
+            assertTrue("the server cannot resize", client.requestDesktopSize(w, h))
+            while ((client.width != w || client.height != h) && System.currentTimeMillis() < deadline + 10_000) {
+                Thread.sleep(50)
+            }
+            // Give the desktop time to rearrange itself for the new size.
+            Thread.sleep(4000)
+            client.requestFullUpdate()
+        }
+
         // Wiggle the pointer so the server has damage to send.
         repeat(System.getenv("LINX_LIVE_STEPS")?.toIntOrNull() ?: 40) { i ->
             Thread.sleep(250)

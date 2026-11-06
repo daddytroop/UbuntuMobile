@@ -16,6 +16,11 @@ import java.net.Socket
  * Supported encodings: Raw (0), CopyRect (1) and Hextile (5). Hextile keeps
  * the amount of data on the wire small enough for a phone.
  *
+ * The client also takes part in resizing (the DesktopSize and
+ * ExtendedDesktopSize pseudo-encodings): the server can change the size of
+ * the framebuffer, and with Xvnc the client can ask it to, which is how the
+ * desktop follows the phone when it rotates or is docked.
+ *
  * Pixels are decoded according to the pixel format the server announced in
  * `ServerInit`. That is deliberate: a server may ignore `SetPixelFormat`, so
  * following the server's own description removes any ambiguity.
@@ -32,6 +37,12 @@ class VncClient(
         const val ENCODING_COPY_RECT = 1
         const val ENCODING_HEXTILE = 5
 
+        /** Pseudo-encoding: the server changed the framebuffer size. */
+        const val ENCODING_DESKTOP_SIZE = -223
+
+        /** Pseudo-encoding: as DesktopSize, plus the client may ask for a size. */
+        const val ENCODING_EXTENDED_DESKTOP_SIZE = -308
+
         private const val MSG_FRAMEBUFFER_UPDATE = 0
         private const val MSG_SET_COLOUR_MAP_ENTRIES = 1
         private const val MSG_BELL = 2
@@ -39,6 +50,7 @@ class VncClient(
 
         private const val MSG_KEY_EVENT = 4
         private const val MSG_POINTER_EVENT = 5
+        private const val MSG_SET_DESKTOP_SIZE = 251
 
         /** The button bit of "wheel up" in a pointer event's mask. */
         const val BUTTON_WHEEL_UP = 8
@@ -132,6 +144,24 @@ class VncClient(
     /** Called after every framebuffer update with the updated regions. */
     var onUpdate: ((List<Rect>) -> Unit)? = null
 
+    /**
+     * Called (on the reader thread) when the framebuffer changed size. The
+     * new, empty [framebuffer] is already in place; the server repaints it.
+     */
+    var onResize: ((Int, Int) -> Unit)? = null
+
+    /**
+     * True once the server has said it accepts size requests
+     * (ExtendedDesktopSize). Xvnc does; x11vnc does not.
+     */
+    @Volatile
+    var canResize = false
+        private set
+
+    /** The server's screen layout, which a size request has to repeat. */
+    private var screenId = 0
+    private var screenFlags = 0
+
     /** A rectangle of the framebuffer that changed. */
     data class Rect(val x: Int, val y: Int, val width: Int, val height: Int)
 
@@ -186,7 +216,12 @@ class VncClient(
         framebuffer = IntArray(width * height)
 
         // Ask for the encodings we can decode, in preference order.
-        setEncodings(listOf(ENCODING_HEXTILE, ENCODING_COPY_RECT, ENCODING_RAW))
+        setEncodings(
+            listOf(
+                ENCODING_HEXTILE, ENCODING_COPY_RECT, ENCODING_RAW,
+                ENCODING_EXTENDED_DESKTOP_SIZE, ENCODING_DESKTOP_SIZE,
+            ),
+        )
 
         // Re-send the server's own pixel format. Some servers (notably
         // libvncserver, which TigerVNC uses) will not start sending frame
@@ -218,13 +253,14 @@ class VncClient(
             s.soTimeout = MESSAGE_TIMEOUT_MS
             when (type) {
                 MSG_FRAMEBUFFER_UPDATE -> {
-                    handleFramebufferUpdate()
+                    val resized = handleFramebufferUpdate()
                     framesReceived++
                     // Keep exactly one request outstanding: the server sends
                     // damage updates while a request is pending. Sending a
                     // second request while one is still pending is a protocol
-                    // violation and servers may ignore it.
-                    requestIncrementalUpdate()
+                    // violation and servers may ignore it. A new size starts
+                    // from an empty framebuffer, so that asks for all of it.
+                    if (resized) requestFullUpdate() else requestIncrementalUpdate()
                 }
                 MSG_SET_COLOUR_MAP_ENTRIES -> {
                     // RFC 6143 7.6.2: padding (1), first colour (2), count (2).
@@ -315,11 +351,13 @@ class VncClient(
         lastRequestAt = System.currentTimeMillis()
     }
 
-    private fun handleFramebufferUpdate() {
+    /** Returns true if the update changed the framebuffer size. */
+    private fun handleFramebufferUpdate(): Boolean {
         val stream = input!!
         stream.readUnsignedByte() // padding
         val rectCount = stream.readUnsignedShort()
         val changed = ArrayList<Rect>(rectCount)
+        var resized = false
 
         for (i in 0 until rectCount) {
             val x = stream.readUnsignedShort()
@@ -343,6 +381,33 @@ class VncClient(
                     readHextile(x, y, w, h)
                     changed += Rect(x, y, w, h)
                 }
+                ENCODING_DESKTOP_SIZE -> {
+                    if (resizeFramebuffer(w, h)) {
+                        resized = true
+                        changed.clear()
+                    }
+                }
+                ENCODING_EXTENDED_DESKTOP_SIZE -> {
+                    // x is why the size changed and y whether a request of
+                    // ours worked; the screen layout follows (RFC 6143 7.8.2).
+                    val screens = stream.readUnsignedByte()
+                    skipFully(3)
+                    repeat(screens) { i ->
+                        val id = stream.readInt()
+                        skipFully(8) // x, y, width, height
+                        val flags = stream.readInt()
+                        if (i == 0) {
+                            screenId = id
+                            screenFlags = flags
+                        }
+                    }
+                    canResize = true
+                    // A refused request repeats the current size.
+                    if (y == 0 && resizeFramebuffer(w, h)) {
+                        resized = true
+                        changed.clear()
+                    }
+                }
                 else -> throw IllegalStateException(
                     "unsupported encoding: $encoding after ${recent.joinToString()}",
                 )
@@ -351,6 +416,45 @@ class VncClient(
         }
 
         if (changed.isNotEmpty()) onUpdate?.invoke(changed)
+        return resized
+    }
+
+    /** Switch to a new framebuffer size; false if it is the current one. */
+    private fun resizeFramebuffer(w: Int, h: Int): Boolean {
+        val newW = w.coerceIn(1, MAX_DIMENSION)
+        val newH = h.coerceIn(1, MAX_DIMENSION)
+        if (newW == width && newH == height) return false
+        framebuffer = IntArray(newW * newH)
+        width = newW
+        height = newH
+        onResize?.invoke(newW, newH)
+        return true
+    }
+
+    /**
+     * Ask the server for a new framebuffer size (SetDesktopSize).
+     *
+     * Returns false when the server cannot resize. Otherwise the answer
+     * arrives later, as an update that carries the new size.
+     */
+    @Synchronized
+    fun requestDesktopSize(w: Int, h: Int): Boolean {
+        val out = output ?: return false
+        if (!canResize) return false
+        out.write(MSG_SET_DESKTOP_SIZE)
+        out.write(0) // padding
+        writeShort(w)
+        writeShort(h)
+        out.write(1) // one screen, covering the whole framebuffer
+        out.write(0) // padding
+        writeInt(screenId)
+        writeShort(0)
+        writeShort(0)
+        writeShort(w)
+        writeShort(h)
+        writeInt(screenFlags)
+        out.flush()
+        return true
     }
 
     /** Read raw pixel data in the server's pixel format. */

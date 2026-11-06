@@ -56,6 +56,35 @@ start_xfce_extras() {
   thunar --daemon >/tmp/linx-thunar.log 2>&1 &
 }
 
+# The UI scale (2 on the phone, 1 on a monitor) goes through XSETTINGS
+# rather than GDK_SCALE: GTK applications follow an XSETTINGS change while
+# they run, so the scale can change when the phone is docked without
+# restarting anything. xfsettingsd is what serves XSETTINGS; the scale is
+# stored in xfconf, where display-scale.sh changes it.
+start_settings() {
+  # display-scale.sh runs outside this session and needs its bus. From
+  # here on it changes the scale through xfconf...
+  echo "$DBUS_SESSION_BUS_ADDRESS" >/tmp/linx-session-bus
+  # ...and until here it could only leave it in the file.
+  SCALE="$(cat /tmp/linx-ui-scale 2>/dev/null || echo "${LINX_UI_SCALE:-2}")"
+  if command -v xfsettingsd >/dev/null 2>&1 && command -v xfconf-query >/dev/null 2>&1; then
+    xfconf-query -c xsettings -p /Gdk/WindowScalingFactor -n -t int -s "$SCALE"
+    # The X server already says 96 DPI; doubling it as well would make
+    # the text four times the size.
+    xfconf-query -c xsettings -p /Xft/DPI -n -t int -s 96
+    # A screen that changes size is not a new monitor: no dialog about it.
+    xfconf-query -c displays -p /Notify -n -t int -s 0 2>/dev/null
+    xfsettingsd --no-daemon >/tmp/linx-xfsettingsd.log 2>&1 &
+    sleep 1
+  else
+    # No XSETTINGS daemon: a fixed scale is better than none.
+    export GDK_SCALE="$SCALE"
+    export GDK_DPI_SCALE=1
+  fi
+}
+
+start_settings
+
 case "$DESKTOP" in
   plain)
     start_openbox

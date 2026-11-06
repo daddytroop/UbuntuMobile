@@ -89,10 +89,12 @@ Browse and install from Flathub with a native UI. Backed by
 ### Linux Display — running real X11 apps
 This is the piece that turns the container into a usable desktop.
 
-Inside the container, **Xvfb** runs the X server and **x11vnc** exports it
-over RFB, with an XFCE desktop (panel, xfdesktop, Thunar) on Openbox. The
-app talks to it with a hand-written RFB client (`VncClient.kt`), decoding
-Raw, CopyRect and Hextile encodings.
+Inside the container, TigerVNC's **Xvnc** is the X server and the RFB
+server in one, with an XFCE desktop (panel, xfdesktop, Thunar) on Openbox.
+The app talks to it with a hand-written RFB client (`VncClient.kt`),
+decoding Raw, CopyRect and Hextile, and taking part in resizing
+(DesktopSize and ExtendedDesktopSize): the app asks Xvnc for a new screen
+size and the desktop rearranges itself.
 
 Two properties make this work without any extra APK:
 
@@ -103,9 +105,10 @@ Two properties make this work without any extra APK:
   the protocol directly rather than going through a browser, so there is no
   JavaScript or noVNC payload in the APK.
 
-If the X server does not push updates on its own, the container falls back
-to **Xvfb + x11vnc**, which polls the framebuffer instead of relying on
-damage notifications. display-start.sh picks whichever works.
+If Xvnc does not come up, the container falls back to **Xvfb + x11vnc**,
+which polls the framebuffer. That stack cannot change size (Xvfb's RandR
+only knows its starting size), so with it the desktop keeps the shape it
+started with. display-start.sh picks whichever works.
 
 Pixels are decoded according to the pixel format the server announces in
 ServerInit rather than a format the client imposes, so the colours are
@@ -115,7 +118,9 @@ that runs a fake RFB server and asserts every pixel matches.
 
 Touch is translated into pointer events and the on-screen keyboard supplies
 key events, so ordinary X applications (xterm, xeyes, GTK apps) can be
-driven from the phone.
+driven from the phone. A USB or Bluetooth mouse works as a real mouse
+(hover, three buttons, wheel) and a physical keyboard as a PC keyboard
+(function keys, Super, the numeric keypad, the layout's own characters).
 
 ### Virtual gamepad
 An Xbox-layout on-screen controller (dual sticks, D-pad, ABXY, triggers,
@@ -128,9 +133,37 @@ joystick.
 > ROMs that permit it. The app detects this and says so instead of pretending
 > it works. The on-screen controls themselves are always usable.
 
-### Orientation
-The shell, gamepad and terminal all re-layout on rotation. The activity
-handles `orientation|screenSize` itself so the container is never restarted.
+### Rotation
+The desktop follows the phone. Rotating it resizes the X screen to the new
+shape (it is never restarted, and open windows stay open): in portrait the
+app's actions sit in a bar above the desktop, in landscape they move to a
+rail at the side and the status and navigation bars hide until swiped in.
+The shell, gamepad and terminal re-layout too.
+
+### Docking: a desktop on a monitor
+Connect the phone to a monitor (a USB-C dock, or a USB-C to HDMI or
+DisplayPort cable) and the desktop moves to the monitor at its own
+resolution, laid out like a normal desktop rather than a phone's. The phone
+becomes the trackpad: slide to move, tap to click, two-finger tap to
+right-click, two fingers to scroll, hold then slide to drag, plus left and
+right buttons. A mouse and keyboard plugged into the dock drive the desktop
+directly (the trackpad captures the mouse; tap the chip to let it go).
+"Show on the phone" in the menu brings the desktop back; unplugging does
+too.
+
+How it fits together: the monitor is an Android presentation display, and
+the app shows the desktop there in a `Presentation`. The X screen is
+resized to the monitor's size (capped at about 1080p of pixels, since every
+pixel is streamed), and the UI scale switches from 2 (phone) to 1 (monitor)
+while everything runs: the scale is served through XSETTINGS by
+xfsettingsd, which running GTK applications follow (`display-scale.sh`).
+Qt applications only read their scale when they start.
+
+The phone has to offer the monitor as a presentation display, which phones
+with DisplayPort over USB-C do. Phones that only mirror (no video over
+USB-C) cannot be docked this way. On a tablet, or in a large window
+(Samsung DeX, Android's desktop windowing) the desktop is laid out at scale
+1 as well.
 
 ---
 
@@ -395,6 +428,23 @@ helper unsets it before launching the server.
 
 ---
 
+**Xvnc is not black.** The display once used Xvnc, and every window came
+through black while the root window was fine, so it was replaced with Xvfb
+plus x11vnc. The real cause was the client's Hextile decoder, which lost
+every tile with detail in it - which is all of the drawn content. With the
+decoder fixed Xvnc is back, because it is the one that can change size.
+
+**Xvfb cannot resize, and does not pretend to.** Its RandR reports the
+starting size as the maximum, `xrandr --newmode` and `--setmonitor` are
+accepted and then ignored. Only an X server that implements resizing (Xvnc
+here) lets the desktop follow a rotation.
+
+**A physical keyboard brings up the soft keyboard.** Key events take
+Android out of touch mode, and Compose then focuses the first focusable
+element - here the hidden field that feeds the soft keyboard - which shows
+the keyboard. The field can only take the focus after the keyboard button
+asked for it.
+
 ## Verification performed
 
 - Rootfs built and validated for arm64, armhf and amd64.
@@ -419,6 +469,18 @@ helper unsets it before launching the server.
   RFB client. Taps, drags and the soft keyboard reach X (typing a command
   into xfce4-terminal runs it), apps open from the launcher, and Ubuntu
   Software lists Flathub.
+- **Rotation and docking on the emulator.** Rotating resizes the running
+  desktop (720x1382 portrait, 1418x720 landscape, with the rail and the
+  bars hidden). With a simulated 1920x1080 monitor
+  (`adb shell settings put global overlay_display_devices 1920x1080/240`)
+  the desktop moves there at scale 1, the phone shows the trackpad, the
+  trackpad moves the pointer and clicks (opening a terminal from the dock),
+  key events type into it with Shift applied, and a window open while
+  docking and undocking stays open and on screen. Starting the app while
+  docked starts the desktop at the monitor's size directly.
+- Resizing has been run against real Xvnc from the build machine
+  (`LINX_LIVE_RESIZE` in `LiveVncProbe`); the desktop reflows to the new
+  size, and switching the scale to 1 and back works while it runs.
 - The decoder has been run against real x11vnc, both from the build machine
   (`LiveVncProbe`) and by replaying a stream recorded on the phone
   (`VncReplayTest`); see the comments in those tests for how.
@@ -437,5 +499,8 @@ helper unsets it before launching the server.
 - **Running Flatpak apps.** Installing from Flathub is wired up, but Flatpak
   starts every app inside bwrap, which needs user namespaces that proot
   cannot provide, so an installed Flatpak is not expected to launch yet.
-- **Rotation.** The X screen is sized once, for the orientation the app
-  starts in; rotating letterboxes it until the app is restarted.
+- **Docking on real hardware.** Docking has run against the emulator's
+  simulated monitor only. Whether a given phone offers its USB-C video
+  output as a presentation display (rather than only mirroring) varies.
+- **Capturing a real mouse.** Moving a physical mouse through pointer
+  capture in dock mode has not been tried with a real mouse yet.

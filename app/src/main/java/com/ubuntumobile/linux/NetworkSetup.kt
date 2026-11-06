@@ -116,6 +116,7 @@ object ContainerSetup {
     private val SCRIPT_TARGETS = mapOf(
         "display-start.sh" to "usr/local/lib/linx/display-start.sh",
         "desktop-start.sh" to "usr/local/lib/linx/desktop-start.sh",
+        "display-scale.sh" to "usr/local/lib/linx/display-scale.sh",
         "gamepad-helper.py" to "usr/local/lib/linx/gamepad-helper.py",
         "tint2rc" to "usr/local/share/linx/tint2rc",
         "nosandbox-bwrap" to "usr/local/lib/linx/nosandbox/bwrap",

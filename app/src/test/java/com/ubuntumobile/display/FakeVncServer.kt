@@ -32,7 +32,27 @@ class FakeVncServer(
     private val hextileSubrects: Boolean = false,
     /** Send a clipboard update (ServerCutText) before every frame, as x11vnc does. */
     private val sendCutText: Boolean = false,
+    /**
+     * Take part in resizing the way Xvnc does: announce ExtendedDesktopSize
+     * in the first update and honour SetDesktopSize. After a resize the
+     * framebuffer is a single colour, [RESIZED_COLOUR].
+     */
+    private val resizable: Boolean = false,
 ) {
+
+    companion object {
+        const val RESIZED_COLOUR = 0xFF336699.toInt()
+    }
+
+    /** The sizes the client asked for with SetDesktopSize. */
+    val desktopSizeRequests: MutableList<Pair<Int, Int>> =
+        java.util.Collections.synchronizedList(mutableListOf<Pair<Int, Int>>())
+
+    private var currentWidth = width
+    private var currentHeight = height
+    private var announcedSize = false
+    @Volatile
+    private var pendingSize: Pair<Int, Int>? = null
 
     private var serverSocket: ServerSocket? = null
     private var thread: Thread? = null
@@ -156,6 +176,17 @@ class FakeVncServer(
                     )
                     trace("pointer event mask=$mask at $x,$y")
                 }
+                251 -> { // SetDesktopSize
+                    input.readUnsignedByte()
+                    val w = input.readUnsignedShort()
+                    val h = input.readUnsignedShort()
+                    val screens = input.readUnsignedByte()
+                    input.readUnsignedByte()
+                    input.readFully(ByteArray(screens * 16))
+                    desktopSizeRequests.add(w to h)
+                    pendingSize = w to h
+                    trace("desktop size request ${w}x$h")
+                }
                 else -> {
                     trace("unexpected message $type, closing")
                     return
@@ -165,6 +196,7 @@ class FakeVncServer(
     }
 
     private fun sendUpdate(out: OutputStream) {
+        if (resizable && sendResizableUpdate(out)) return
         if (sendCutText) {
             val text = "clipboard".toByteArray()
             out.write(3)                     // ServerCutText
@@ -187,6 +219,60 @@ class FakeVncServer(
             out.write(hextileBytes())
         }
         out.flush()
+    }
+
+    /**
+     * The Xvnc behaviour: announce the screen layout first, then follow
+     * size requests. Returns false when the normal image should be sent.
+     */
+    private fun sendResizableUpdate(out: OutputStream): Boolean {
+        val size = pendingSize
+        val announce = !announcedSize || size != null
+        if (size != null) {
+            currentWidth = size.first
+            currentHeight = size.second
+            pendingSize = null
+        }
+        val resized = currentWidth != width || currentHeight != height
+        if (!announce && !resized) return false
+
+        out.write(0)          // FramebufferUpdate
+        out.write(0)          // padding
+        val rects = (if (announce) 1 else 0) + (if (resized) 1 else 0)
+        out.write(rects.toShortBigEndian())
+        if (announce) {
+            // ExtendedDesktopSize: x is the reason (1 = this client asked),
+            // y the status (0 = done), then the screen layout.
+            out.write((if (announcedSize) 1 else 0).toShortBigEndian())
+            out.write(0.toShortBigEndian())
+            out.write(currentWidth.toShortBigEndian())
+            out.write(currentHeight.toShortBigEndian())
+            out.write((-308).toBigEndian())
+            out.write(byteArrayOf(1, 0, 0, 0))
+            out.write(7.toBigEndian())                // screen id
+            out.write(0.toShortBigEndian())
+            out.write(0.toShortBigEndian())
+            out.write(currentWidth.toShortBigEndian())
+            out.write(currentHeight.toShortBigEndian())
+            out.write(0.toBigEndian())                // flags
+            announcedSize = true
+        }
+        if (resized) {
+            out.write(0.toShortBigEndian())
+            out.write(0.toShortBigEndian())
+            out.write(currentWidth.toShortBigEndian())
+            out.write(currentHeight.toShortBigEndian())
+            out.write(0.toBigEndian())                // Raw
+            val bpp = (format.bitsPerPixel + 7) / 8
+            val value = encode(RESIZED_COLOUR)
+            val pixel = ByteArray(bpp) { b ->
+                val shift = if (format.bigEndian) (bpp - 1 - b) * 8 else b * 8
+                ((value shr shift) and 0xFF).toByte()
+            }
+            repeat(currentWidth * currentHeight) { out.write(pixel) }
+        }
+        out.flush()
+        return true
     }
 
     /** The framebuffer encoded in the server's pixel format. */
