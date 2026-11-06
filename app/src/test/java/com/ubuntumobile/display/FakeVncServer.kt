@@ -90,6 +90,10 @@ class FakeVncServer(
     val pointerEvents: MutableList<ByteArray> =
         java.util.Collections.synchronizedList(mutableListOf<ByteArray>())
 
+    /** The clipboard texts the client sent (ClientCutText). */
+    val clipboardTexts: MutableList<String> =
+        java.util.Collections.synchronizedList(mutableListOf<String>())
+
     /** The keysyms of the key events the client sent. */
     val keyEvents: MutableList<Int> =
         java.util.Collections.synchronizedList(mutableListOf<Int>())
@@ -184,6 +188,12 @@ class FakeVncServer(
                         )
                     )
                     trace("pointer event mask=$mask at $x,$y")
+                }
+                6 -> { // ClientCutText
+                    input.readFully(ByteArray(3))
+                    val text = ByteArray(input.readInt())
+                    input.readFully(text)
+                    clipboardTexts.add(String(text, Charsets.ISO_8859_1))
                 }
                 251 -> { // SetDesktopSize
                     input.readUnsignedByte()

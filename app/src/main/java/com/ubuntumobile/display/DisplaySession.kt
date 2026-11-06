@@ -83,6 +83,9 @@ class DisplaySession(
     /** Debugging aid: when set, each connection's byte stream is saved next to it, timestamped. */
     var captureFile: java.io.File? = null
 
+    /** Called (on the reader thread) when Linux puts text on its clipboard. */
+    var onClipboard: ((String) -> Unit)? = null
+
     /** Called (on the reader thread) whenever a new frame is available. */
     var onFrame: (() -> Unit)? = null
 
@@ -147,6 +150,7 @@ class DisplaySession(
                 // The first update says whether the server can resize.
                 applyWantedSize()
             }
+            c.onClipboard = { text -> onClipboard?.invoke(text) }
             c.onResize = { w, h ->
                 // A new bitmap rather than a resized one: the UI thread may
                 // be drawing the old one right now.
@@ -322,6 +326,11 @@ class DisplaySession(
         if (want == (width to height) || want == requested) return
         requested = want
         send { it.requestDesktopSize(want.first, want.second) }
+    }
+
+    /** Put text on Linux's clipboard. */
+    fun sendClipboard(text: String) {
+        send { it.sendClipboard(text) }
     }
 
     /** Ask the server for a complete repaint. */

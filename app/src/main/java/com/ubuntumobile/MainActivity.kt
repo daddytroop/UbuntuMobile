@@ -403,34 +403,130 @@ fun UbuntuApp(
         }
     }
 
-    // Firefox is the desktop's browser. It is not in the image (Ubuntu's
-    // package is a snap, which cannot run here), so it is installed from
-    // Mozilla's repository the first time the desktop is up.
+    // The first-run pack (install-extras.sh): Firefox, the sound server and
+    // Ubuntu's look. None of it is in the image - Firefox cannot be (Ubuntu's
+    // package is a snap), the rest keeps the APK small - so it is installed
+    // the first time the desktop is up, in the background.
     val firefoxBinary = remember { java.io.File(vm.paths.root, "usr/lib/firefox/firefox") }
+    fun extrasInstalled(): Boolean =
+        (firefoxBinary.exists() || java.io.File(vm.paths.root, "usr/bin/epiphany").exists()) &&
+            java.io.File(vm.paths.root, "usr/bin/pulseaudio").exists() &&
+            java.io.File(vm.paths.root, "usr/share/themes/Yaru").isDirectory
     var browserInstalled by remember { mutableStateOf<Boolean?>(null) }
     var browserBusy by remember { mutableStateOf(false) }
     var browserNote by remember { mutableStateOf<String?>(null) }
-    suspend fun installBrowser() {
+
+    // Linux's sound, played on the phone. The player waits for the stream
+    // by itself; the server is started from the container (linx-audio.sh)
+    // in a process of its own that keeps it alive.
+    val audio = remember { com.ubuntumobile.display.AudioBridge() }
+    DisposableEffect(Unit) { onDispose { audio.stop() } }
+    fun startAudio() {
+        if (!java.io.File(vm.paths.root, "usr/bin/pulseaudio").exists()) return
+        audio.start()
+        vm.runtime.startPersistent(
+            listOf("/bin/bash", "-c", "/usr/local/lib/linx/linx-audio.sh && exec sleep infinity"),
+        )
+    }
+
+    suspend fun installExtras() {
         if (browserBusy) return
         browserBusy = true
-        browserNote = "Installing Firefox…"
-        vm.paths.appendLog("installing Firefox")
+        browserNote = "Setting up Firefox, sound and the Ubuntu look…"
+        vm.paths.appendLog("installing the first-run pack")
         val out = withContext(Dispatchers.IO) {
-            vm.runtime.shell("/usr/local/lib/linx/install-firefox.sh 2>&1 | tail -n 3", 1800).output
+            vm.runtime.shell("/usr/local/lib/linx/install-extras.sh 2>&1 | tail -n 4", 2400).output
         }
         browserInstalled = firefoxBinary.exists()
         browserNote = when {
-            browserInstalled == true -> null
-            out.contains("BROWSER_READY") -> "This phone gets GNOME Web instead (no Firefox for 32-bit ARM)"
-            else -> "Could not install Firefox; check the connection and try again"
+            extrasInstalled() && browserInstalled == true -> null
+            extrasInstalled() -> "This phone gets GNOME Web instead (no Firefox for 32-bit ARM)"
+            else -> "Setup did not finish; check the connection and try again"
         }
-        vm.paths.appendLog("Firefox: ${out.trim().lines().lastOrNull()}")
+        vm.paths.appendLog("first-run pack: ${out.trim().lines().lastOrNull()}")
+        withContext(Dispatchers.IO) {
+            vm.runtime.shell("/usr/local/lib/linx/linx-look.sh", 120)
+            startAudio()
+        }
         browserBusy = false
     }
     LaunchedEffect(session.connected) {
         if (!session.connected) return@LaunchedEffect
         browserInstalled = firefoxBinary.exists()
-        if (browserInstalled == false) installBrowser()
+        withContext(Dispatchers.IO) { startAudio() }
+        if (!extrasInstalled()) installExtras()
+    }
+
+    // The clipboard, shared both ways. Android only lets the app in the
+    // foreground read the clipboard, so the phone's is checked whenever the
+    // app comes back and whenever it changes while the app is open - and
+    // only read when its timestamp says it changed, because reading shows a
+    // "pasted from your clipboard" notice on newer Android.
+    val clipboard = remember { ContextCompat.getSystemService(context, android.content.ClipboardManager::class.java) }
+    val lifecycleOwner = androidx.lifecycle.compose.LocalLifecycleOwner.current
+    DisposableEffect(clipboard, lifecycleOwner) {
+        var lastText: String? = null
+        var lastStamp = -1L
+        val main = android.os.Handler(android.os.Looper.getMainLooper())
+        session.onClipboard = { text ->
+            main.post {
+                lastText = text
+                clipboard?.setPrimaryClip(android.content.ClipData.newPlainText("Ubuntu", text))
+                lastStamp = clipboard?.primaryClipDescription?.timestamp ?: -1L
+            }
+        }
+        fun pushToLinux() {
+            val cm = clipboard ?: return
+            val stamp = cm.primaryClipDescription?.timestamp ?: return
+            if (stamp == lastStamp) return
+            lastStamp = stamp
+            val text = cm.primaryClip?.getItemAt(0)?.coerceToText(context)?.toString() ?: return
+            if (text != lastText && session.connected) {
+                lastText = text
+                session.sendClipboard(text)
+            }
+        }
+        val listener = android.content.ClipboardManager.OnPrimaryClipChangedListener { pushToLinux() }
+        clipboard?.addPrimaryClipChangedListener(listener)
+        val observer = androidx.lifecycle.LifecycleEventObserver { _, event ->
+            if (event == androidx.lifecycle.Lifecycle.Event.ON_RESUME) main.postDelayed({ pushToLinux() }, 500)
+        }
+        lifecycleOwner.lifecycle.addObserver(observer)
+        onDispose {
+            session.onClipboard = null
+            clipboard?.removePrimaryClipChangedListener(listener)
+            lifecycleOwner.lifecycle.removeObserver(observer)
+        }
+    }
+
+    // The phone's own folders (Downloads, Documents, Pictures...) appear in
+    // the Linux home folder once the app may read them (linx-folders.sh).
+    fun storageGranted(): Boolean =
+        ContextCompat.checkSelfPermission(context, android.Manifest.permission.WRITE_EXTERNAL_STORAGE) ==
+            android.content.pm.PackageManager.PERMISSION_GRANTED
+    var storageAllowed by remember { mutableStateOf(storageGranted()) }
+    val storageRequest = androidx.activity.compose.rememberLauncherForActivityResult(
+        androidx.activity.result.contract.ActivityResultContracts.RequestMultiplePermissions(),
+    ) {
+        storageAllowed = storageGranted()
+        if (storageAllowed) {
+            scope.launch(Dispatchers.IO) { vm.runtime.shell("/usr/local/lib/linx/linx-folders.sh", 60) }
+        }
+    }
+    fun askForStorage() {
+        storageRequest.launch(
+            arrayOf(
+                android.Manifest.permission.READ_EXTERNAL_STORAGE,
+                android.Manifest.permission.WRITE_EXTERNAL_STORAGE,
+            ),
+        )
+    }
+    LaunchedEffect(session.connected) {
+        // Asked once, the first time the desktop is up; Settings can ask again.
+        if (session.connected && !storageAllowed && !prefs.getBoolean("storage_asked", false)) {
+            prefs.edit().putBoolean("storage_asked", true).apply()
+            askForStorage()
+        }
     }
 
     // On a monitor, the desktop.
@@ -600,7 +696,9 @@ fun UbuntuApp(
                 browserInstalled = browserInstalled ?: firefoxBinary.exists(),
                 browserBusy = browserBusy,
                 browserNote = browserNote,
-                onInstallBrowser = { scope.launch { installBrowser() } },
+                onInstallBrowser = { scope.launch { installExtras() } },
+                storageAllowed = storageAllowed,
+                onAllowStorage = { askForStorage() },
                 versionName = BuildConfig.VERSION_NAME,
                 ubuntuVersion = state.guestInfo.prettyName,
                 onClose = { screen = Screen.DISPLAY },
@@ -682,7 +780,7 @@ fun UbuntuApp(
                     if (firefoxBinary.exists()) {
                         launchOnDisplay(listOf("firefox"))
                     } else if (!browserBusy) {
-                        scope.launch { installBrowser() }
+                        scope.launch { installExtras() }
                     }
                 },
                 onOpenSettings = { screen = Screen.SETTINGS },

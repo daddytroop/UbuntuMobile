@@ -93,11 +93,8 @@ start_settings() {
     # The X server already says 96 DPI; doubling it as well would make
     # the text four times the size.
     set_xsettings /Xft/DPI int 96
-    # Noto Sans, as on Kubuntu. Greyscale antialiasing: the picture is
-    # scaled on its way to the screen, and coloured subpixel edges would
-    # turn into fringes.
-    set_xsettings /Gtk/FontName string "Noto Sans 10"
-    set_xsettings /Gtk/MonospaceFontName string "Noto Sans Mono 10"
+    # Greyscale antialiasing: the picture is scaled on its way to the
+    # screen, and coloured subpixel edges would turn into fringes.
     set_xsettings /Xft/Antialias int 1
     set_xsettings /Xft/Hinting int 1
     set_xsettings /Xft/HintStyle string hintslight
@@ -105,12 +102,11 @@ start_settings() {
     # A screen that changes size is not a new monitor: no dialog about it.
     xfconf-query -c displays -p /Notify -n -t int -s 0 2>/dev/null
 
-    # The window manager: its theme follows the scale (display-scale.sh
-    # switches it), one workspace, and the usual buttons on the right.
-    local theme=Default
-    [ "$SCALE" -ge 2 ] && theme=Default-xhdpi
-    xfconf-query -c xfwm4 -p /general/theme -n -t string -s "$theme"
-    xfconf-query -c xfwm4 -p /general/title_font -n -t string -s "Noto Sans Bold 9"
+    # The window manager: one workspace, and the usual buttons on the
+    # right. The theme, the fonts and the icons are linx-look.sh's: Yaru
+    # and the Ubuntu font once the first-run pack is in, and window
+    # borders sized for the scale.
+    /usr/local/lib/linx/linx-look.sh >/tmp/linx-look.log 2>&1
     xfconf-query -c xfwm4 -p /general/button_layout -n -t string -s "O|HMC"
     xfconf-query -c xfwm4 -p /general/workspace_count -n -t int -s 1
     xfconf-query -c xfwm4 -p /general/use_compositing -n -t bool -s false

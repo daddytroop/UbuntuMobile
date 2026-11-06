@@ -28,10 +28,8 @@ echo "$SCALE" >/tmp/linx-ui-scale
 # /tmp/linx-ui-scale when it starts instead.
 if [ -n "${DBUS_SESSION_BUS_ADDRESS:-}" ] && command -v xfconf-query >/dev/null 2>&1; then
   xfconf-query -c xsettings -p /Gdk/WindowScalingFactor -n -t int -s "$SCALE"
-  # The window decorations come in sizes; xfwm4 follows the change.
-  THEME=Default
-  [ "$SCALE" -ge 2 ] && THEME=Default-xhdpi
-  xfconf-query -c xfwm4 -p /general/theme -n -t string -s "$THEME"
+  # The window borders come in sizes; xfwm4 follows the change.
+  /usr/local/lib/linx/linx-look.sh >/dev/null 2>&1
 fi
 # Back on the phone, windows sized for the monitor would hang off the
 # screen; they fill it instead, as new ones do there.

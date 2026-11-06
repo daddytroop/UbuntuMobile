@@ -94,12 +94,44 @@ Flathub stays configured in the image, but the store no longer offers
 Flatpak apps: they install, then cannot start, because Flatpak runs every
 app in a bwrap sandbox that needs user namespaces proot cannot provide.
 
+### The first-run pack
+The first time the desktop comes up, the app installs what makes it a
+complete one, in the background (about 150 MB; `install-extras.sh`):
+Firefox, PulseAudio for sound, and Ubuntu's Yaru theme, icons and font.
+None of it is in the image: Firefox cannot be (see below) and the rest keeps
+the APK small. Settings can start it again if it was interrupted.
+
 ### Firefox
-Firefox is the desktop's browser, installed the first time the desktop comes
-up (about 80 MB; Settings can retry it). Ubuntu's own `firefox` package only
+Firefox is the desktop's browser, installed with the first-run pack. Ubuntu's own `firefox` package only
 installs the snap, which cannot run here, so it comes from Mozilla's apt
 repository (`install-firefox.sh`), pinned above Ubuntu's. Mozilla builds it
 for amd64 and arm64; on 32-bit ARM the app installs GNOME Web instead.
+
+### Sound
+PulseAudio in the container plays into a virtual sound card ("Phone") and
+streams it as raw PCM on 127.0.0.1:4713 (`linx-audio.sh`). The app plays
+that stream through Android (`AudioBridge.kt`), so Firefox, VLC and the rest
+come out of the phone's speaker, headphones or Bluetooth. Silence is not
+passed on, and the Android track pauses when nothing plays.
+
+### Clipboard
+Copy on the phone, paste in Linux, and the other way round: the RFB
+clipboard messages carry it, and the app syncs with Android's clipboard when
+it changes and when the app comes back to the front. The basic RFB clipboard
+is Latin-1, so other characters arrive as "?".
+
+### Phone folders
+With storage permission (asked the first time; Settings can ask again),
+Downloads, Documents, Pictures, Music and Videos in the Linux home folder
+are the phone's own (`linx-folders.sh`), so a file saved in Firefox shows
+up in the phone's Downloads, and a photo is one click away in GIMP.
+
+### Look
+Ubuntu's Yaru theme and icons and the Ubuntu font (`linx-look.sh`), a dark
+bottom panel, and window borders drawn for the app by
+`make-xfwm4-theme.py` in Yaru's colours - a flat title bar with round
+minimise, maximise and close buttons - at 1x for a monitor and 2x for the
+phone.
 
 ### The app around the desktop
 The desktop fills the screen; the status and navigation bars hide until
@@ -551,8 +583,7 @@ asked for it.
 - **Hardware acceleration.** The X server runs with Mesa's software
   rasteriser, so 3D games are CPU-bound. Compositing a desktop application
   is fine; a 3D title is not.
-- **Audio.** The container has PulseAudio utilities, but there is no audio
-  bridge from the container to the phone's audio stack yet.
+- **Microphone.** Sound goes from Linux to the phone, not back.
 - **A physical phone.** Everything has run on the x86_64 emulator; the arm64
   APK has not been tried on real hardware yet.
 - **Flatpak apps.** Flatpak starts every app inside bwrap, which needs user
@@ -560,7 +591,8 @@ asked for it.
   instead.
 - **Snaps.** Ubuntu ships some apps (Chromium, Thunderbird) only as snaps,
   which need snapd and mounts; they are not available.
-- **Audio in Firefox and VLC.** There is no audio bridge yet (see Audio).
+- **Clipboard beyond Latin-1.** The basic RFB clipboard cannot carry
+  other characters; TigerVNC's extended clipboard could.
 - **Docking on real hardware.** Docking has run against the emulator's
   simulated monitor only. Whether a given phone offers its USB-C video
   output as a presentation display (rather than only mirroring) varies.

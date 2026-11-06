@@ -52,6 +52,10 @@ class VncClient(
 
         private const val MSG_KEY_EVENT = 4
         private const val MSG_POINTER_EVENT = 5
+        private const val MSG_CLIENT_CUT_TEXT = 6
+
+        /** Clipboard text longer than this is skipped rather than kept. */
+        const val MAX_CLIPBOARD = 1 shl 20
         private const val MSG_SET_DESKTOP_SIZE = 251
 
         /** The button bit of "wheel up" in a pointer event's mask. */
@@ -155,6 +159,9 @@ class VncClient(
      */
     var framebuffer: IntArray = IntArray(0)
         private set
+
+    /** Called (on the reader thread) when the desktop's clipboard changes. */
+    var onClipboard: ((String) -> Unit)? = null
 
     /** Called after every framebuffer update with the updated regions. */
     var onUpdate: ((List<Rect>) -> Unit)? = null
@@ -291,7 +298,14 @@ class VncClient(
                     // the padding puts the client three bytes out of step.
                     skipFully(3)
                     val length = stream.readInt()
-                    skipFully(length.toLong())
+                    if (length in 0..MAX_CLIPBOARD) {
+                        val text = ByteArray(length)
+                        stream.readFully(text)
+                        // The basic RFB clipboard is Latin-1.
+                        onClipboard?.invoke(String(text, Charsets.ISO_8859_1))
+                    } else {
+                        skipFully(length.toLong() and 0xFFFFFFFFL)
+                    }
                 }
                 else -> throw IllegalStateException(
                     "unexpected server message: $type after ${recent.joinToString()}",
@@ -658,6 +672,21 @@ class VncClient(
     }
 
 
+
+    /**
+     * Put text on the desktop's clipboard (ClientCutText). The basic RFB
+     * clipboard is Latin-1: other characters arrive as "?".
+     */
+    @Synchronized
+    fun sendClipboard(text: String) {
+        val out = output ?: return
+        val bytes = text.replace("\r\n", "\n").toByteArray(Charsets.ISO_8859_1)
+        out.write(MSG_CLIENT_CUT_TEXT)
+        out.write(byteArrayOf(0, 0, 0)) // padding
+        writeInt(bytes.size)
+        out.write(bytes)
+        out.flush()
+    }
 
     /** Close the connection. */
     @Synchronized

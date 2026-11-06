@@ -213,6 +213,8 @@ for _ in 1 2 3 4 5 6 7 8 9 10 11 12 13 14 15; do
       sed -i '/^WebBrowser=/d' "$HELPERS"
       echo "WebBrowser=$BROWSER" >>"$HELPERS"
     fi
+    # The phone's Downloads, Documents and so on, in the home folder.
+    /usr/local/lib/linx/linx-folders.sh >/dev/null 2>&1
 
     # The X screen is sized like a normal desktop screen (the phone's
     # aspect ratio, short side 720 pixels), not like the phone's display.

@@ -58,6 +58,9 @@ fun SettingsScreen(
     browserBusy: Boolean,
     browserNote: String?,
     onInstallBrowser: () -> Unit,
+    /** Whether Linux can see the phone's folders. */
+    storageAllowed: Boolean,
+    onAllowStorage: () -> Unit,
     versionName: String,
     ubuntuVersion: String,
     onClose: () -> Unit,
@@ -138,6 +141,31 @@ fun SettingsScreen(
                 }
             }
 
+            Card("Phone folders", null) {
+                Row(verticalAlignment = Alignment.CenterVertically) {
+                    Column(Modifier.weight(1f)) {
+                        Text(
+                            "Downloads, Documents, Pictures",
+                            fontSize = 15.sp,
+                            fontWeight = FontWeight.Medium,
+                            color = UbuntuPalette.LightOnSurface,
+                        )
+                        Text(
+                            if (storageAllowed) {
+                                "In the Linux home folder, shared with your phone's apps"
+                            } else {
+                                "Let Linux apps open and save files in your phone's folders"
+                            },
+                            fontSize = 12.sp,
+                            color = UbuntuPalette.LightOnSurfaceVariant,
+                        )
+                    }
+                    if (!storageAllowed) {
+                        ActionChip("Allow", onAllowStorage)
+                    }
+                }
+            }
+
             Card("Web browser", null) {
                 Row(verticalAlignment = Alignment.CenterVertically) {
                     Column(Modifier.weight(1f)) {
@@ -145,7 +173,7 @@ fun SettingsScreen(
                         Text(
                             browserNote ?: when (browserInstalled) {
                                 true -> "Installed, and the desktop's default browser"
-                                false -> "Not installed yet - about 80 MB to download"
+                                false -> "Not installed yet - with sound and the Ubuntu look, about 150 MB"
                                 null -> "Checking…"
                             },
                             fontSize = 12.sp,
@@ -159,17 +187,7 @@ fun SettingsScreen(
                             color = UbuntuPalette.UbuntuOrange,
                         )
                     } else if (browserInstalled == false) {
-                        Text(
-                            "Install",
-                            color = Color.White,
-                            fontSize = 13.sp,
-                            fontWeight = FontWeight.Medium,
-                            modifier = Modifier
-                                .clip(RoundedCornerShape(20.dp))
-                                .background(UbuntuPalette.UbuntuOrange)
-                                .clickable(onClick = onInstallBrowser)
-                                .padding(horizontal = 18.dp, vertical = 9.dp),
-                        )
+                        ActionChip("Install", onInstallBrowser)
                     }
                 }
             }
@@ -200,6 +218,21 @@ private fun Card(title: String, subtitle: String?, content: @Composable () -> Un
         Spacer(Modifier.height(10.dp))
         content()
     }
+}
+
+@Composable
+private fun ActionChip(label: String, onClick: () -> Unit) {
+    Text(
+        label,
+        color = Color.White,
+        fontSize = 13.sp,
+        fontWeight = FontWeight.Medium,
+        modifier = Modifier
+            .clip(RoundedCornerShape(20.dp))
+            .background(UbuntuPalette.UbuntuOrange)
+            .clickable(onClick = onClick)
+            .padding(horizontal = 18.dp, vertical = 9.dp),
+    )
 }
 
 @Composable
