@@ -169,6 +169,27 @@ class VncDecoderTest {
     }
 
     @Test
+    fun copyRectMovesAnOverlappingBlock() {
+        // Dragging a window down and to the right copies a block onto a
+        // place it overlaps; copied in the wrong order it smears.
+        val server = FakeVncServer(copyRectAfterFirstFrame = true)
+        server.start()
+        try {
+            val client = VncClient("127.0.0.1", server.port)
+            client.connect()
+            val frames = CountDownLatch(2)
+            client.onUpdate = { frames.countDown() }
+            Thread { try { client.runLoop() } catch (_: Exception) {} }.apply { isDaemon = true; start() }
+            client.requestFullUpdate()
+            assertTrue("the CopyRect never arrived", frames.await(10, TimeUnit.SECONDS))
+            assertEquals(server.expectedAfterCopy().toList(), client.framebuffer.toList())
+            client.close()
+        } finally {
+            server.stop()
+        }
+    }
+
+    @Test
     fun asksTheServerForANewSizeAndFollowsIt() {
         // How the desktop follows a rotation: the client asks Xvnc for a
         // new size (SetDesktopSize) and switches to the size it answers with.

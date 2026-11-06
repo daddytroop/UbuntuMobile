@@ -90,11 +90,16 @@ Browse and install from Flathub with a native UI. Backed by
 This is the piece that turns the container into a usable desktop.
 
 Inside the container, TigerVNC's **Xvnc** is the X server and the RFB
-server in one, with an XFCE desktop (panel, xfdesktop, Thunar) on Openbox.
-The app talks to it with a hand-written RFB client (`VncClient.kt`),
-decoding Raw, CopyRect and Hextile, and taking part in resizing
-(DesktopSize and ExtendedDesktopSize): the app asks Xvnc for a new screen
-size and the desktop rearranges itself.
+server in one, with an XFCE desktop: xfwm4 (Openbox as the fallback), a
+single Plasma-style panel along the bottom (`tools/xfce4-panel.xml`),
+xfdesktop and Thunar, in Noto Sans. On the phone, application windows open
+maximized (`linx-windows.py`); on a monitor they open at their own size.
+The app talks to Xvnc with a hand-written RFB client (`VncClient.kt`),
+which asks for Raw pixels (on the phone's own loopback that is cheaper than
+having the server compress them) and copies them in bulk, also decodes
+CopyRect and Hextile, and takes part in resizing (DesktopSize and
+ExtendedDesktopSize): the app asks Xvnc for a new screen size and the
+desktop rearranges itself.
 
 Two properties make this work without any extra APK:
 
@@ -427,6 +432,20 @@ phone's own DNS servers into the rootfs when the container starts.
 helper unsets it before launching the server.
 
 ---
+
+**proot must use seccomp.** The app used to run proot with
+`PROOT_NO_SECCOMP=1`, which stops every process on every system call
+instead of only on the ones proot rewrites. Timed on the emulator, starting
+programs was 2.7 times and walking files 3.8 times slower that way, and the
+whole desktop felt it: a terminal took over 20 seconds to open, and opens
+in about 3 now.
+
+**xfwm4 works under Xvnc, but starts slowly.** It never took over under the
+old Xvfb display, which is why Openbox was used. Under Xvnc it does, after
+loading its theme's images - each through glycin, GTK's image loader, which
+starts loader processes - which can take twenty seconds on a phone. Killing
+it for being slow leaves the screen claimed and Openbox refuses to start,
+so desktop-start.sh waits for as long as xfwm4 is alive.
 
 **Xvnc is not black.** The display once used Xvnc, and every window came
 through black while the root window was fine, so it was replaced with Xvfb

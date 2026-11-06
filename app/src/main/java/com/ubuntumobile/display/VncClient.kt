@@ -13,8 +13,10 @@ import java.net.Socket
  * server is reachable on 127.0.0.1 - no port forwarding or WebSocket proxy
  * is needed.
  *
- * Supported encodings: Raw (0), CopyRect (1) and Hextile (5). Hextile keeps
- * the amount of data on the wire small enough for a phone.
+ * Supported encodings: Raw (0), CopyRect (1) and Hextile (5). Raw is asked
+ * for first: the server is on the phone's own loopback, where moving four
+ * bytes a pixel costs less than the server analysing every tile to
+ * compress it (Hextile), and the client can copy the pixels in bulk.
  *
  * The client also takes part in resizing (the DesktopSize and
  * ExtendedDesktopSize pseudo-encodings): the server can change the size of
@@ -79,6 +81,8 @@ class VncClient(
         const val HEXTILE_ANY_SUBRECTS = 0x08
         const val HEXTILE_SUBRECTS_COLOURED = 0x10
 
+        private const val OPAQUE = 0xFF shl 24
+
         /** Guard against a malformed ServerInit claiming an absurd size. */
         const val MAX_DIMENSION = 4096
     }
@@ -103,6 +107,17 @@ class VncClient(
         val blueShift: Int,
     ) {
         val bytesPerPixel: Int get() = (bitsPerPixel + 7) / 8
+
+        /**
+         * True for 32-bit little-endian pixels laid out as B, G, R, X - the
+         * native format of an X server on ARM and x86. Read as a
+         * little-endian int that is already 0x00RRGGBB, so it can be copied
+         * in bulk with only the alpha byte to set.
+         */
+        val isNativeXrgb: Boolean
+            get() = bitsPerPixel == 32 && !bigEndian && trueColour &&
+                redMax == 255 && greenMax == 255 && blueMax == 255 &&
+                redShift == 16 && greenShift == 8 && blueShift == 0
 
         /** Convert a raw pixel value into an Android ARGB pixel. */
         fun toArgb(value: Int): Int {
@@ -218,7 +233,7 @@ class VncClient(
         // Ask for the encodings we can decode, in preference order.
         setEncodings(
             listOf(
-                ENCODING_HEXTILE, ENCODING_COPY_RECT, ENCODING_RAW,
+                ENCODING_COPY_RECT, ENCODING_RAW, ENCODING_HEXTILE,
                 ENCODING_EXTENDED_DESKTOP_SIZE, ENCODING_DESKTOP_SIZE,
             ),
         )
@@ -457,13 +472,16 @@ class VncClient(
         return true
     }
 
+    /** Reused for raw rectangles; grows to the largest one seen. */
+    private var rawBuffer = ByteArray(0)
+
     /** Read raw pixel data in the server's pixel format. */
     private fun readRawPixels(x: Int, y: Int, w: Int, h: Int) {
-        val pf = pixelFormat
-        val bpp = pf.bytesPerPixel
-        val bytes = ByteArray(w * h * bpp)
-        input!!.readFully(bytes)
-        blit(bytes, x, y, w, h, bpp)
+        val bpp = pixelFormat.bytesPerPixel
+        val n = w * h * bpp
+        if (rawBuffer.size < n) rawBuffer = ByteArray(n)
+        input!!.readFully(rawBuffer, 0, n)
+        blit(rawBuffer, x, y, w, h, bpp)
     }
 
     /** Hextile: 16x16 tiles, each raw or a set of sub-rectangles. */
@@ -657,6 +675,19 @@ class VncClient(
     private fun blit(bytes: ByteArray, x: Int, y: Int, w: Int, h: Int, bpp: Int) {
         val fb = framebuffer
         val pf = pixelFormat
+        if (pf.isNativeXrgb && x >= 0 && y >= 0 && x + w <= width && y + h <= height) {
+            // The common case, in bulk: each row straight into the
+            // framebuffer, then the alpha byte set.
+            val ints = java.nio.ByteBuffer.wrap(bytes, 0, w * h * 4)
+                .order(java.nio.ByteOrder.LITTLE_ENDIAN)
+                .asIntBuffer()
+            for (row in 0 until h) {
+                val dst = (y + row) * width + x
+                ints.get(fb, dst, w)
+                for (i in dst until dst + w) fb[i] = fb[i] or OPAQUE
+            }
+            return
+        }
         var src = 0
         for (row in 0 until h) {
             val py = y + row
@@ -683,12 +714,18 @@ class VncClient(
         }
     }
 
+    private val pixelBytes = ByteArray(4)
+
     /** Read a single pixel value in the server's pixel format. */
     private fun readPixel(): Int {
         val pf = pixelFormat
         val bpp = pf.bytesPerPixel
-        val bytes = ByteArray(bpp)
-        input!!.readFully(bytes)
+        val bytes = pixelBytes
+        input!!.readFully(bytes, 0, bpp)
+        if (pf.isNativeXrgb) {
+            return OPAQUE or (bytes[0].toInt() and 0xFF) or
+                ((bytes[1].toInt() and 0xFF) shl 8) or ((bytes[2].toInt() and 0xFF) shl 16)
+        }
         var value = 0
         if (pf.bigEndian) {
             for (i in 0 until bpp) value = (value shl 8) or (bytes[i].toInt() and 0xFF)
@@ -699,22 +736,29 @@ class VncClient(
     }
 
     private fun fillRect(x: Int, y: Int, w: Int, h: Int, argb: Int) {
-        if (w <= 0 || h <= 0) return
+        val x0 = maxOf(x, 0)
+        val x1 = minOf(x + w, width)
+        if (x1 <= x0) return
         val fb = framebuffer
-        for (row in 0 until h) {
-            val py = y + row
-            if (py < 0 || py >= height) continue
-            var dst = py * width + x
-            for (col in 0 until w) {
-                val px = x + col
-                if (px in 0 until width) fb[dst] = argb
-                dst++
-            }
+        for (py in maxOf(y, 0) until minOf(y + h, height)) {
+            java.util.Arrays.fill(fb, py * width + x0, py * width + x1, argb)
         }
     }
 
     private fun copyRect(srcX: Int, srcY: Int, dstX: Int, dstY: Int, w: Int, h: Int) {
         val fb = framebuffer
+        val inside = minOf(srcX, srcY, dstX, dstY) >= 0 &&
+            maxOf(srcX, dstX) + w <= width && maxOf(srcY, dstY) + h <= height
+        if (inside) {
+            // Row by row, in the order that leaves rows still to be read
+            // untouched when the areas overlap (a window dragged down, a
+            // page scrolled).
+            val rows = if (dstY > srcY) (h - 1 downTo 0) else (0 until h)
+            for (row in rows) {
+                System.arraycopy(fb, (srcY + row) * width + srcX, fb, (dstY + row) * width + dstX, w)
+            }
+            return
+        }
         val tmp = IntArray(w * h)
         for (row in 0 until h) {
             val sy = srcY + row

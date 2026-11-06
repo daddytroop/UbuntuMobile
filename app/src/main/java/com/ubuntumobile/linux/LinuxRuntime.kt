@@ -79,7 +79,11 @@ class LinuxRuntime(private val paths: LinuxPaths) {
         "PROOT_LOADER" to File(paths.libDir, "loader").absolutePath,
         "PROOT_LOADER_32" to File(paths.libDir, "loader32").absolutePath,
         "PROOT_TMP_DIR" to paths.cacheDir.absolutePath,
-        "PROOT_NO_SECCOMP" to "1",
+        // PROOT_NO_SECCOMP is deliberately NOT set. With seccomp, proot only
+        // stops a process for the system calls it has to rewrite; without
+        // it every system call stops twice. Measured on the emulator, that
+        // made starting programs 2.7 times and walking files 3.8 times
+        // slower - the whole desktop with them.
         "PROOT_L2S_DUMMY" to "1",
     )
 

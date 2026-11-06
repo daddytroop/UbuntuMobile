@@ -87,7 +87,6 @@ object ProotInstaller {
                     "TMPDIR" to paths.cacheDir.absolutePath,
                     "PROOT_LOADER" to File(paths.libDir, "loader").absolutePath,
                     "PROOT_LOADER_32" to File(paths.libDir, "loader32").absolutePath,
-                    "PROOT_NO_SECCOMP" to "1",
                 ),
                 "proot (inherited environment)" to emptyMap(),
             )

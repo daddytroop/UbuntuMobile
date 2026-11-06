@@ -1,25 +1,25 @@
 #!/bin/bash
 # Start the desktop components inside the X display.
 #
-#   desktop-start.sh xfce     XFCE panel and file manager on Openbox
+#   desktop-start.sh xfce     XFCE: xfwm4, the panel, the desktop, Thunar
 #   desktop-start.sh plain    Openbox + tint2 + feh (no GTK at all)
 #
 # The window manager is the important part. Without one the X server does
 # not map the windows of the applications, so nothing is ever drawn - the
 # applications sit there unmapped and the display stays black.
 #
-# XFCE's own window manager (xfwm4) does not take over the display inside
-# the container: it creates its supporting window but never registers
-# itself, so the applications wait for a window manager that never comes.
-# Openbox does register, and it works.
-#
-# The panel is tint2 rather than the XFCE one for the same reason the
-# window manager is Openbox: the GTK programs (XFCE's panel, Thunar,
-# Mousepad) do not paint inside the container, while the plain X11 ones
-# (tint2, feh, xterm, xfe) do.
+# The window manager is XFCE's own, xfwm4: its themes come in 1x, 2x and 3x
+# sizes, so the title bar buttons are big enough to tap on the phone and
+# normal on a monitor. Openbox is the fallback; its buttons are fixed,
+# tiny bitmaps. (Under the old Xvfb display xfwm4 never took over, which is
+# why Openbox was first for a while. Under Xvnc it does.)
 set -u
 
 DESKTOP="${1:-xfce}"
+
+# The panel layout ships with the app; it is installed over the user's once
+# per version, so an update can change it. Bump this when it changes.
+PANEL_VERSION=1
 
 wm_is_running() {
   # A window manager that has taken over sets this on the root window.
@@ -29,8 +29,33 @@ wm_is_running() {
   return 1
 }
 
+wait_for_wm() {
+  for _ in $(seq 1 "$1"); do
+    sleep 1
+    wm_is_running && return 0
+  done
+  return 1
+}
+
+start_xfwm4() {
+  # No compositor: without a GPU it only costs CPU, and nothing needs it.
+  xfwm4 --compositor=off >/tmp/linx-xfwm4.log 2>&1 &
+}
+
 start_openbox() {
   openbox >/tmp/linx-openbox.log 2>&1 &
+}
+
+install_panel_layout() {
+  local conf="$HOME/.config/xfce4/xfconf/xfce-perchannel-xml"
+  local mark="$HOME/.config/xfce4/.linx-panel-version"
+  [ -f /usr/local/share/linx/xfce4-panel.xml ] || return
+  [ "$(cat "$mark" 2>/dev/null)" = "$PANEL_VERSION" ] && return
+  mkdir -p "$conf"
+  cp /usr/local/share/linx/xfce4-panel.xml "$conf/xfce4-panel.xml"
+  # The old layout's launchers keep their own copies here.
+  rm -rf "$HOME/.config/xfce4/panel"
+  echo "$PANEL_VERSION" >"$mark"
 }
 
 # The panel and the wallpaper.
@@ -42,18 +67,13 @@ start_panel() {
       >/tmp/linx-feh.log 2>&1 &
 }
 
-# The fallback panel, for the case where the GTK one does not come up.
-start_plain_panel() {
-  tint2 -c /usr/local/share/linx/tint2rc >/tmp/linx-tint2.log 2>&1 &
-  feh --no-fehbg --bg-fill /usr/share/xfce4/backdrops/xubuntu-wallpaper.png \
-      >/tmp/linx-feh.log 2>&1 &
-}
-
 # The XFCE programs are started as well. They add the desktop icons and
 # the file manager's menu integration.
 start_xfce_extras() {
   xfdesktop >/tmp/linx-desktop.log 2>&1 &
   thunar --daemon >/tmp/linx-thunar.log 2>&1 &
+  # On the phone, application windows open maximized.
+  python3 /usr/local/lib/linx/linx-windows.py >/tmp/linx-windows.log 2>&1 &
 }
 
 # The UI scale (2 on the phone, 1 on a monitor) goes through XSETTINGS
@@ -68,12 +88,33 @@ start_settings() {
   # ...and until here it could only leave it in the file.
   SCALE="$(cat /tmp/linx-ui-scale 2>/dev/null || echo "${LINX_UI_SCALE:-2}")"
   if command -v xfsettingsd >/dev/null 2>&1 && command -v xfconf-query >/dev/null 2>&1; then
-    xfconf-query -c xsettings -p /Gdk/WindowScalingFactor -n -t int -s "$SCALE"
+    set_xsettings() { xfconf-query -c xsettings -p "$1" -n -t "$2" -s "$3"; }
+    set_xsettings /Gdk/WindowScalingFactor int "$SCALE"
     # The X server already says 96 DPI; doubling it as well would make
     # the text four times the size.
-    xfconf-query -c xsettings -p /Xft/DPI -n -t int -s 96
+    set_xsettings /Xft/DPI int 96
+    # Noto Sans, as on Kubuntu. Greyscale antialiasing: the picture is
+    # scaled on its way to the screen, and coloured subpixel edges would
+    # turn into fringes.
+    set_xsettings /Gtk/FontName string "Noto Sans 10"
+    set_xsettings /Gtk/MonospaceFontName string "Noto Sans Mono 10"
+    set_xsettings /Xft/Antialias int 1
+    set_xsettings /Xft/Hinting int 1
+    set_xsettings /Xft/HintStyle string hintslight
+    set_xsettings /Xft/RGBA string none
     # A screen that changes size is not a new monitor: no dialog about it.
     xfconf-query -c displays -p /Notify -n -t int -s 0 2>/dev/null
+
+    # The window manager: its theme follows the scale (display-scale.sh
+    # switches it), one workspace, and the usual buttons on the right.
+    local theme=Default
+    [ "$SCALE" -ge 2 ] && theme=Default-xhdpi
+    xfconf-query -c xfwm4 -p /general/theme -n -t string -s "$theme"
+    xfconf-query -c xfwm4 -p /general/title_font -n -t string -s "Noto Sans Bold 9"
+    xfconf-query -c xfwm4 -p /general/button_layout -n -t string -s "O|HMC"
+    xfconf-query -c xfwm4 -p /general/workspace_count -n -t int -s 1
+    xfconf-query -c xfwm4 -p /general/use_compositing -n -t bool -s false
+
     xfsettingsd --no-daemon >/tmp/linx-xfsettingsd.log 2>&1 &
     sleep 1
   else
@@ -83,6 +124,8 @@ start_settings() {
   fi
 }
 
+# Before anything reads xfconf, so the daemon loads the new layout.
+install_panel_layout
 start_settings
 
 case "$DESKTOP" in
@@ -92,26 +135,26 @@ case "$DESKTOP" in
     start_panel
     ;;
   *)
-    start_openbox
-    # Give the window manager a moment and check that it took over.
-    for _ in 1 2 3 4 5 6 7 8; do
-      sleep 1
+    start_xfwm4
+    WM_PID=$!
+    # xfwm4 loads its theme's images first, and on a phone that can take
+    # twenty seconds. Wait for as long as it is still alive and starting:
+    # killing it halfway through taking over leaves the screen claimed, and
+    # Openbox then refuses with "a window manager is already running".
+    for _ in $(seq 1 60); do
       wm_is_running && break
+      kill -0 "$WM_PID" 2>/dev/null || break
+      sleep 1
     done
     if ! wm_is_running; then
-      echo "Openbox did not take over; trying XFCE's own window manager" \
-        >>/tmp/linx-session.log
-      xfwm4 --compositor=off >/tmp/linx-xfwm4.log 2>&1 &
-      sleep 2
+      echo "xfwm4 did not take over; using Openbox" >>/tmp/linx-session.log
+      kill "$WM_PID" 2>/dev/null
+      sleep 1
+      openbox --replace >/tmp/linx-openbox.log 2>&1 &
+      wait_for_wm 15 || echo "no window manager either way" >>/tmp/linx-session.log
     fi
-    if wm_is_running; then
-      start_panel
-      start_xfce_extras
-    else
-      echo "no window manager; falling back to the plain desktop" \
-        >>/tmp/linx-session.log
-      start_panel
-    fi
+    start_panel
+    start_xfce_extras
     ;;
 esac
 

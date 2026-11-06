@@ -117,6 +117,8 @@ object ContainerSetup {
         "display-start.sh" to "usr/local/lib/linx/display-start.sh",
         "desktop-start.sh" to "usr/local/lib/linx/desktop-start.sh",
         "display-scale.sh" to "usr/local/lib/linx/display-scale.sh",
+        "linx-windows.py" to "usr/local/lib/linx/linx-windows.py",
+        "xfce4-panel.xml" to "usr/local/share/linx/xfce4-panel.xml",
         "gamepad-helper.py" to "usr/local/lib/linx/gamepad-helper.py",
         "tint2rc" to "usr/local/share/linx/tint2rc",
         "nosandbox-bwrap" to "usr/local/lib/linx/nosandbox/bwrap",
@@ -140,7 +142,7 @@ object ContainerSetup {
                 if (dest.isFile && dest.readBytes().contentEquals(bytes)) continue
                 val tmp = File(dest.parentFile, ".${dest.name}.new")
                 tmp.writeBytes(bytes)
-                android.system.Os.chmod(tmp.absolutePath, if (asset == "tint2rc") 0x1A4 else 0x1ED)
+                android.system.Os.chmod(tmp.absolutePath, if (asset == "tint2rc" || asset.endsWith(".xml")) 0x1A4 else 0x1ED)
                 if (!tmp.renameTo(dest)) {
                     dest.delete()
                     tmp.renameTo(dest)

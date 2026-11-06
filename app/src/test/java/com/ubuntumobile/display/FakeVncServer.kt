@@ -38,7 +38,16 @@ class FakeVncServer(
      * framebuffer is a single colour, [RESIZED_COLOUR].
      */
     private val resizable: Boolean = false,
+    /**
+     * After the first frame, send a CopyRect that moves a block onto an
+     * overlapping place below and to the right, as dragging a window does.
+     */
+    private val copyRectAfterFirstFrame: Boolean = false,
 ) {
+
+    /** The block the CopyRect moves: source x, y, then w, h, then destination x, y. */
+    val copy = intArrayOf(4, 6, 24, 20, 10, 14)
+    private var framesSent = 0
 
     companion object {
         const val RESIZED_COLOUR = 0xFF336699.toInt()
@@ -197,6 +206,17 @@ class FakeVncServer(
 
     private fun sendUpdate(out: OutputStream) {
         if (resizable && sendResizableUpdate(out)) return
+        if (copyRectAfterFirstFrame && framesSent++ == 1) {
+            val (sx, sy, w, h, dx, dy) = copy.toList()
+            out.write(0); out.write(0)
+            out.write(1.toShortBigEndian())
+            out.write(dx.toShortBigEndian()); out.write(dy.toShortBigEndian())
+            out.write(w.toShortBigEndian()); out.write(h.toShortBigEndian())
+            out.write(1.toBigEndian())                // CopyRect
+            out.write(sx.toShortBigEndian()); out.write(sy.toShortBigEndian())
+            out.flush()
+            return
+        }
         if (sendCutText) {
             val text = "clipboard".toByteArray()
             out.write(3)                     // ServerCutText
@@ -289,6 +309,19 @@ class FakeVncServer(
         }
         return bytes
     }
+
+    /** What the client should show after the CopyRect: the block, moved. */
+    fun expectedAfterCopy(): IntArray {
+        val before = expectedDecoded()
+        val after = before.copyOf()
+        val (sx, sy, w, h, dx, dy) = copy.toList()
+        for (row in 0 until h) for (col in 0 until w) {
+            after[(dy + row) * width + dx + col] = before[(sy + row) * width + sx + col]
+        }
+        return after
+    }
+
+    private operator fun <T> List<T>.component6(): T = this[5]
 
     /**
      * What the client should end up with after a round trip.

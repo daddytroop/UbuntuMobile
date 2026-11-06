@@ -74,6 +74,7 @@ start_xtigervnc() {
     -ac \
     -dpi 96 \
     -desktop Ubuntu \
+    -CompareFB 0 \
     >/tmp/linx-xtigervnc.log 2>&1 &
   return 0
 }
@@ -220,12 +221,13 @@ for _ in 1 2 3 4 5 6 7 8 9 10 11 12 13 14 15; do
     export QT_ENABLE_HIGHDPI_SCALING=1
 
     # Normalise the font DPI for the X11-only applications that ignore
-    # GDK_SCALE, and turn on subpixel rendering so the text stays sharp.
+    # the XSETTINGS scale. Antialiasing is greyscale: the picture is scaled
+    # on its way to the screen, and coloured subpixel edges would fringe.
     if command -v xrdb >/dev/null 2>&1; then
       {
         echo "Xft.dpi: 96"
         echo "Xft.antialias: 1"
-        echo "Xft.rgba: rgb"
+        echo "Xft.rgba: none"
         echo "Xft.hinting: true"
         echo "Xft.hintstyle: hintslight"
       } | xrdb -merge 2>/dev/null || true
