@@ -94,9 +94,8 @@ A native store with two sources, switched at the top:
   the popular apps and the categories (Games, Office, Graphics, ...), only
   apps built for this phone's processor. Each app has a page with its
   screenshots and description. A search also finds apps built only for PC
-  processors, marked **PC only**, so someone looking for Steam sees why it
-  is not there and what to use instead (Moonlight, or Valve's Steam Link
-  for Android). Without internet, the store falls back to the apps this
+  processors, marked **PC only**, so someone looking for one sees why it
+  is not there. Without internet, the store falls back to the apps this
   version knows and Flatpak's own list. The first install turns Flatpak
   on (`linx-flatpak.sh`) and brings the app's runtime, a few hundred MB.
   Flatpak prints its progress only to a terminal, so installs run under
@@ -107,6 +106,17 @@ A native store with two sources, switched at the top:
   image ships without them) and installs with `apt-get`.
 
 Installed apps from either appear in the desktop's Applications menu.
+
+### Steam goes to DroidDeck
+Steam on an ARM phone needs three things Mobuntu does not have: Valve's
+ARM build of Steam and Proton, FEX to run PC code, and games drawn on the
+phone's GPU (Mobuntu draws its desktop without the GPU, like a remote
+desktop). [DroidDeck](https://github.com/Droid-Deck/DroidDeck) is a separate
+open-source app that has all three, so Mobuntu hands Steam to it
+(`DroidDeck.kt`). On ARM phones, All apps has a **Steam** entry, and
+Flathub's Steam and Steam Link say **Play** or **Get DroidDeck** instead of
+**PC only**. Play opens DroidDeck (`com.droiddeck.launcher`); Get DroidDeck
+opens its releases page, the only place it is published.
 
 ### Flatpak under proot
 Flatpak runs every app in a bubblewrap sandbox, which needs kernel

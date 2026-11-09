@@ -107,12 +107,12 @@ internal fun FlathubHit.toStoreApp() = StoreApp(
 )
 
 /** Why an app is not offered on this phone, in words. */
-internal fun notForThisPhone(app: StoreApp): String {
-    val pc = "${app.name} is built only for PC processors (Intel and AMD), so it cannot run on a phone's ARM processor."
-    return if (app.pkg == "com.valvesoftware.Steam" || app.pkg == "com.valvesoftware.SteamLink") {
-        "$pc Valve does not offer Steam for ARM Linux yet. To play your Steam games on this phone, " +
-            "stream them from your PC with Moonlight (in Games), or use Valve's Steam Link app from the Play Store. " +
-            "Games and emulators built for phones are in Games too."
+internal fun notForThisPhone(app: StoreApp, droidDeckInstalled: Boolean = false): String {
+    val pc = "This ${app.name} is built only for PC processors (Intel and AMD), so it cannot run on a phone's ARM processor."
+    return if (app.pkg in DroidDeck.steamIds) {
+        "$pc DroidDeck, a free open-source app, runs Valve's ARM version of Steam and your PC games on Snapdragon phones, " +
+            "with Proton and the phone's graphics chip. " +
+            if (droidDeckInstalled) "Tap Play to open it." else "Tap Get DroidDeck to download it from its GitHub page, then install it."
     } else {
         "$pc Search for another app that does the same thing."
     }
@@ -655,6 +655,26 @@ private fun StoreButton(
 ) {
     val canOpen = installed == true && app.command.isNotEmpty()
     val blocked = !app.available && installed != true
+    if (blocked && app.pkg in DroidDeck.steamIds) {
+        val context = androidx.compose.ui.platform.LocalContext.current
+        val has = DroidDeck.isInstalled(context)
+        Box(
+            modifier = Modifier
+                .clip(RoundedCornerShape(20.dp))
+                .background(UbuntuPalette.UbuntuOrange)
+                .clickable { DroidDeck.open(context) }
+                .padding(horizontal = 18.dp, vertical = 9.dp),
+            contentAlignment = Alignment.Center,
+        ) {
+            Text(
+                if (has) "Play" else "Get DroidDeck",
+                color = Color.White,
+                fontSize = 13.sp,
+                fontWeight = FontWeight.Medium,
+            )
+        }
+        return
+    }
     Box(
         modifier = Modifier
             .clip(RoundedCornerShape(20.dp))
@@ -743,7 +763,7 @@ private fun StoreDetails(
         if (!app.available && installed != true) {
             Spacer(Modifier.height(16.dp))
             Text(
-                notForThisPhone(app),
+                notForThisPhone(app, DroidDeck.isInstalled(androidx.compose.ui.platform.LocalContext.current)),
                 fontSize = 14.sp,
                 color = UbuntuPalette.LightOnSurface,
                 modifier = Modifier

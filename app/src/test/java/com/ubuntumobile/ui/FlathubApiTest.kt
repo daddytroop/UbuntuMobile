@@ -29,6 +29,7 @@ class FlathubApiTest {
     @Test
     fun steamSaysWhatToDoInstead() {
         val steam = FlathubHit("com.valvesoftware.Steam", "Steam", "", null, arches = listOf("x86_64")).toStoreApp()
-        assertTrue("Moonlight" in notForThisPhone(steam))
+        assertTrue("Get DroidDeck" in notForThisPhone(steam))
+        assertTrue("Tap Play" in notForThisPhone(steam, droidDeckInstalled = true))
     }
 }

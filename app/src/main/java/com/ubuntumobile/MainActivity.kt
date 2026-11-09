@@ -87,6 +87,7 @@ import com.ubuntumobile.ui.AnsiTerminal
 import com.ubuntumobile.ui.AppCatalog
 import com.ubuntumobile.ui.AppEntry
 import com.ubuntumobile.ui.DesktopSize
+import com.ubuntumobile.ui.DroidDeck
 import com.ubuntumobile.ui.SettingsScreen
 import com.ubuntumobile.ui.StoreScreen
 import com.ubuntumobile.ui.TerminalScreen
@@ -1018,6 +1019,7 @@ fun UbuntuApp(
                     when (entry.id) {
                         "store" -> screen = Screen.STORE
                         "gamepad" -> screen = Screen.GAMEPAD
+                        "steam" -> DroidDeck.open(context)
                         "console" -> openConsole()
                         "browser" -> if (firefoxBinary.exists()) {
                             launchOnDisplay(listOf("firefox"))

@@ -35,8 +35,21 @@ data class AppEntry(
  */
 object AppCatalog {
 
-    /** The phone app's own screens, which are always in the launcher. */
-    val device: List<AppEntry> get() = builtin.filter { it.command.isEmpty() }
+    /**
+     * The phone app's own screens, which are always in the launcher, and
+     * Steam on ARM phones (it opens DroidDeck).
+     */
+    val device: List<AppEntry> get() = builtin.filter { it.command.isEmpty() } +
+        if (FlathubApi.deviceArch == "aarch64") listOf(steam) else emptyList()
+
+    val steam = AppEntry(
+        id = "steam",
+        name = "Steam",
+        summary = "Plays in DroidDeck",
+        command = emptyList(),
+        category = AppEntry.Category.SYSTEM,
+        accent = 0xFF1B2838,
+    )
 
     /**
      * The launcher's apps from linx-apps.py's lines ("id|name|comment|kind|icon"):

@@ -37,6 +37,7 @@ import androidx.compose.material.icons.filled.Settings
 import androidx.compose.material.icons.filled.ShoppingBag
 import androidx.compose.material.icons.filled.Speed
 import androidx.compose.material.icons.filled.SportsEsports
+import androidx.compose.material.icons.filled.VideogameAsset
 import androidx.compose.material.icons.filled.Terminal
 import androidx.compose.material.icons.filled.Widgets
 import androidx.compose.material3.Icon
@@ -257,6 +258,7 @@ private fun iconFor(app: AppEntry): ImageVector = when (app.id) {
     "settings" -> Icons.Default.Settings
     "store" -> Icons.Default.ShoppingBag
     "gamepad" -> Icons.Default.SportsEsports
+    "steam" -> Icons.Default.VideogameAsset
     "console" -> Icons.Default.Code
     else -> Icons.Default.Widgets
 }
