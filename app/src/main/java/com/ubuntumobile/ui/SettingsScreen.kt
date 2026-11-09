@@ -68,6 +68,11 @@ fun SettingsScreen(
     /** The look chosen at setup, changed here at once: dark, accent, wallpaper. */
     look: SetupChoices? = null,
     onLook: (SetupChoices) -> Unit = {},
+    /** A snapshot being saved or restored ("Saving: 820 MB"), or how the last one went. */
+    snapshotNote: String? = null,
+    snapshotBusy: Boolean = false,
+    onBackup: () -> Unit = {},
+    onRestore: () -> Unit = {},
     versionName: String,
     ubuntuVersion: String,
     onClose: () -> Unit,
@@ -176,6 +181,30 @@ fun SettingsScreen(
                                     .clickable { onLook(look.copy(wallpaper = w)) },
                             )
                         }
+                    }
+                }
+            }
+
+            Card("Snapshots", "Your whole Linux system - apps, files, settings - as one file, saved wherever you choose: Downloads, Drive, a USB stick.") {
+                Row(verticalAlignment = Alignment.CenterVertically) {
+                    Text(
+                        snapshotNote ?: "Save one before big changes; restore it to go back.",
+                        fontSize = 13.sp,
+                        color = UbuntuPalette.LightOnSurfaceVariant,
+                        modifier = Modifier.weight(1f),
+                    )
+                }
+                Spacer(Modifier.height(12.dp))
+                Row(horizontalArrangement = Arrangement.spacedBy(10.dp)) {
+                    if (!snapshotBusy) {
+                        ActionChip("Save snapshot", onBackup)
+                        ActionChip("Restore", onRestore)
+                    } else {
+                        androidx.compose.material3.CircularProgressIndicator(
+                            modifier = Modifier.size(22.dp),
+                            color = UbuntuPalette.UbuntuOrange,
+                            strokeWidth = 2.5.dp,
+                        )
                     }
                 }
             }

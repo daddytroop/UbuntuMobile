@@ -230,6 +230,44 @@ x11.XGetAtomName.restype = ctypes.c_void_p
 # after a tap. X says when it changes through the XFixes extension.
 CURSOR_FILE = "/tmp/linx-cursor"
 NEW_WINDOW_FILE = "/tmp/linx-new-window"
+# The app in front, by its window class ("TelegramDesktop", "retroarch"),
+# for the gamepad's layouts per game.
+ACTIVE_APP_FILE = "/tmp/linx-active-app"
+ACTIVE_WINDOW = atom("_NET_ACTIVE_WINDOW")
+WM_CLASS = atom("WM_CLASS")
+XA_STRING = 31
+
+
+def window_class(window):
+    """The class half of WM_CLASS ("instance\\0Class\\0"), or ""."""
+    actual = Atom()
+    fmt = ctypes.c_int()
+    count = ctypes.c_ulong()
+    after = ctypes.c_ulong()
+    data = ctypes.c_void_p()
+    status = x11.XGetWindowProperty(
+        display, window, WM_CLASS, 0, 256, 0, XA_STRING,
+        ctypes.byref(actual), ctypes.byref(fmt), ctypes.byref(count),
+        ctypes.byref(after), ctypes.byref(data),
+    )
+    if status != 0 or not data.value:
+        return ""
+    raw = ctypes.string_at(data, count.value)
+    x11.XFree(data)
+    parts = raw.split(b"\0")
+    name = parts[1] if len(parts) > 1 and parts[1] else parts[0]
+    return name.decode("utf-8", "replace")
+
+
+def active_changed():
+    windows = property_values(root, ACTIVE_WINDOW, XA_WINDOW)
+    name = window_class(windows[0]) if windows and windows[0] else ""
+    try:
+        with open(ACTIVE_APP_FILE + ".tmp", "w") as f:
+            f.write(name)
+        os.replace(ACTIVE_APP_FILE + ".tmp", ACTIVE_APP_FILE)
+    except OSError:
+        pass
 CURSOR_EVENT = -1
 try:
     xfixes = ctypes.cdll.LoadLibrary("libXfixes.so.3")
@@ -284,6 +322,9 @@ while True:
     x11.XNextEvent(display, ctypes.byref(event))
     if event.type == CURSOR_EVENT:
         cursor_changed(event.cursor.cursor_name)
+        continue
+    if event.type == PROPERTY_NOTIFY and event.property.atom == ACTIVE_WINDOW:
+        active_changed()
         continue
     if event.type != PROPERTY_NOTIFY or event.property.atom != CLIENT_LIST:
         continue

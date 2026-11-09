@@ -179,6 +179,30 @@ borders drawn for the app by `make-xfwm4-theme.py` to match - a flat title
 bar with round minimise and maximise buttons and a close button in the
 accent colour - at 1x for a monitor and 2x for the phone.
 
+### Notifications on the phone
+Linux apps notify through `org.freedesktop.Notifications`, and xfce4-notifyd
+shows those notifications on the desktop. `linx-notify.py` watches the same
+calls with `dbus-monitor` and sends each one to the app over an abstract
+unix socket (`<package>.notify`). While the app is in the background, it
+posts each as an Android notification with the app's own icon
+(`NotificationBridge.kt`). The notification channel is created the first time
+the desktop is on screen, because Android only asks an app built for older
+versions whether it may notify while that app is in the foreground.
+
+### Linux apps on the home screen
+Long-press an app in "All apps" and choose **Add to home screen**. The
+shortcut carries the app's id and opens it on the desktop. If the app is
+not running, the shortcut starts it first and waits until the desktop has
+finished starting, so the app does not race the window manager.
+
+### Snapshots
+Settings → Snapshots saves the whole system to a `.tar.zst` file wherever you
+choose, through Android's file picker, and restores one the same way
+(`linx-snapshot.sh`). tar runs in the container and is streamed straight to
+the file, so there is no copy in between. On the emulator it wrote about
+12 MB/s. A save that fails deletes its partial file. Restoring replaces the
+files the snapshot has and keeps files you added since.
+
 ### The app in your colours
 The accent colour chosen at setup colours the app as well as Linux: the
 floating button, menus, Settings, the store and the system bars
@@ -295,6 +319,11 @@ Linux sees:
   moves the mouse.
 
 When Linux cannot have a controller, keyboard keys is the default.
+
+Layouts can be kept per game. `linx-windows.py` writes the window class of
+the app in front to `/tmp/linx-active-app`. The editor's "Just <app>" choice
+saves the layout under that name, and the pad switches to it whenever that
+app is in front.
 
 > **Note:** `/dev/uinput` is not exposed to unprivileged apps on most Android
 > devices, so the Linux-side virtual pad only works on rooted devices or

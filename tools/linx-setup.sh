@@ -53,7 +53,7 @@ free_mb() { df -Pm / 2>/dev/null | awk 'NR == 2 {print $4}'; }
 
 step "Sound and the Ubuntu look"
 /usr/local/lib/linx/apt-install.sh pulseaudio yaru-theme-gtk yaru-theme-icon fonts-ubuntu \
-  xfce4-whiskermenu-plugin xfce4-docklike-plugin \
+  xfce4-whiskermenu-plugin xfce4-docklike-plugin xfce4-notifyd libnotify-bin \
   >/tmp/linx-setup-base.log 2>&1 || fail base /tmp/linx-setup-base.log
 
 if [ "$LINX_BROWSER" = 1 ]; then
@@ -94,6 +94,12 @@ if [ "$LINX_FLATHUB" = 1 ]; then
           | tee -a /tmp/linx-setup-flatpaks.log | tr '\r' '\n' \
           | grep --line-buffered -o '[0-9]\+%' | sed -u 's/^/flatpak:/' >>"$LINX_APT_STATUS"
         [ "${PIPESTATUS[0]}" = 0 ] || fail "flatpak:$app" /tmp/linx-setup-flatpaks.log
+      done
+      # Run each once, doing nothing: Flatpak builds the app's library
+      # cache (~/.var/app/<id>/.ld.so) the first time, so the first real
+      # start is quicker. Not a failure if one will not run here.
+      for app in $LINX_FLATPAKS; do
+        timeout 300 flatpak run --command=true "$app" >>/tmp/linx-setup-flatpaks.log 2>&1 || true
       done
     fi
   fi

@@ -54,6 +54,8 @@ rm -f "/tmp/.X${DISPLAY_NUM}-lock" "/tmp/.X11-unix/X${DISPLAY_NUM}"
 # The desktop session writes its bus address when it starts; one left from
 # an earlier run points at a bus that is gone.
 rm -f /tmp/linx-session-bus
+# The app waits for this one to say the desktop is fully up.
+rm -f /tmp/linx-windows.log
 # Every shell the app opens in the container (setup, the store, the
 # console) joins the desktop's session bus. Without an address, the first
 # program that wants a bus - Flatpak does - auto-launches a dbus-daemon of

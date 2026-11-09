@@ -32,6 +32,7 @@ class UbuntuViewModel(app: Application) : AndroidViewModel(app) {
 
     init {
         com.ubuntumobile.linux.SandboxSpawner.start(app.packageName, paths, runtime)
+        com.ubuntumobile.linux.NotificationBridge.start(app, paths)
         _state.value = _state.value.copy(
             isInstalled = paths.isInstalled,
             isProotReady = paths.isProotReady,
@@ -71,6 +72,7 @@ class UbuntuViewModel(app: Application) : AndroidViewModel(app) {
                     installDetail = "",
                 )
                 com.ubuntumobile.linux.SandboxSpawner.start(getApplication<Application>().packageName, paths, runtime)
+                com.ubuntumobile.linux.NotificationBridge.start(getApplication(), paths)
                 refreshSystemInfo()
             }.onFailure { e ->
                 _state.value = _state.value.copy(

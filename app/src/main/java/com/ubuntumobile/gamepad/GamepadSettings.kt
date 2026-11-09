@@ -71,7 +71,8 @@ data class GamepadSettings(
 ) {
     fun offset(part: String) = offsets[part] ?: (0f to 0f)
 
-    fun save(prefs: SharedPreferences) {
+    /** Kept for every game, or ([profile]) for one app - by its X window class. */
+    fun save(prefs: SharedPreferences, profile: String? = null) {
         val json = JSONObject()
             .put("opacity", opacity.toDouble())
             .put("size", size.toDouble())
@@ -80,19 +81,36 @@ data class GamepadSettings(
             .put("keys", JSONObject(keys.mapValues { it.value }))
             .put("offsets", JSONObject(offsets.mapValues { (_, v) -> "${v.first},${v.second}" }))
         mode?.let { json.put("mode", it.name) }
-        prefs.edit().putString(KEY, json.toString()).apply()
+        prefs.edit().putString(key(profile), json.toString()).apply()
     }
 
     companion object {
         private const val KEY = "gamepad"
 
-        fun load(prefs: SharedPreferences): GamepadSettings {
+        private fun key(profile: String?) = if (profile == null) KEY else "$KEY:$profile"
+
+        /** Whether one app has a layout of its own. */
+        fun hasProfile(prefs: SharedPreferences, profile: String) = prefs.contains(key(profile))
+
+        fun deleteProfile(prefs: SharedPreferences, profile: String) {
+            prefs.edit().remove(key(profile)).apply()
+        }
+
+        /** One app's layout if it has one ([profile]), otherwise the one for every game. */
+        fun load(prefs: SharedPreferences, profile: String? = null): GamepadSettings {
+            if (profile != null && hasProfile(prefs, profile)) {
+                parse(prefs.getString(key(profile), null))?.let { return it }
+            }
+            return parse(prefs.getString(KEY, null)) ?: GamepadSettings(
+                opacity = prefs.getFloat("gamepad_opacity", 0.55f),
+            )
+        }
+
+        private fun parse(text: String?): GamepadSettings? {
             val json = try {
-                JSONObject(prefs.getString(KEY, null) ?: return GamepadSettings(
-                    opacity = prefs.getFloat("gamepad_opacity", 0.55f),
-                ))
+                JSONObject(text ?: return null)
             } catch (_: Exception) {
-                return GamepadSettings()
+                return null
             }
             val keys = json.optJSONObject("keys")?.let { o ->
                 PadParts.defaultKeys + o.keys().asSequence().associateWith { o.optInt(it) }

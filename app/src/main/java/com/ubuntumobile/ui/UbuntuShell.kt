@@ -3,6 +3,7 @@ package com.ubuntumobile.ui
 import androidx.compose.foundation.Image
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
+import androidx.compose.foundation.combinedClickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
@@ -79,6 +80,8 @@ fun UbuntuShell(
     apps: List<AppEntry>,
     /** The container's root, where the apps' icon files are. */
     iconRoot: java.io.File? = null,
+    /** Put a shortcut to a Linux app on the phone's home screen. */
+    onPin: ((AppEntry) -> Unit)? = null,
     wide: Boolean,
     onLaunchApp: (AppEntry) -> Unit,
     onOpenStore: () -> Unit,
@@ -154,18 +157,18 @@ fun UbuntuShell(
             verticalArrangement = Arrangement.spacedBy(8.dp),
         ) {
             items(linuxApps, key = { it.id }) { app ->
-                AppTile(app = app, iconRoot = iconRoot, onClick = { onLaunchApp(app) })
+                AppTile(app = app, iconRoot = iconRoot, onClick = { onLaunchApp(app) }, onPin = onPin.takeIf { app.isLinuxApp })
             }
             if (flatpaks.isNotEmpty()) {
                 item(span = { GridItemSpan(maxLineSpan) }) { SectionLabel("From Flathub") }
                 items(flatpaks, key = { it.id }) { app ->
-                    AppTile(app = app, iconRoot = iconRoot, onClick = { onLaunchApp(app) })
+                    AppTile(app = app, iconRoot = iconRoot, onClick = { onLaunchApp(app) }, onPin = onPin.takeIf { app.isLinuxApp })
                 }
             }
             if (system.isNotEmpty()) {
                 item(span = { GridItemSpan(maxLineSpan) }) { SectionLabel("System") }
                 items(system, key = { it.id }) { app ->
-                    AppTile(app = app, iconRoot = iconRoot, onClick = { onLaunchApp(app) })
+                    AppTile(app = app, iconRoot = iconRoot, onClick = { onLaunchApp(app) }, onPin = onPin.takeIf { app.isLinuxApp })
                 }
             }
             if (filtered.isEmpty()) {
@@ -271,42 +274,70 @@ private fun rememberAppIcon(root: java.io.File?, path: String?): ImageBitmap? {
     val icon by produceState(path?.let { iconCache.get(it) }, root, path) {
         if (value != null || root == null || path == null) return@produceState
         value = withContext(Dispatchers.IO) {
-            try {
-                val file = java.io.File(root, path.removePrefix("/"))
-                val bitmap = if (path.endsWith(".svg")) {
-                    val svg = com.caverock.androidsvg.SVG.getFromInputStream(file.inputStream())
-                    val size = 192
-                    // Without a viewBox a resized SVG is drawn at its own size in a corner.
-                    if (svg.documentViewBox == null && svg.documentWidth > 0f && svg.documentHeight > 0f) {
-                        svg.setDocumentViewBox(0f, 0f, svg.documentWidth, svg.documentHeight)
-                    }
-                    svg.documentWidth = size.toFloat()
-                    svg.documentHeight = size.toFloat()
-                    val bmp = android.graphics.Bitmap.createBitmap(size, size, android.graphics.Bitmap.Config.ARGB_8888)
-                    svg.renderToCanvas(android.graphics.Canvas(bmp))
-                    bmp
-                } else {
-                    android.graphics.BitmapFactory.decodeFile(file.absolutePath)
-                }
-                bitmap?.asImageBitmap()?.also { iconCache.put(path, it) }
-            } catch (_: Exception) {
-                null
-            } catch (_: OutOfMemoryError) {
-                null
-            }
+            decodeAppIcon(root, path)?.asImageBitmap()?.also { iconCache.put(path, it) }
         }
     }
     return icon
 }
 
+/**
+ * An app's icon file from the container (a container path under [root]) as
+ * a bitmap, or null. SVGs are rendered at [size] pixels. Slow: off the main
+ * thread. Also used for notifications and home-screen shortcuts.
+ */
+fun decodeAppIcon(root: java.io.File, path: String, size: Int = 192): android.graphics.Bitmap? = try {
+    val file = java.io.File(root, path.removePrefix("/"))
+    if (path.endsWith(".svg")) {
+        val svg = com.caverock.androidsvg.SVG.getFromInputStream(file.inputStream())
+        // Without a viewBox a resized SVG is drawn at its own size in a corner.
+        if (svg.documentViewBox == null && svg.documentWidth > 0f && svg.documentHeight > 0f) {
+            svg.setDocumentViewBox(0f, 0f, svg.documentWidth, svg.documentHeight)
+        }
+        svg.documentWidth = size.toFloat()
+        svg.documentHeight = size.toFloat()
+        val bmp = android.graphics.Bitmap.createBitmap(size, size, android.graphics.Bitmap.Config.ARGB_8888)
+        svg.renderToCanvas(android.graphics.Canvas(bmp))
+        bmp
+    } else {
+        android.graphics.BitmapFactory.decodeFile(file.absolutePath)
+    }
+} catch (_: Exception) {
+    null
+} catch (_: OutOfMemoryError) {
+    null
+}
+
 /** A single app in the grid. */
 @Composable
-fun AppTile(app: AppEntry, onClick: () -> Unit, modifier: Modifier = Modifier, iconRoot: java.io.File? = null) {
+@OptIn(androidx.compose.foundation.ExperimentalFoundationApi::class)
+fun AppTile(
+    app: AppEntry,
+    onClick: () -> Unit,
+    modifier: Modifier = Modifier,
+    iconRoot: java.io.File? = null,
+    /** A long press offers "Add to home screen". */
+    onPin: ((AppEntry) -> Unit)? = null,
+) {
     val picture = rememberAppIcon(iconRoot, app.iconPath)
+    var menu by remember { mutableStateOf(false) }
+    // The menu opens at the tile: it is anchored to the Box around it.
+    Box(modifier) {
+    androidx.compose.material3.DropdownMenu(expanded = menu, onDismissRequest = { menu = false }) {
+        androidx.compose.material3.DropdownMenuItem(
+            text = { Text("Add to home screen") },
+            onClick = {
+                menu = false
+                onPin?.invoke(app)
+            },
+        )
+    }
     Column(
-        modifier = modifier
+        modifier = Modifier
             .clip(RoundedCornerShape(16.dp))
-            .clickable { onClick() }
+            .combinedClickable(
+                onClick = onClick,
+                onLongClick = if (onPin != null) ({ menu = true }) else null,
+            )
             .padding(vertical = 10.dp, horizontal = 4.dp),
         horizontalAlignment = Alignment.CenterHorizontally,
     ) {
@@ -338,6 +369,7 @@ fun AppTile(app: AppEntry, onClick: () -> Unit, modifier: Modifier = Modifier, i
             overflow = TextOverflow.Ellipsis,
             textAlign = TextAlign.Center,
         )
+    }
     }
 }
 

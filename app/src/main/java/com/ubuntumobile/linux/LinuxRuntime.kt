@@ -243,6 +243,33 @@ class LinuxRuntime(private val paths: LinuxPaths) {
     }
 
     /**
+     * Start a guest command whose standard input and output the caller
+     * uses as data - a backup streamed out of tar, a restore streamed in.
+     * Its error output goes to the app's log. Null if it cannot start.
+     */
+    fun startPiped(command: List<String>): Process? {
+        if (!paths.isProotReady || !paths.isInstalled) return null
+        return try {
+            val pb = ProcessBuilder(buildGuestCommand(command))
+            pb.environment().apply {
+                clear()
+                putAll(hostEnv())
+            }
+            val proc = pb.start()
+            Thread({
+                try {
+                    proc.errorStream.bufferedReader().forEachLine { paths.appendLog("guest: $it") }
+                } catch (_: Exception) {
+                }
+            }, "guest-errors").apply { isDaemon = true }.start()
+            proc
+        } catch (e: Exception) {
+            Log.e(TAG, "could not start a piped guest command", e)
+            null
+        }
+    }
+
+    /**
      * Copy the container's display logs into the on-device log.
      *
      * The display server and the XFCE components write their output into

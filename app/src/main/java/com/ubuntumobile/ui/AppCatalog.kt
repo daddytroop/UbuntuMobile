@@ -21,6 +21,9 @@ data class AppEntry(
     val iconPath: String? = null,
 ) {
     enum class Category { TERMINAL, LINUX, SYSTEM, FLATPAK }
+
+    /** A desktop app (from linx-apps.py), not one of the phone app's own screens. */
+    val isLinuxApp: Boolean get() = command.getOrNull(1) == "/usr/local/lib/linx/linx-apps.py"
 }
 
 /**

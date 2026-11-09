@@ -77,6 +77,8 @@ start_xfce_extras() {
   thunar --daemon >/tmp/linx-thunar.log 2>&1 &
   # On the phone, application windows open maximized.
   python3 /usr/local/lib/linx/linx-windows.py >/tmp/linx-windows.log 2>&1 &
+  # Apps' notifications reach the phone's notification shade too.
+  python3 /usr/local/lib/linx/linx-notify.py >/tmp/linx-notify.log 2>&1 &
 }
 
 # The UI scale (2 on the phone, 1 on a monitor) goes through XSETTINGS

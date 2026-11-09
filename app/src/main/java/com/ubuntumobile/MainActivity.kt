@@ -121,6 +121,7 @@ class MainActivity : ComponentActivity() {
         enableEdgeToEdge()
         window.addFlags(WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON)
 
+        takeLaunch(intent)
         setContent {
             UbuntuTheme {
                 UbuntuApp(
@@ -179,6 +180,19 @@ class MainActivity : ComponentActivity() {
         return androidKeyToX11(event.keyCode)
     }
 
+    override fun onNewIntent(intent: android.content.Intent) {
+        super.onNewIntent(intent)
+        takeLaunch(intent)
+    }
+
+    /** A home-screen shortcut's app (see [pinShortcut]), to open on the desktop. */
+    private fun takeLaunch(intent: android.content.Intent?) {
+        if (intent?.action != ACTION_LAUNCH_APP) return
+        val id = intent.getStringExtra(EXTRA_APP_ID) ?: return
+        pendingLaunch = id to (intent.getStringExtra(EXTRA_APP_NAME) ?: id)
+        intent.action = null
+    }
+
     @Deprecated("the onBackPressedDispatcher is the modern way to do this")
     override fun onBackPressed() {
         if (backAction?.invoke() == true) return
@@ -195,6 +209,42 @@ private const val DISPLAY_PORT = 5901
 
 /** X display number used inside the container. */
 private const val DISPLAY_NUM = 99
+
+const val ACTION_LAUNCH_APP = "com.ubuntumobile.LAUNCH_APP"
+private const val EXTRA_APP_ID = "app_id"
+private const val EXTRA_APP_NAME = "app_name"
+
+/** A Linux app a home-screen shortcut asked for: (id, name), until it is started. */
+private var pendingLaunch by mutableStateOf<Pair<String, String>?>(null)
+
+/**
+ * Ask the launcher to pin a shortcut that opens a Linux app (by its
+ * linx-apps.py id) straight on the desktop, with the app's own icon.
+ */
+private suspend fun pinShortcut(context: android.content.Context, root: java.io.File, app: com.ubuntumobile.ui.AppEntry): Boolean {
+    if (!androidx.core.content.pm.ShortcutManagerCompat.isRequestPinShortcutSupported(context)) return false
+    val bitmap = withContext(Dispatchers.IO) {
+        app.iconPath?.let { com.ubuntumobile.ui.decodeAppIcon(root, it, 192) }
+    }
+    val icon = if (bitmap != null) {
+        androidx.core.graphics.drawable.IconCompat.createWithBitmap(bitmap)
+    } else {
+        androidx.core.graphics.drawable.IconCompat.createWithResource(context, R.mipmap.ic_launcher)
+    }
+    val intent = android.content.Intent(context, MainActivity::class.java)
+        .setAction(ACTION_LAUNCH_APP)
+        .putExtra(EXTRA_APP_ID, app.id)
+        .putExtra(EXTRA_APP_NAME, app.name)
+    val shortcut = androidx.core.content.pm.ShortcutInfoCompat.Builder(context, "linux-${app.id}")
+        .setShortLabel(app.name)
+        .setIcon(icon)
+        .setIntent(intent)
+        .build()
+    return androidx.core.content.pm.ShortcutManagerCompat.requestPinShortcut(context, shortcut, null)
+}
+
+/** Window classes that are part of the desktop, not apps with a layout of their own. */
+private val NOT_GAMES = setOf("Xfce4-panel", "Xfdesktop", "Wrapper-2.0", "Xfwm4", "Thunar", "Xfce4-terminal")
 
 /** The X cursor names toolkits use over text you can type into. */
 private val TEXT_CURSORS = setOf("text", "xterm", "ibeam", "IBeam")
@@ -502,6 +552,8 @@ fun UbuntuApp(
     LaunchedEffect(session.connected, onboarded) {
         if (!session.connected || !onboarded) return@LaunchedEffect
         browserInstalled = firefoxBinary.exists()
+        // Asks, the first time, whether Linux apps may notify.
+        com.ubuntumobile.linux.NotificationBridge.ensureChannel(context)
         withContext(Dispatchers.IO) {
             startAudio()
             // The wallpapers are drawn by the app (once per design change).
@@ -535,6 +587,112 @@ fun UbuntuApp(
         val choices = com.ubuntumobile.ui.SetupChoices.fromConf(text, desktopSize)
         look = choices
         showAccent(choices.accent)
+    }
+
+    // Snapshots: the whole system streamed out of tar (linx-snapshot.sh)
+    // into a file the user picks, or back.
+    var snapshotNote by remember { mutableStateOf<String?>(null) }
+    var snapshotBusy by remember { mutableStateOf(false) }
+    var restoreFrom by remember { mutableStateOf<android.net.Uri?>(null) }
+
+    /** Copy [from] to [to], saying how much has gone ("Saving: 820 MB"). */
+    suspend fun pump(from: java.io.InputStream, to: java.io.OutputStream, verb: String) = withContext(Dispatchers.IO) {
+        val buf = ByteArray(1 shl 16)
+        var total = 0L
+        var shown = 0L
+        while (true) {
+            val n = from.read(buf)
+            if (n < 0) break
+            to.write(buf, 0, n)
+            total += n
+            if (total - shown > 8L shl 20) {
+                shown = total
+                snapshotNote = "$verb: ${total shr 20} MB"
+            }
+        }
+        to.flush()
+        total
+    }
+
+    val backupPicker = androidx.activity.compose.rememberLauncherForActivityResult(
+        androidx.activity.result.contract.ActivityResultContracts.CreateDocument("application/zstd"),
+    ) { uri ->
+        if (uri == null || snapshotBusy) return@rememberLauncherForActivityResult
+        snapshotBusy = true
+        snapshotNote = "Saving…"
+        scope.launch {
+            val ok = try {
+                val proc = vm.runtime.startPiped(listOf("/bin/bash", "/usr/local/lib/linx/linx-snapshot.sh", "--backup"))
+                    ?: error("Linux is not running")
+                val size = context.contentResolver.openOutputStream(uri)!!.use { out ->
+                    proc.inputStream.use { pump(it, out, "Saving") }
+                }
+                val code = withContext(Dispatchers.IO) { proc.waitFor() }
+                snapshotNote = if (code == 0) "Saved a snapshot of ${size shr 20} MB" else "The snapshot could not be made"
+                code == 0
+            } catch (e: Exception) {
+                snapshotNote = "The snapshot could not be saved: ${e.message}"
+                false
+            }
+            if (!ok) {
+                try {
+                    android.provider.DocumentsContract.deleteDocument(context.contentResolver, uri)
+                } catch (_: Exception) {
+                }
+            }
+            snapshotBusy = false
+        }
+    }
+    val restorePicker = androidx.activity.compose.rememberLauncherForActivityResult(
+        androidx.activity.result.contract.ActivityResultContracts.OpenDocument(),
+    ) { uri -> if (uri != null && !snapshotBusy) restoreFrom = uri }
+
+    fun restoreSnapshot(uri: android.net.Uri) {
+        snapshotBusy = true
+        snapshotNote = "Restoring…"
+        scope.launch {
+            try {
+                val proc = vm.runtime.startPiped(listOf("/bin/bash", "/usr/local/lib/linx/linx-snapshot.sh", "--restore"))
+                    ?: error("Linux is not running")
+                context.contentResolver.openInputStream(uri)!!.use { input ->
+                    proc.outputStream.use { pump(input, it, "Restoring") }
+                }
+                val result = withContext(Dispatchers.IO) {
+                    proc.inputStream.bufferedReader().readText().also { proc.waitFor() }
+                }
+                if ("SNAPSHOT_RESTORED" in result) {
+                    snapshotNote = "Restored. Restart the app to use it."
+                    vm.refreshInstalledApps()
+                    withContext(Dispatchers.IO) { vm.runtime.shell("/usr/local/lib/linx/linx-look.sh", 120) }
+                } else {
+                    snapshotNote = "That file could not be restored (is it a Mobuntu snapshot?)"
+                }
+            } catch (e: Exception) {
+                snapshotNote = "Restoring failed: ${e.message}"
+            }
+            snapshotBusy = false
+        }
+    }
+    restoreFrom?.let { uri ->
+        androidx.compose.material3.AlertDialog(
+            onDismissRequest = { restoreFrom = null },
+            title = { Text("Restore this snapshot?") },
+            text = {
+                Text(
+                    "Every file in the snapshot replaces the one in Linux now. Files you made since are kept. " +
+                        "Restart the app afterwards.",
+                )
+            },
+            confirmButton = {
+                androidx.compose.material3.TextButton(onClick = {
+                    restoreFrom = null
+                    restoreSnapshot(uri)
+                }) { Text("Restore") }
+            },
+            dismissButton = {
+                androidx.compose.material3.TextButton(onClick = { restoreFrom = null }) { Text("Cancel") }
+            },
+        )
     }
 
     /** Change the look - dark, accent, wallpaper - without running setup again. */
@@ -588,6 +746,26 @@ fun UbuntuApp(
     // "pasted from your clipboard" notice on newer Android.
     val clipboard = remember { ContextCompat.getSystemService(context, android.content.ClipboardManager::class.java) }
     val lifecycleOwner = androidx.lifecycle.compose.LocalLifecycleOwner.current
+    // Linux apps' notifications go to the phone while the app is in the
+    // background (NotificationBridge), with the app's own icon.
+    DisposableEffect(lifecycleOwner) {
+        val observer = androidx.lifecycle.LifecycleEventObserver { _, event ->
+            when (event) {
+                androidx.lifecycle.Lifecycle.Event.ON_RESUME -> com.ubuntumobile.linux.NotificationBridge.foreground = true
+                androidx.lifecycle.Lifecycle.Event.ON_PAUSE -> com.ubuntumobile.linux.NotificationBridge.foreground = false
+                else -> {}
+            }
+        }
+        lifecycleOwner.lifecycle.addObserver(observer)
+        onDispose { lifecycleOwner.lifecycle.removeObserver(observer) }
+    }
+    LaunchedEffect(state.installedApps) {
+        val apps = state.installedApps
+        com.ubuntumobile.linux.NotificationBridge.iconFor = { name ->
+            apps.firstOrNull { it.name.equals(name, ignoreCase = true) || it.id.endsWith(name, ignoreCase = true) }
+                ?.iconPath?.let { com.ubuntumobile.ui.decodeAppIcon(vm.paths.root, it, 128) }
+        }
+    }
     DisposableEffect(clipboard, lifecycleOwner) {
         var lastText: String? = null
         var lastStamp = -1L
@@ -741,6 +919,26 @@ fun UbuntuApp(
         )
     }
 
+    // A home-screen shortcut: open its app once the desktop is up.
+    LaunchedEffect(pendingLaunch, session.connected) {
+        val (id, name) = pendingLaunch ?: return@LaunchedEffect
+        if (!session.connected) return@LaunchedEffect
+        pendingLaunch = null
+        screen = Screen.DISPLAY
+        opening = name
+        // Not before the desktop has finished starting: the app would race
+        // the window manager for the processor (and win), and would miss
+        // the session bus. desktop-start.sh starts linx-windows.py last.
+        val ready = java.io.File(vm.paths.sharedTmpDir, "linx-windows.log")
+        val since = System.currentTimeMillis()
+        while (!withContext(Dispatchers.IO) { ready.exists() } && System.currentTimeMillis() - since < 120_000) {
+            delay(500)
+        }
+        delay(1500)
+        launchOnDisplay(listOf("/usr/bin/python3", "/usr/local/lib/linx/linx-apps.py", "--run", id))
+        opening = name
+    }
+
     /** Show the Android soft keyboard so key events reach the VNC session. */
     fun showSoftKeyboard(view: android.view.View, ctx: android.content.Context) {
         keyboardWanted = true
@@ -807,6 +1005,14 @@ fun UbuntuApp(
                 state = state,
                 apps = apps,
                 iconRoot = vm.paths.root,
+                onPin = { app ->
+                    scope.launch {
+                        val asked = pinShortcut(context, vm.paths.root, app)
+                        if (!asked) {
+                            android.widget.Toast.makeText(context, "This home screen does not take shortcuts", android.widget.Toast.LENGTH_SHORT).show()
+                        }
+                    }
+                },
                 wide = wide,
                 onLaunchApp = { entry ->
                     when (entry.id) {
@@ -882,6 +1088,13 @@ fun UbuntuApp(
                 onSetUpAgain = { screen = Screen.ONBOARDING },
                 look = look,
                 onLook = { changeLook(it) },
+                snapshotNote = snapshotNote,
+                snapshotBusy = snapshotBusy,
+                onBackup = {
+                    val day = java.text.SimpleDateFormat("yyyy-MM-dd", java.util.Locale.US).format(java.util.Date())
+                    backupPicker.launch("mobuntu-$day.tar.zst")
+                },
+                onRestore = { restorePicker.launch(arrayOf("*/*")) },
                 storageAllowed = storageAllowed,
                 onAllowStorage = { askForStorage() },
                 versionName = BuildConfig.VERSION_NAME,
@@ -1029,10 +1242,33 @@ private fun GamepadOverlay(
 ) {
     val context = LocalContext.current
     val prefs = remember { context.getSharedPreferences("settings", android.content.Context.MODE_PRIVATE) }
-    var settings by remember { mutableStateOf(com.ubuntumobile.gamepad.GamepadSettings.load(prefs)) }
+    // The app in front (its X window class, from linx-windows.py): a game
+    // can have a layout of its own, which comes up whenever it is in front.
+    var activeApp by remember { mutableStateOf<String?>(null) }
+    LaunchedEffect(Unit) {
+        val file = java.io.File(vm.paths.sharedTmpDir, "linx-active-app")
+        while (true) {
+            val name = withContext(Dispatchers.IO) {
+                try {
+                    file.readText().trim()
+                } catch (_: Exception) {
+                    ""
+                }
+            }
+            // The desktop itself and its panel are not games.
+            activeApp = name.takeIf { it.isNotEmpty() && it !in NOT_GAMES }
+            delay(1000)
+        }
+    }
+    var perApp by remember(activeApp) {
+        mutableStateOf(activeApp?.let { com.ubuntumobile.gamepad.GamepadSettings.hasProfile(prefs, it) } == true)
+    }
+    var settings by remember(activeApp) {
+        mutableStateOf(com.ubuntumobile.gamepad.GamepadSettings.load(prefs, activeApp))
+    }
     fun update(changed: com.ubuntumobile.gamepad.GamepadSettings) {
         settings = changed
-        changed.save(prefs)
+        changed.save(prefs, if (perApp) activeApp else null)
     }
     var editing by remember { mutableStateOf(false) }
     val pad = remember { GamepadState() }
@@ -1132,6 +1368,20 @@ private fun GamepadOverlay(
                 settings = settings,
                 mode = mode,
                 controllerAvailable = bridgeActive == true,
+                activeApp = activeApp,
+                perApp = perApp,
+                onPerApp = { only ->
+                    val app = activeApp
+                    if (app != null) {
+                        perApp = only
+                        if (only) {
+                            settings.save(prefs, app)
+                        } else {
+                            com.ubuntumobile.gamepad.GamepadSettings.deleteProfile(prefs, app)
+                            settings = com.ubuntumobile.gamepad.GamepadSettings.load(prefs)
+                        }
+                    }
+                },
                 onChange = { update(it) },
                 onDone = { editing = false },
                 // In portrait the controls are in the lower half: the
@@ -1151,6 +1401,10 @@ private fun GamepadEditor(
     settings: com.ubuntumobile.gamepad.GamepadSettings,
     mode: com.ubuntumobile.gamepad.PadMode,
     controllerAvailable: Boolean,
+    /** The app in front, which can have a layout of its own; null for none. */
+    activeApp: String?,
+    perApp: Boolean,
+    onPerApp: (Boolean) -> Unit,
     onChange: (com.ubuntumobile.gamepad.GamepadSettings) -> Unit,
     onDone: () -> Unit,
     modifier: Modifier = Modifier,
@@ -1189,6 +1443,13 @@ private fun GamepadEditor(
     ) {
         Text("Edit gamepad", color = Color.White, fontSize = 18.sp, fontWeight = FontWeight.Medium)
         Text("Drag the controls to move them.", color = Color.White.copy(alpha = 0.7f), fontSize = 12.sp)
+        if (activeApp != null) {
+            Label("Layout for")
+            Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                Chip("Every game", !perApp) { onPerApp(false) }
+                Chip("Just $activeApp", perApp) { onPerApp(true) }
+            }
+        }
 
         Label("See-through")
         androidx.compose.material3.Slider(
