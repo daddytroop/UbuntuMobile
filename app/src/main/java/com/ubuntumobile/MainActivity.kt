@@ -1066,6 +1066,7 @@ fun UbuntuApp(
                 },
                 onClose = { screen = Screen.DISPLAY },
                 modifier = Modifier.systemBarsPadding(),
+                tmpDir = vm.paths.sharedTmpDir,
             )
         }
 

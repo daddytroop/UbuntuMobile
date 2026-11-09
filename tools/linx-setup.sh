@@ -88,9 +88,10 @@ if [ "$LINX_FLATHUB" = 1 ]; then
       fail flatpaks /tmp/linx-setup-flatpaks.log
     else
       # One at a time, so an app that is not built for this phone's
-      # processor does not keep the others out.
+      # processor does not keep the others out. Flatpak prints how far
+      # it is only to a terminal, so it gets one (script).
       for app in $LINX_FLATPAKS; do
-        flatpak install -y --noninteractive --or-update flathub "$app" 2>&1 \
+        COLUMNS=100 script -qfec "flatpak install -y --or-update flathub $app" /dev/null 2>&1 \
           | tee -a /tmp/linx-setup-flatpaks.log | tr '\r' '\n' \
           | grep --line-buffered -o '[0-9]\+%' | sed -u 's/^/flatpak:/' >>"$LINX_APT_STATUS"
         [ "${PIPESTATUS[0]}" = 0 ] || fail "flatpak:$app" /tmp/linx-setup-flatpaks.log

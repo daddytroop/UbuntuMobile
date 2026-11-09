@@ -1,6 +1,14 @@
 package com.ubuntumobile.ui
 
+import androidx.compose.foundation.Image
 import androidx.compose.foundation.background
+import androidx.compose.foundation.horizontalScroll
+import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.verticalScroll
+import androidx.compose.foundation.lazy.LazyRow
+import androidx.compose.ui.graphics.ImageBitmap
+import androidx.compose.ui.layout.ContentScale
+import androidx.compose.material.icons.filled.Block
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
@@ -83,11 +91,41 @@ data class StoreApp(
     val accent: Long = 0xFFE95420,
     /** From Flathub: [pkg] is the app id. */
     val flatpak: Boolean = false,
+    /** Its icon on Flathub's website. */
+    val iconUrl: String? = null,
+    val developer: String = "",
+    /** False when it is built only for other processors (Steam is PC-only). */
+    val available: Boolean = true,
 )
 
-/** Turns Flathub on if it is not yet (linx-flatpak.sh), then installs. */
-private fun flatpakInstaller(id: String) =
-    "/usr/local/lib/linx/linx-flatpak.sh >/dev/null && flatpak install -y --noninteractive flathub $id"
+/** A Flathub app for the store, from Flathub's website. */
+internal fun FlathubHit.toStoreApp() = StoreApp(
+    pkg = id, name = name, summary = summary, command = listOf("/usr/bin/flatpak", "run", id),
+    installer = flatpakInstaller(id),
+    icon = Icons.Default.Inventory2, accent = 0xFF4A86CF, flatpak = true,
+    iconUrl = icon, developer = developer, available = runsOn(FlathubApi.deviceArch),
+)
+
+/** Why an app is not offered on this phone, in words. */
+internal fun notForThisPhone(app: StoreApp): String {
+    val pc = "${app.name} is built only for PC processors (Intel and AMD), so it cannot run on a phone's ARM processor."
+    return if (app.pkg == "com.valvesoftware.Steam" || app.pkg == "com.valvesoftware.SteamLink") {
+        "$pc Valve does not offer Steam for ARM Linux yet. To play your Steam games on this phone, " +
+            "stream them from your PC with Moonlight (in Games), or use Valve's Steam Link app from the Play Store. " +
+            "Games and emulators built for phones are in Games too."
+    } else {
+        "$pc Search for another app that does the same thing."
+    }
+}
+
+/**
+ * Turns Flathub on if it is not yet (linx-flatpak.sh), then installs.
+ * Flatpak only prints how far the download is when it writes to a
+ * terminal, so it gets one (`script`).
+ */
+internal fun flatpakInstaller(id: String) =
+    "/usr/local/lib/linx/linx-flatpak.sh >/dev/null && " +
+        "COLUMNS=100 script -qfec 'flatpak install -y flathub $id' /dev/null"
 
 private fun flathubApp(id: String, name: String, summary: String, icon: ImageVector, accent: Long) = StoreApp(
     pkg = id, name = name, summary = summary, command = listOf("/usr/bin/flatpak", "run", id),
@@ -120,7 +158,7 @@ private val WELL_KNOWN = listOf(
     "org.videolan.", "org.blender.", "com.obsproject.", "org.freedesktop.",
 )
 
-private enum class StoreSource(val label: String) { UBUNTU("Ubuntu"), FLATHUB("Flathub") }
+private enum class StoreSource(val label: String) { FLATHUB("Flathub"), UBUNTU("Ubuntu") }
 
 /**
  * The store's front page: well-known desktop applications that run in the
@@ -193,8 +231,17 @@ fun StoreScreen(
     openApp: (List<String>) -> Unit,
     onClose: () -> Unit,
     modifier: Modifier = Modifier,
+    /** The container's /tmp, where an install says how far it is. */
+    tmpDir: java.io.File? = null,
 ) {
-    var source by remember { mutableStateOf(StoreSource.UBUNTU) }
+    var source by remember { mutableStateOf(StoreSource.FLATHUB) }
+    // Flathub's front page: popular apps, or one category's.
+    var category by remember { mutableStateOf<String?>(null) }
+    var flathubList by remember { mutableStateOf<List<StoreApp>>(emptyList()) }
+    var flathubLoading by remember { mutableStateOf(false) }
+    var flathubOffline by remember { mutableStateOf(false) }
+    var details by remember { mutableStateOf<StoreApp?>(null) }
+    var progress by remember { mutableStateOf<Int?>(null) }
     var query by remember { mutableStateOf("") }
     var results by remember { mutableStateOf<List<StoreApp>>(emptyList()) }
     var searching by remember { mutableStateOf(false) }
@@ -224,8 +271,25 @@ fun StoreScreen(
         }
     }
 
-    LaunchedEffect(source) {
-        refreshStatus(if (source == StoreSource.FLATHUB) FlathubCatalog.featured else StoreCatalog.featured)
+    LaunchedEffect(source, category) {
+        if (source != StoreSource.FLATHUB) {
+            refreshStatus(StoreCatalog.featured)
+            return@LaunchedEffect
+        }
+        flathubLoading = true
+        flathubList = try {
+            val cat = category
+            (if (cat == null) FlathubApi.collection("popular") else FlathubApi.category(cat))
+                .map { it.toStoreApp() }
+                .also { flathubOffline = false }
+        } catch (e: Exception) {
+            // No internet, or Flathub's website is down: the apps this
+            // build knows are still there.
+            flathubOffline = true
+            FlathubCatalog.featured
+        }
+        flathubLoading = false
+        refreshStatus(flathubList)
     }
 
     // Searching runs apt or Flatpak inside the container, which takes a
@@ -237,9 +301,18 @@ fun StoreScreen(
         }
         delay(500)
         searching = true
-        results = if (source == StoreSource.FLATHUB) {
-            // The whole catalogue, filtered here: Flatpak's own search needs
-            // an appstream download the container does not have.
+        val online = if (source == StoreSource.FLATHUB) {
+            try {
+                FlathubApi.search(query.trim()).map { it.toStoreApp() }
+            } catch (e: Exception) {
+                null
+            }
+        } else null
+        results = if (online != null) {
+            online
+        } else if (source == StoreSource.FLATHUB) {
+            // Offline: the catalogue Flatpak itself has, filtered here
+            // (Flatpak's own search needs an appstream download).
             val words = query.trim().lowercase().split(Regex("\\s+"))
             runGuest("/usr/local/lib/linx/flatpak-search.sh flathub", 300).lines().mapNotNull { line ->
                 val p = line.split("|").map { it.trim() }
@@ -274,15 +347,46 @@ fun StoreScreen(
     }
 
     fun install(app: StoreApp) {
+        if (!app.available) {
+            details = app
+            return
+        }
         scope.launch {
             installing = app.pkg
+            progress = null
             message = if (app.flatpak) {
                 "Installing ${app.name} from Flathub… the first app also brings its runtime, a few hundred MB."
             } else {
                 "Installing ${app.name}… the first install also downloads Ubuntu's package lists."
             }
             val cmd = app.installer ?: ("/usr/local/lib/linx/apt-install.sh " + app.packages.joinToString(" "))
-            val out = runGuest("$cmd 2>&1 | tail -n 3", 1800)
+            // Flatpak prints "42%" as it downloads; keep the latest where the
+            // app can read it.
+            val progressFile = tmpDir?.let { java.io.File(it, "linx-store-progress") }
+            progressFile?.delete()
+            val watch = if (app.flatpak && progressFile != null) scope.launch {
+                while (true) {
+                    delay(700)
+                    val last = try {
+                        progressFile.readLines().lastOrNull { it.isNotBlank() }
+                    } catch (_: Exception) {
+                        null
+                    }
+                    last?.trim()?.removeSuffix("%")?.toIntOrNull()?.let { progress = it.coerceIn(0, 100) }
+                }
+            } else null
+            val out = if (app.flatpak) {
+                runGuest(
+                    "{ $cmd; } 2>&1 | tee /tmp/linx-store.log | tr '\\r' '\\n' " +
+                        "| grep --line-buffered -o '[0-9]\\+%' >/tmp/linx-store-progress; " +
+                        "tr '\\r' '\\n' </tmp/linx-store.log | sed 's/\\x1b\\[[0-9;?]*[a-zA-Z]//g' | grep -v '^\\s*$' | tail -n 3",
+                    1800,
+                )
+            } else {
+                runGuest("$cmd 2>&1 | tail -n 3", 1800)
+            }
+            watch?.cancel()
+            progress = null
             refreshStatus(listOf(app))
             message = if (installed[app.pkg] == true) {
                 "${app.name} is installed. It is in the Applications menu on the desktop."
@@ -312,7 +416,7 @@ fun StoreScreen(
                     .padding(horizontal = 4.dp),
                 verticalAlignment = Alignment.CenterVertically,
             ) {
-                IconButton(onClick = onClose) {
+                IconButton(onClick = { if (details != null) details = null else onClose() }) {
                     Icon(Icons.AutoMirrored.Filled.ArrowBack, contentDescription = "Back", tint = Color.White)
                 }
                 Column(Modifier.weight(1f)) {
@@ -366,7 +470,15 @@ fun StoreScreen(
             }
         }
 
-        if (searching || installing != null) {
+        val pct = progress
+        if (installing != null && pct != null) {
+            LinearProgressIndicator(
+                progress = { pct / 100f },
+                modifier = Modifier.fillMaxWidth(),
+                color = UbuntuPalette.UbuntuOrange,
+                trackColor = UbuntuPalette.LightSurfaceVariant,
+            )
+        } else if (searching || installing != null || flathubLoading) {
             LinearProgressIndicator(
                 modifier = Modifier.fillMaxWidth(),
                 color = UbuntuPalette.UbuntuOrange,
@@ -400,9 +512,25 @@ fun StoreScreen(
             }
         }
 
+        details?.let { app ->
+            StoreDetails(
+                app = app,
+                installed = installed[app.pkg],
+                busy = installing == app.pkg,
+                progress = if (installing == app.pkg) progress else null,
+                enabled = installing == null,
+                onInstall = { install(app) },
+                onOpen = { openApp(app.command) },
+                modifier = Modifier
+                    .widthIn(max = 720.dp)
+                    .align(Alignment.CenterHorizontally),
+            )
+            return@Column
+        }
+
         val showing = when {
             query.isNotBlank() -> results
-            source == StoreSource.FLATHUB -> FlathubCatalog.featured
+            source == StoreSource.FLATHUB -> flathubList
             else -> StoreCatalog.featured
         }
         LazyColumn(
@@ -413,9 +541,18 @@ fun StoreScreen(
             contentPadding = PaddingValues(horizontal = 16.dp, vertical = 12.dp),
             verticalArrangement = Arrangement.spacedBy(8.dp),
         ) {
+            if (source == StoreSource.FLATHUB && query.isBlank()) {
+                item {
+                    CategoryChips(selected = category, onSelect = { category = it })
+                }
+            }
             item {
                 Text(
                     when {
+                        query.isBlank() && source == StoreSource.FLATHUB && flathubOffline ->
+                            "Flathub's website cannot be reached, so these are the apps this version knows."
+                        query.isBlank() && source == StoreSource.FLATHUB ->
+                            FlathubApi.categories.firstOrNull { it.first == category }?.second ?: "Popular"
                         query.isBlank() -> "Featured"
                         searching -> "Searching…"
                         results.isEmpty() -> "Nothing matches “$query”."
@@ -436,9 +573,221 @@ fun StoreScreen(
                     enabled = installing == null,
                     onInstall = { install(app) },
                     onOpen = { openApp(app.command) },
+                    onDetails = if (app.flatpak) ({ details = app }) else null,
                 )
             }
         }
+    }
+}
+
+@Composable
+private fun CategoryChips(selected: String?, onSelect: (String?) -> Unit) {
+    Row(
+        Modifier
+            .fillMaxWidth()
+            .horizontalScroll(rememberScrollState())
+            .padding(bottom = 8.dp),
+        horizontalArrangement = Arrangement.spacedBy(8.dp),
+    ) {
+        (listOf<Pair<String?, String>>(null to "Popular") + FlathubApi.categories).forEach { (id, label) ->
+            val on = id == selected
+            Box(
+                Modifier
+                    .clip(RoundedCornerShape(18.dp))
+                    .background(if (on) UbuntuPalette.Aubergine else UbuntuPalette.LightSurface)
+                    .clickable { onSelect(id) }
+                    .padding(horizontal = 14.dp, vertical = 8.dp),
+            ) {
+                Text(
+                    label,
+                    fontSize = 13.sp,
+                    fontWeight = FontWeight.Medium,
+                    color = if (on) Color.White else UbuntuPalette.LightOnSurface,
+                )
+            }
+        }
+    }
+}
+
+/** An image from the web, or nothing until it has loaded. */
+@Composable
+private fun rememberWebImage(url: String?, maxWidth: Int = 256): ImageBitmap? {
+    var image by remember(url) { mutableStateOf(url?.let { WebImages.cached(it) }) }
+    LaunchedEffect(url) {
+        if (url != null && image == null) image = WebImages.load(url, maxWidth)
+    }
+    return image
+}
+
+@Composable
+private fun AppIcon(app: StoreApp, size: androidx.compose.ui.unit.Dp) {
+    val image = rememberWebImage(app.iconUrl)
+    if (image != null) {
+        Image(
+            bitmap = image,
+            contentDescription = null,
+            modifier = Modifier
+                .size(size)
+                .clip(RoundedCornerShape(size / 4)),
+        )
+    } else {
+        Box(
+            modifier = Modifier
+                .size(size)
+                .clip(RoundedCornerShape(size / 3.4f))
+                .background(Color(app.accent)),
+            contentAlignment = Alignment.Center,
+        ) {
+            Icon(app.icon ?: Icons.Default.Inventory2, contentDescription = null, tint = Color.White)
+        }
+    }
+}
+
+/** Install, Open, Installed, or why it is not for this phone. */
+@Composable
+private fun StoreButton(
+    app: StoreApp,
+    installed: Boolean?,
+    busy: Boolean,
+    enabled: Boolean,
+    onInstall: () -> Unit,
+    onOpen: () -> Unit,
+) {
+    val canOpen = installed == true && app.command.isNotEmpty()
+    val blocked = !app.available && installed != true
+    Box(
+        modifier = Modifier
+            .clip(RoundedCornerShape(20.dp))
+            .background(
+                when {
+                    busy -> UbuntuPalette.LightSurfaceVariant
+                    blocked -> UbuntuPalette.LightSurfaceVariant
+                    canOpen -> UbuntuPalette.Aubergine
+                    installed == true -> UbuntuPalette.LightSurfaceVariant
+                    enabled -> UbuntuPalette.UbuntuOrange
+                    else -> UbuntuPalette.LightOutline
+                },
+            )
+            .clickable(enabled = !busy && (blocked || canOpen || (installed != true && enabled))) {
+                if (canOpen) onOpen() else onInstall()
+            }
+            .padding(horizontal = 18.dp, vertical = 9.dp),
+        contentAlignment = Alignment.Center,
+    ) {
+        when {
+            busy -> CircularProgressIndicator(
+                modifier = Modifier.size(16.dp),
+                strokeWidth = 2.dp,
+                color = UbuntuPalette.UbuntuOrange,
+            )
+            blocked -> Row(verticalAlignment = Alignment.CenterVertically) {
+                Icon(Icons.Default.Block, contentDescription = null, tint = UbuntuPalette.LightOnSurfaceVariant, modifier = Modifier.size(14.dp))
+                Spacer(Modifier.width(6.dp))
+                Text("PC only", color = UbuntuPalette.LightOnSurfaceVariant, fontSize = 13.sp)
+            }
+            canOpen -> Text("Open", color = Color.White, fontSize = 13.sp, fontWeight = FontWeight.Medium)
+            installed == true -> Text("Installed", color = UbuntuPalette.LightOnSurface, fontSize = 13.sp)
+            else -> Text("Install", color = Color.White, fontSize = 13.sp, fontWeight = FontWeight.Medium)
+        }
+    }
+}
+
+/** One app's page: what it is, what it looks like, and Install. */
+@Composable
+private fun StoreDetails(
+    app: StoreApp,
+    installed: Boolean?,
+    busy: Boolean,
+    progress: Int?,
+    enabled: Boolean,
+    onInstall: () -> Unit,
+    onOpen: () -> Unit,
+    modifier: Modifier = Modifier,
+) {
+    var info by remember(app.pkg) { mutableStateOf<FlathubDetails?>(null) }
+    var failed by remember(app.pkg) { mutableStateOf(false) }
+    LaunchedEffect(app.pkg) {
+        info = try {
+            FlathubApi.details(app.pkg)
+        } catch (_: Exception) {
+            failed = true
+            null
+        }
+    }
+    Column(
+        modifier
+            .fillMaxSize()
+            .verticalScroll(rememberScrollState())
+            .padding(16.dp),
+    ) {
+        Row(verticalAlignment = Alignment.CenterVertically) {
+            AppIcon(app, 72.dp)
+            Spacer(Modifier.width(16.dp))
+            Column(Modifier.weight(1f)) {
+                Text(app.name, fontSize = 22.sp, fontWeight = FontWeight.Medium, color = UbuntuPalette.LightOnSurface)
+                if (app.developer.isNotBlank()) {
+                    Text(app.developer, fontSize = 13.sp, color = UbuntuPalette.LightOnSurfaceVariant)
+                }
+                Spacer(Modifier.height(10.dp))
+                StoreButton(app, installed, busy, enabled, onInstall, onOpen)
+            }
+        }
+        if (busy) {
+            Spacer(Modifier.height(12.dp))
+            Text(
+                if (progress != null) "Downloading… $progress%" else "Installing…",
+                fontSize = 13.sp,
+                color = UbuntuPalette.LightOnSurfaceVariant,
+            )
+        }
+        if (!app.available && installed != true) {
+            Spacer(Modifier.height(16.dp))
+            Text(
+                notForThisPhone(app),
+                fontSize = 14.sp,
+                color = UbuntuPalette.LightOnSurface,
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .clip(RoundedCornerShape(12.dp))
+                    .background(UbuntuPalette.LightSurfaceVariant)
+                    .padding(14.dp),
+            )
+        }
+        Spacer(Modifier.height(16.dp))
+        Text(app.summary, fontSize = 16.sp, fontWeight = FontWeight.Medium, color = UbuntuPalette.LightOnSurface)
+        val shots = info?.screenshots.orEmpty()
+        if (shots.isNotEmpty()) {
+            Spacer(Modifier.height(14.dp))
+            LazyRow(horizontalArrangement = Arrangement.spacedBy(10.dp)) {
+                items(shots) { url ->
+                    val shot = rememberWebImage(url, maxWidth = 800)
+                    Box(
+                        Modifier
+                            .height(200.dp)
+                            .width(300.dp)
+                            .clip(RoundedCornerShape(12.dp))
+                            .background(UbuntuPalette.LightSurfaceVariant),
+                    ) {
+                        if (shot != null) {
+                            Image(shot, contentDescription = null, contentScale = ContentScale.Crop, modifier = Modifier.fillMaxSize())
+                        }
+                    }
+                }
+            }
+        }
+        Spacer(Modifier.height(14.dp))
+        Text(
+            info?.description ?: if (failed) "" else "Loading…",
+            fontSize = 14.sp,
+            lineHeight = 20.sp,
+            color = UbuntuPalette.LightOnSurface,
+        )
+        info?.license?.takeIf { it.isNotBlank() && !it.startsWith("LicenseRef") }?.let {
+            Spacer(Modifier.height(12.dp))
+            Text("Licence: $it", fontSize = 12.sp, color = UbuntuPalette.LightOnSurfaceVariant)
+        }
+        Spacer(Modifier.height(4.dp))
+        Text("From Flathub · ${app.pkg}", fontSize = 12.sp, color = UbuntuPalette.LightOnSurfaceVariant)
     }
 }
 
@@ -490,31 +839,25 @@ private fun StoreRow(
     enabled: Boolean,
     onInstall: () -> Unit,
     onOpen: () -> Unit,
+    onDetails: (() -> Unit)? = null,
 ) {
     Row(
         modifier = Modifier
             .fillMaxWidth()
             .clip(RoundedCornerShape(16.dp))
             .background(UbuntuPalette.LightSurface)
+            .then(if (onDetails != null) Modifier.clickable(onClick = onDetails) else Modifier)
             .padding(12.dp),
         verticalAlignment = Alignment.CenterVertically,
     ) {
-        Box(
-            modifier = Modifier
-                .size(48.dp)
-                .clip(RoundedCornerShape(14.dp))
-                .background(Color(app.accent)),
-            contentAlignment = Alignment.Center,
-        ) {
-            Icon(app.icon ?: Icons.Default.Inventory2, contentDescription = null, tint = Color.White)
-        }
+        AppIcon(app, 48.dp)
         Spacer(Modifier.width(14.dp))
         Column(Modifier.weight(1f)) {
             Text(
                 app.name,
                 fontSize = 16.sp,
                 fontWeight = FontWeight.Medium,
-                color = UbuntuPalette.LightOnSurface,
+                color = if (app.available) UbuntuPalette.LightOnSurface else UbuntuPalette.LightOnSurfaceVariant,
                 maxLines = 1,
                 overflow = TextOverflow.Ellipsis,
             )
@@ -527,36 +870,7 @@ private fun StoreRow(
             )
         }
         Spacer(Modifier.width(8.dp))
-        val canOpen = installed == true && app.command.isNotEmpty()
-        Box(
-            modifier = Modifier
-                .clip(RoundedCornerShape(20.dp))
-                .background(
-                    when {
-                        busy -> UbuntuPalette.LightSurfaceVariant
-                        canOpen -> UbuntuPalette.Aubergine
-                        installed == true -> UbuntuPalette.LightSurfaceVariant
-                        enabled -> UbuntuPalette.UbuntuOrange
-                        else -> UbuntuPalette.LightOutline
-                    },
-                )
-                .clickable(enabled = !busy && (canOpen || (installed != true && enabled))) {
-                    if (canOpen) onOpen() else onInstall()
-                }
-                .padding(horizontal = 18.dp, vertical = 9.dp),
-            contentAlignment = Alignment.Center,
-        ) {
-            when {
-                busy -> CircularProgressIndicator(
-                    modifier = Modifier.size(16.dp),
-                    strokeWidth = 2.dp,
-                    color = UbuntuPalette.UbuntuOrange,
-                )
-                canOpen -> Text("Open", color = Color.White, fontSize = 13.sp, fontWeight = FontWeight.Medium)
-                installed == true -> Text("Installed", color = UbuntuPalette.LightOnSurface, fontSize = 13.sp)
-                else -> Text("Install", color = Color.White, fontSize = 13.sp, fontWeight = FontWeight.Medium)
-            }
-        }
+        StoreButton(app, installed, busy, enabled, onInstall, onOpen)
     }
 }
 

@@ -89,14 +89,22 @@ sequences.
 ### Ubuntu Software
 A native store with two sources, switched at the top:
 
+- **Flathub** (first): the whole Flathub catalogue, as flathub.org shows
+  it, read from Flathub's web API (`FlathubApi.kt`). The front page has
+  the popular apps and the categories (Games, Office, Graphics, ...), only
+  apps built for this phone's processor. Each app has a page with its
+  screenshots and description. A search also finds apps built only for PC
+  processors, marked **PC only**, so someone looking for Steam sees why it
+  is not there and what to use instead (Moonlight, or Valve's Steam Link
+  for Android). Without internet, the store falls back to the apps this
+  version knows and Flatpak's own list. The first install turns Flatpak
+  on (`linx-flatpak.sh`) and brings the app's runtime, a few hundred MB.
+  Flatpak prints its progress only to a terminal, so installs run under
+  `script`, and the store and setup show the real percentage.
 - **Ubuntu**: a featured page (Firefox, LibreOffice, GIMP, Inkscape, VLC,
   Geany, ...) and a search of the Ubuntu archive. Backed by
   `apt-install.sh`, which fetches apt's package lists the first time (the
   image ships without them) and installs with `apt-get`.
-- **Flathub**: a featured page (Thunderbird, Telegram, Signal, VS Code,
-  Krita, Blender, OBS Studio, mpv, Flatseal) and a search of the whole
-  Flathub catalogue. The first install turns Flatpak on (`linx-flatpak.sh`)
-  and brings the app's runtime, a few hundred MB.
 
 Installed apps from either appear in the desktop's Applications menu.
 
