@@ -50,7 +50,10 @@ class LinuxRuntime(private val paths: LinuxPaths) {
         // "setlocale: cannot change locale" warning on every shell.
         put("LANG", "C.UTF-8")
         put("LC_ALL", "C.UTF-8")
-        put("DISPLAY", ":0")
+        // The desktop's X server (display-start.sh, started as :99 by the
+        // app), so whatever runs in the guest - the scripts restarting the
+        // panel, a program started from the console - finds it.
+        put("DISPLAY", ":99")
         put("XDG_RUNTIME_DIR", "/tmp/runtime-root")
         put("TMPDIR", "/tmp")
         put("DEBIAN_FRONTEND", "noninteractive")
