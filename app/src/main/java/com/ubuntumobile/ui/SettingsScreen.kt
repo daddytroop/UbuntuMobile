@@ -61,6 +61,8 @@ fun SettingsScreen(
     /** Whether Linux can see the phone's folders. */
     storageAllowed: Boolean,
     onAllowStorage: () -> Unit,
+    /** Run onboarding again: apps, look and app stores. */
+    onSetUpAgain: () -> Unit,
     versionName: String,
     ubuntuVersion: String,
     onClose: () -> Unit,
@@ -94,6 +96,21 @@ fun SettingsScreen(
                 .align(Alignment.CenterHorizontally),
             verticalArrangement = Arrangement.spacedBy(16.dp),
         ) {
+            Card("Your Linux", null) {
+                Row(verticalAlignment = Alignment.CenterVertically) {
+                    Column(Modifier.weight(1f)) {
+                        Text("Apps, look and app stores", fontSize = 15.sp, fontWeight = FontWeight.Medium, color = UbuntuPalette.LightOnSurface)
+                        Text(
+                            "Go through setup again: light or full, light or dark, Flathub on or off",
+                            fontSize = 12.sp,
+                            color = UbuntuPalette.LightOnSurfaceVariant,
+                        )
+                    }
+                    Spacer(Modifier.width(12.dp))
+                    ActionChip("Set up", onSetUpAgain)
+                }
+            }
+
             Card("Desktop size", "How big the Linux desktop is drawn on the phone. A monitor always gets a normal desktop.") {
                 DesktopSize.entries.forEach { size ->
                     val selected = size == desktopSize
@@ -173,7 +190,7 @@ fun SettingsScreen(
                         Text(
                             browserNote ?: when (browserInstalled) {
                                 true -> "Installed, and the desktop's default browser"
-                                false -> "Not installed yet - with sound and the Ubuntu look, about 150 MB"
+                                false -> "Not installed - Set up adds it"
                                 null -> "Checking…"
                             },
                             fontSize = 12.sp,

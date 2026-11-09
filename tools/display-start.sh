@@ -182,8 +182,11 @@ for _ in 1 2 3 4 5 6 7 8 9 10 11 12 13 14 15; do
     # under proot. The stand-in makes it load them unsandboxed instead; see
     # nosandbox-bwrap.
     export PATH="/usr/local/lib/linx/nosandbox:$PATH"
-    # Flatpak finds bwrap on PATH too; keep it on the real one.
+    # Flatpak finds bwrap on PATH too; keep it on /usr/bin/bwrap, which is
+    # linx-bwrap once Flathub is on (linx-flatpak.sh).
     export FLATPAK_BWRAP=/usr/bin/bwrap
+    # Apps installed from Flathub appear in the Applications menu.
+    export XDG_DATA_DIRS="/var/lib/flatpak/exports/share:/usr/local/share:/usr/share"
 
     # D-Bus refuses to start a session bus without a machine id, and the
     # rootfs is built without one (systemd would normally create it).

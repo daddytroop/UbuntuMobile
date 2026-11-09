@@ -7,3 +7,4 @@ gradlew   text eol=lf
 tools/nosandbox-bwrap text eol=lf
 tools/firefox text eol=lf
 tools/*.xml text eol=lf
+tools/linx-bwrap text eol=lf

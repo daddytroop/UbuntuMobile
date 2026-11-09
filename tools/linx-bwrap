@@ -1,0 +1,403 @@
+#!/usr/bin/python3
+# bwrap for Flatpak under proot.
+#
+# Flatpak runs every app in a bubblewrap sandbox: a new mount namespace in
+# which the runtime is /usr, the app is /app, and the rest of the system is
+# put together from bind mounts. Namespaces need the kernel's help, which
+# proot on Android does not have, so the real bwrap fails and no Flatpak app
+# can start.
+#
+# This takes bwrap's place (installed over /usr/bin/bwrap by
+# linx-flatpak.sh). It reads the same arguments and builds the same file
+# system view with a second, nested proot instead: an empty directory as the
+# new root, every bind mount a proot binding, and the directories, symlinks
+# and files bwrap would create made in that directory. What it cannot do -
+# new PID, network or user namespaces, seccomp filters, read-only remounts -
+# it leaves out: the app still runs, just without Flatpak's sandbox.
+#
+# Programs started this way pay for two proots on each exec (about four
+# times the cost of one); once running they run at full speed.
+import json
+import os
+import shutil
+import signal
+import socket
+import struct
+import subprocess
+import sys
+import tempfile
+
+PROOT = "/usr/bin/proot"
+REAL_BWRAP = "/usr/bin/bwrap.real"
+
+# Options and how many arguments each takes, for the ones that are only
+# passed over.
+IGNORED = {
+    "--unshare-all": 0, "--unshare-user": 0, "--unshare-user-try": 0,
+    "--unshare-ipc": 0, "--unshare-pid": 0, "--unshare-net": 0,
+    "--unshare-uts": 0, "--unshare-cgroup": 0, "--unshare-cgroup-try": 0,
+    "--share-net": 0, "--disable-userns": 0, "--assert-userns-disabled": 0,
+    "--new-session": 0, "--die-with-parent": 0, "--as-pid-1": 0,
+    "--level-prefix": 0,
+    "--userns": 1, "--userns2": 1, "--pidns": 1, "--uid": 1, "--gid": 1,
+    "--hostname": 1, "--lock-file": 1, "--sync-fd": 1, "--remount-ro": 1,
+    "--exec-label": 1, "--file-label": 1, "--mqueue": 1, "--seccomp": 1,
+    "--add-seccomp-fd": 1, "--cap-add": 1, "--cap-drop": 1,
+    "--perms": 1, "--size": 1, "--overlay-src": 1, "--tmp-overlay": 1,
+    "--ro-overlay": 1, "--userns-block-fd": 1,
+    "--chmod": 2,
+    "--overlay": 3,
+}
+
+
+def read_fd(fd):
+    data = b""
+    # Flatpak hands over memfds it may reuse; read them from the start
+    # whatever an earlier reader left the shared offset at.
+    try:
+        os.lseek(int(fd), 0, os.SEEK_SET)
+    except OSError:
+        pass
+    with os.fdopen(int(fd), "rb", closefd=True) as f:
+        while True:
+            chunk = f.read(65536)
+            if not chunk:
+                break
+            data += chunk
+    return data
+
+
+class Sandbox:
+    def __init__(self):
+        self.work = tempfile.mkdtemp(prefix="linx-bwrap-", dir="/tmp")
+        self.root = os.path.join(self.work, "root")
+        os.mkdir(self.root)
+        self.binds = []  # (host source, sandbox destination), later wins
+        self.env = dict(os.environ)
+        self.chdir = None
+        self.argv0 = None
+        self.info_fds = []
+        self.status_fds = []
+        self.block_fds = []
+        self.counter = 0
+
+    def resolve(self, path, follow_last=True, depth=0):
+        """A sandbox path with its symlinks followed the way they would be
+        inside the sandbox: a link's target is a sandbox path too."""
+        parts = [p for p in os.path.normpath("/" + path.lstrip("/")).split("/") if p]
+        cur = "/"
+        for idx, comp in enumerate(parts):
+            nxt = os.path.join(cur, comp)
+            last = idx == len(parts) - 1
+            host = self.map(nxt)
+            if depth < 40 and (follow_last or not last) and os.path.islink(host):
+                target = os.readlink(host)
+                base = target if target.startswith("/") else os.path.join(cur, target)
+                return self.resolve(os.path.join(base, *parts[idx + 1:]), follow_last, depth + 1)
+            cur = nxt
+        return os.path.normpath(cur)
+
+    def host_path(self, dest, follow_last=True):
+        """Where a sandbox path lives on this side."""
+        return self.map(self.resolve(dest, follow_last))
+
+    def map(self, dest):
+        """Under the binding that covers a (resolved) sandbox path, or in the
+        new root."""
+        dest = os.path.normpath("/" + dest.lstrip("/"))
+        best = None
+        for src, d in self.binds:
+            if dest == d or dest.startswith(d.rstrip("/") + "/"):
+                if best is None or len(d) >= len(best[1]):
+                    best = (src, d)
+        if best is None:
+            return self.root + dest
+        rest = dest[len(best[1]):].lstrip("/")
+        return os.path.join(best[0], rest) if rest else best[0]
+
+    def make_parent(self, dest):
+        parent = self.host_path(os.path.dirname(os.path.normpath("/" + dest.lstrip("/"))))
+        try:
+            os.makedirs(parent, exist_ok=True)
+        except OSError:
+            pass
+
+    def bind(self, src, dest, try_only=False):
+        if not os.path.exists(src) and not os.path.islink(src):
+            if try_only:
+                return
+            sys.stderr.write("bwrap: Can't find source path %s\n" % src)
+            sys.exit(1)
+        dest = self.resolve(dest)
+        # The mount point exists in the new root, as bwrap would make it.
+        target = self.map(dest)
+        if not os.path.lexists(target):
+            self.make_parent(dest)
+            try:
+                if os.path.isdir(src):
+                    os.makedirs(target, exist_ok=True)
+                else:
+                    open(target, "a").close()
+            except OSError:
+                pass
+        self.binds = [(s, d) for s, d in self.binds if d != dest]
+        self.binds.append((os.path.realpath(src), dest))
+
+    def scratch(self, name):
+        self.counter += 1
+        return os.path.join(self.work, "%d-%s" % (self.counter, name))
+
+    def data_file(self, fd, dest):
+        path = self.scratch("file")
+        with open(path, "wb") as f:
+            f.write(read_fd(fd))
+        self.bind(path, dest)
+
+    def make_dir(self, dest):
+        try:
+            os.makedirs(self.host_path(dest), exist_ok=True)
+        except OSError:
+            pass
+
+    def symlink(self, src, dest):
+        self.make_parent(dest)
+        target = self.host_path(dest, follow_last=False)
+        if os.path.islink(target) and os.readlink(target) == src:
+            return
+        try:
+            os.symlink(src, target)
+        except FileExistsError:
+            pass
+        except OSError as e:
+            sys.stderr.write("bwrap: Can't make symlink at %s: %s\n" % (dest, e))
+            sys.exit(1)
+
+    def tmpfs(self, dest):
+        path = self.scratch("tmpfs")
+        os.mkdir(path)
+        os.chmod(path, 0o755)
+        self.bind(path, dest)
+
+
+def parse(args, box):
+    i = 0
+    while i < len(args):
+        a = args[i]
+        def arg(n):
+            if i + n >= len(args):
+                sys.stderr.write("bwrap: %s takes %d arguments\n" % (a, n))
+                sys.exit(1)
+            return args[i + n]
+        if a == "--":
+            return args[i + 1:]
+        if not a.startswith("--"):
+            return args[i:]
+        if a == "--args":
+            # NUL-terminated; an empty argument ("--setenv X ''") is real.
+            data = read_fd(arg(1))
+            if data.endswith(b"\0"):
+                data = data[:-1]
+            extra = [x.decode() for x in data.split(b"\0")] if data else []
+            args = args[:i] + extra + args[i + 2:]
+            continue
+        if a in ("--bind", "--dev-bind", "--ro-bind"):
+            box.bind(arg(1), arg(2)); i += 3
+        elif a in ("--bind-try", "--dev-bind-try", "--ro-bind-try"):
+            box.bind(arg(1), arg(2), try_only=True); i += 3
+        elif a in ("--bind-fd", "--ro-bind-fd"):
+            box.bind(os.readlink("/proc/self/fd/%s" % arg(1)), arg(2)); i += 3
+        elif a in ("--file", "--bind-data", "--ro-bind-data"):
+            box.data_file(arg(1), arg(2)); i += 3
+        elif a == "--dir":
+            box.make_dir(arg(1)); i += 2
+        elif a == "--symlink":
+            box.symlink(arg(1), arg(2)); i += 3
+        elif a == "--tmpfs":
+            box.tmpfs(arg(1)); i += 2
+        elif a == "--dev":
+            box.bind("/dev", arg(1)); i += 2
+        elif a == "--proc":
+            box.bind("/proc", arg(1)); i += 2
+        elif a == "--chdir":
+            box.chdir = arg(1); i += 2
+        elif a == "--setenv":
+            box.env[arg(1)] = arg(2); i += 3
+        elif a == "--unsetenv":
+            box.env.pop(arg(1), None); i += 2
+        elif a == "--clearenv":
+            box.env = {k: v for k, v in box.env.items() if k == "PWD"}; i += 1
+        elif a == "--argv0":
+            box.argv0 = arg(1); i += 2
+        elif a == "--info-fd":
+            box.info_fds.append(int(arg(1))); i += 2
+        elif a == "--json-status-fd":
+            box.status_fds.append(int(arg(1))); i += 2
+        elif a == "--block-fd":
+            box.block_fds.append(int(arg(1))); i += 2
+        elif a in IGNORED:
+            i += 1 + IGNORED[a]
+        elif a in ("--help", "--version"):
+            os.execv(REAL_BWRAP, [REAL_BWRAP, a])
+        else:
+            sys.stderr.write("bwrap: Unknown option %s\n" % a)
+            sys.exit(1)
+    return []
+
+
+def write_json(fds, obj):
+    for fd in fds:
+        try:
+            os.write(fd, (json.dumps(obj) + "\n").encode())
+        except OSError:
+            pass
+
+
+def called_by_flatpak():
+    # Flatpak always hands its arguments over in a file descriptor; glycin
+    # never does. Some of its helpers are started through an extra fork, so
+    # the parent is not always flatpak itself.
+    if "--args" in sys.argv[1:]:
+        return True
+    try:
+        with open("/proc/%d/comm" % os.getppid()) as f:
+            return f.read().startswith("flatpak")
+    except OSError:
+        return False
+
+
+def main():
+    # Only Flatpak gets a sandbox. Everyone else - GTK's image loaders
+    # (glycin) first of all - gets the answer bwrap gives on a system
+    # without namespaces, and falls back to running unsandboxed, as before
+    # this stood in for bwrap (see nosandbox-bwrap).
+    if not called_by_flatpak() and sys.argv[1:2] != ["--version"]:
+        sys.stderr.write("bwrap: No permissions to create a new namespace\n")
+        sys.exit(1)
+    box = Sandbox()
+    command = parse(sys.argv[1:], box)
+    if not command:
+        sys.stderr.write("bwrap: No command specified\n")
+        sys.exit(1)
+    for fd in box.block_fds:
+        try:
+            os.read(fd, 1)
+        except OSError:
+            pass
+
+    # bwrap looks the command up with execvp, in the sandbox's PATH (or the
+    # default one when it has none); proot needs it spelled out.
+    if "/" not in command[0]:
+        search = box.env.get("PATH") or "/usr/local/bin:/usr/bin:/bin:/usr/sbin:/sbin"
+        for d in search.split(":"):
+            candidate = os.path.join(d or ".", command[0])
+            if os.access(box.host_path(candidate), os.X_OK):
+                command = [candidate] + command[1:]
+                break
+
+    # Flatpak's D-Bus filter is handed file descriptors that cannot cross to
+    # the app; it is small and mostly waits, so it runs nested.
+    code = None
+    if not os.path.basename(command[0]).startswith("xdg-dbus-proxy"):
+        code = run_outside(box, command)
+    if code is None:
+        code = run_nested(box, command)
+    write_json(box.status_fds, {"exit-code": code})
+    shutil.rmtree(box.work, ignore_errors=True)
+    sys.exit(code)
+
+
+def run_outside(box, command):
+    """Have the Android app start the sandbox in a proot of its own, next to
+    the container's rather than inside it (SandboxSpawner.kt). None when the
+    app cannot be reached."""
+    try:
+        with open("/etc/linx/sandbox-socket") as f:
+            name = f.read().strip()
+        sock = socket.socket(socket.AF_UNIX, socket.SOCK_STREAM)
+        sock.connect("\0" + name)
+    except OSError:
+        return None
+    request = {
+        "root": box.root,
+        "binds": [[src, dest] for src, dest in box.binds],
+        "cwd": box.chdir or "/",
+        "env": box.env,
+        "argv": command,
+    }
+    sock.sendall((json.dumps(request) + "\n").encode())
+    write_json(box.info_fds + box.status_fds, {"child-pid": os.getpid()})
+    close_fds(box.info_fds)
+
+    def forward(sig, _frame):
+        try:
+            sock.sendall(b"K" + struct.pack(">i", sig))
+        except OSError:
+            pass
+    for sig in (signal.SIGTERM, signal.SIGINT, signal.SIGHUP, signal.SIGQUIT):
+        signal.signal(sig, forward)
+
+    def read_exact(n):
+        data = b""
+        while len(data) < n:
+            try:
+                chunk = sock.recv(n - len(data))
+            except InterruptedError:
+                continue
+            if not chunk:
+                raise EOFError
+            data += chunk
+        return data
+
+    out = sys.stdout.buffer
+    try:
+        while True:
+            kind = read_exact(1)
+            value = struct.unpack(">i", read_exact(4))[0]
+            if kind == b"O":
+                out.write(read_exact(value))
+                out.flush()
+            elif kind == b"X":
+                return value if value >= 0 else 128 - value
+    except (EOFError, OSError):
+        return 1
+
+
+def close_fds(fds):
+    for fd in fds:
+        try:
+            os.close(fd)
+        except OSError:
+            pass
+
+
+def run_nested(box, command):
+    """The sandbox in a proot nested in the container's: slow, but it needs
+    nothing from outside."""
+    proot = [PROOT, "-r", box.root]
+    for src, dest in box.binds:
+        proot += ["-b", "%s:%s" % (src, dest)]
+    proot += ["-w", box.chdir or "/"]
+    proot += command
+    env = dict(box.env)
+    # proot's seccomp acceleration does not work under another proot: some
+    # system calls then escape the inner one's path translation.
+    env["PROOT_NO_SECCOMP"] = "1"
+    env.setdefault("PROOT_TMP_DIR", "/tmp")
+
+    child = subprocess.Popen(proot, env=env, close_fds=False)
+    write_json(box.info_fds + box.status_fds, {"child-pid": child.pid})
+    close_fds(box.info_fds)
+
+    def forward(sig, _frame):
+        try:
+            child.send_signal(sig)
+        except OSError:
+            pass
+    for sig in (signal.SIGTERM, signal.SIGINT, signal.SIGHUP, signal.SIGQUIT):
+        signal.signal(sig, forward)
+    code = child.wait()
+    return code if code >= 0 else 128 - code
+
+
+if __name__ == "__main__":
+    main()

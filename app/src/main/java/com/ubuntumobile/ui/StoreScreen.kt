@@ -26,6 +26,11 @@ import androidx.compose.material.icons.filled.Close
 import androidx.compose.material.icons.filled.Code
 import androidx.compose.material.icons.filled.Description
 import androidx.compose.material.icons.filled.Draw
+import androidx.compose.material.icons.filled.Email
+import androidx.compose.material.icons.filled.Forum
+import androidx.compose.material.icons.filled.Send
+import androidx.compose.material.icons.filled.Videocam
+import androidx.compose.material.icons.filled.ViewInAr
 import androidx.compose.material.icons.filled.Inventory2
 import androidx.compose.material.icons.filled.Key
 import androidx.compose.material.icons.filled.Movie
@@ -76,13 +81,51 @@ data class StoreApp(
     val installer: String? = null,
     val icon: ImageVector? = null,
     val accent: Long = 0xFFE95420,
+    /** From Flathub: [pkg] is the app id. */
+    val flatpak: Boolean = false,
 )
+
+/** Turns Flathub on if it is not yet (linx-flatpak.sh), then installs. */
+private fun flatpakInstaller(id: String) =
+    "/usr/local/lib/linx/linx-flatpak.sh >/dev/null && flatpak install -y --noninteractive flathub $id"
+
+private fun flathubApp(id: String, name: String, summary: String, icon: ImageVector, accent: Long) = StoreApp(
+    pkg = id, name = name, summary = summary, command = listOf("/usr/bin/flatpak", "run", id),
+    installer = flatpakInstaller(id), icon = icon, accent = accent, flatpak = true,
+)
+
+/**
+ * Flathub's front page: well-known apps built for both 64-bit ARM and
+ * x86. Flatpak's sandbox needs kernel features proot does not have, so
+ * they run through linx-bwrap, which gives them the same file system
+ * without the sandbox.
+ */
+object FlathubCatalog {
+    val featured = listOf(
+        flathubApp("org.mozilla.Thunderbird", "Thunderbird", "Email and calendar", Icons.Default.Email, 0xFF0A84FF),
+        flathubApp("org.telegram.desktop", "Telegram", "Messaging", Icons.Default.Send, 0xFF2AABEE),
+        flathubApp("org.signal.Signal", "Signal", "Private messaging", Icons.Default.Forum, 0xFF3A76F0),
+        flathubApp("com.visualstudio.code", "Visual Studio Code", "Code editor", Icons.Default.Code, 0xFF007ACC),
+        flathubApp("org.kde.krita", "Krita", "Digital painting", Icons.Default.Brush, 0xFF3BABFF),
+        flathubApp("org.blender.Blender", "Blender", "3D modelling and animation", Icons.Default.ViewInAr, 0xFFEA7600),
+        flathubApp("com.obsproject.Studio", "OBS Studio", "Recording and streaming", Icons.Default.Videocam, 0xFF302E31),
+        flathubApp("io.mpv.Mpv", "mpv", "A light video player", Icons.Default.Movie, 0xFF691F69),
+        flathubApp("com.github.tchx84.Flatseal", "Flatseal", "Flatpak app permissions", Icons.Default.Key, 0xFF4A86CF),
+    )
+}
+
+/** App id prefixes of the big desktop projects, shown first in a search. */
+private val WELL_KNOWN = listOf(
+    "org.gnome.", "org.kde.", "org.mozilla.", "org.libreoffice.", "org.gimp.", "org.inkscape.",
+    "org.videolan.", "org.blender.", "com.obsproject.", "org.freedesktop.",
+)
+
+private enum class StoreSource(val label: String) { UBUNTU("Ubuntu"), FLATHUB("Flathub") }
 
 /**
  * The store's front page: well-known desktop applications that run in the
  * container. They are ordinary Ubuntu packages (Firefox comes from Mozilla's
- * own repository, because Ubuntu's is a snap), so they install with apt and
- * work - unlike Flatpak apps, which need sandboxing proot cannot provide.
+ * own repository, because Ubuntu's is a snap), so they install with apt.
  */
 object StoreCatalog {
     val featured = listOf(
@@ -151,10 +194,11 @@ fun StoreScreen(
     onClose: () -> Unit,
     modifier: Modifier = Modifier,
 ) {
+    var source by remember { mutableStateOf(StoreSource.UBUNTU) }
     var query by remember { mutableStateOf("") }
     var results by remember { mutableStateOf<List<StoreApp>>(emptyList()) }
     var searching by remember { mutableStateOf(false) }
-    // Package name -> installed, for everything on screen.
+    // Package name (or Flathub app id) -> installed, for everything on screen.
     val installed = remember { mutableStateMapOf<String, Boolean>() }
     var installing by remember { mutableStateOf<String?>(null) }
     var message by remember { mutableStateOf<String?>(null) }
@@ -162,32 +206,68 @@ fun StoreScreen(
 
     suspend fun refreshStatus(apps: List<StoreApp>) {
         if (apps.isEmpty()) return
-        val out = runGuest(
-            "/usr/local/lib/linx/apt-install.sh --status " + apps.joinToString(" ") { it.pkg },
-            60,
-        )
-        out.lines().forEach { line ->
-            val parts = line.trim().split(" ")
-            if (parts.size == 2) installed[parts[0]] = parts[1] == "installed"
+        val (flatpaks, debs) = apps.partition { it.flatpak }
+        if (debs.isNotEmpty()) {
+            val out = runGuest(
+                "/usr/local/lib/linx/apt-install.sh --status " + debs.joinToString(" ") { it.pkg },
+                60,
+            )
+            out.lines().forEach { line ->
+                val parts = line.trim().split(" ")
+                if (parts.size == 2) installed[parts[0]] = parts[1] == "installed"
+            }
+        }
+        if (flatpaks.isNotEmpty()) {
+            val ids = runGuest("/usr/local/lib/linx/flatpak-list.sh", 60).lines()
+                .map { it.substringBefore('|').trim() }.toSet()
+            flatpaks.forEach { installed[it.pkg] = it.pkg in ids }
         }
     }
 
-    LaunchedEffect(Unit) { refreshStatus(StoreCatalog.featured) }
+    LaunchedEffect(source) {
+        refreshStatus(if (source == StoreSource.FLATHUB) FlathubCatalog.featured else StoreCatalog.featured)
+    }
 
-    // Searching runs apt inside the container, which takes a moment, so it
-    // waits for the typing to pause.
-    LaunchedEffect(query) {
+    // Searching runs apt or Flatpak inside the container, which takes a
+    // moment, so it waits for the typing to pause.
+    LaunchedEffect(query, source) {
         if (query.isBlank()) {
             results = emptyList()
             return@LaunchedEffect
         }
         delay(500)
         searching = true
-        val out = runGuest("/usr/local/lib/linx/apt-install.sh --search ${shellQuote(query.trim())}", 300)
-        results = out.lines().mapNotNull { line ->
-            val p = line.split("|", limit = 2)
-            if (p.size < 2 || p[0].isBlank() || p[0].contains(' ')) null
-            else StoreApp(pkg = p[0].trim(), name = p[0].trim(), summary = p[1].trim(), command = listOf(p[0].trim()))
+        results = if (source == StoreSource.FLATHUB) {
+            // The whole catalogue, filtered here: Flatpak's own search needs
+            // an appstream download the container does not have.
+            val words = query.trim().lowercase().split(Regex("\\s+"))
+            runGuest("/usr/local/lib/linx/flatpak-search.sh flathub", 300).lines().mapNotNull { line ->
+                val p = line.split("|").map { it.trim() }
+                if (p.size < 3 || p[0].isBlank()) return@mapNotNull null
+                val text = line.lowercase()
+                if (words.any { it !in text }) null
+                else {
+                    val version = p[1].takeIf { it != "-" && it.isNotBlank() }?.let { " · $it" } ?: ""
+                    flathubApp(p[0], p[2], p[0] + version, Icons.Default.Inventory2, 0xFF4A86CF)
+                }
+            }
+                // Well-known projects first, then names that match best.
+                .sortedBy { app ->
+                    val id = app.pkg.lowercase()
+                    val name = app.name.lowercase()
+                    var score = 0
+                    if (WELL_KNOWN.none { id.startsWith(it) }) score += 4
+                    if (!name.startsWith(words.first())) score += 2
+                    if (name.length > 24) score += 1
+                    score
+                }
+                .take(40)
+        } else {
+            runGuest("/usr/local/lib/linx/apt-install.sh --search ${shellQuote(query.trim())}", 300).lines().mapNotNull { line ->
+                val p = line.split("|", limit = 2)
+                if (p.size < 2 || p[0].isBlank() || p[0].contains(' ')) null
+                else StoreApp(pkg = p[0].trim(), name = p[0].trim(), summary = p[1].trim(), command = listOf(p[0].trim()))
+            }
         }
         refreshStatus(results)
         searching = false
@@ -196,7 +276,11 @@ fun StoreScreen(
     fun install(app: StoreApp) {
         scope.launch {
             installing = app.pkg
-            message = "Installing ${app.name}… the first install also downloads Ubuntu's package lists."
+            message = if (app.flatpak) {
+                "Installing ${app.name} from Flathub… the first app also brings its runtime, a few hundred MB."
+            } else {
+                "Installing ${app.name}… the first install also downloads Ubuntu's package lists."
+            }
             val cmd = app.installer ?: ("/usr/local/lib/linx/apt-install.sh " + app.packages.joinToString(" "))
             val out = runGuest("$cmd 2>&1 | tail -n 3", 1800)
             refreshStatus(listOf(app))
@@ -233,18 +317,53 @@ fun StoreScreen(
                 }
                 Column(Modifier.weight(1f)) {
                     Text("Ubuntu Software", color = Color.White, fontSize = 20.sp, fontWeight = FontWeight.Medium)
-                    Text("Desktop apps from Ubuntu", color = Color.White.copy(alpha = 0.7f), fontSize = 12.sp)
+                    Text(
+                        if (source == StoreSource.FLATHUB) "Linux apps from Flathub" else "Desktop apps from Ubuntu",
+                        color = Color.White.copy(alpha = 0.7f),
+                        fontSize = 12.sp,
+                    )
                 }
             }
             StoreSearchField(
                 query = query,
                 onQueryChange = { query = it },
+                placeholder = if (source == StoreSource.FLATHUB) "Search Flathub" else "Search Ubuntu packages",
                 modifier = Modifier
                     .widthIn(max = 720.dp)
                     .fillMaxWidth()
                     .padding(horizontal = 16.dp)
                     .align(Alignment.CenterHorizontally),
             )
+            Row(
+                Modifier
+                    .widthIn(max = 720.dp)
+                    .fillMaxWidth()
+                    .padding(start = 16.dp, end = 16.dp, top = 12.dp)
+                    .clip(RoundedCornerShape(20.dp))
+                    .background(Color.White.copy(alpha = 0.12f))
+                    .padding(4.dp)
+                    .align(Alignment.CenterHorizontally),
+            ) {
+                StoreSource.entries.forEach { s ->
+                    val selected = s == source
+                    Box(
+                        Modifier
+                            .weight(1f)
+                            .clip(RoundedCornerShape(16.dp))
+                            .background(if (selected) Color.White else Color.Transparent)
+                            .clickable { source = s }
+                            .padding(vertical = 8.dp),
+                        contentAlignment = Alignment.Center,
+                    ) {
+                        Text(
+                            s.label,
+                            color = if (selected) UbuntuPalette.Aubergine else Color.White,
+                            fontSize = 14.sp,
+                            fontWeight = FontWeight.Medium,
+                        )
+                    }
+                }
+            }
         }
 
         if (searching || installing != null) {
@@ -281,7 +400,11 @@ fun StoreScreen(
             }
         }
 
-        val showing = if (query.isBlank()) StoreCatalog.featured else results
+        val showing = when {
+            query.isNotBlank() -> results
+            source == StoreSource.FLATHUB -> FlathubCatalog.featured
+            else -> StoreCatalog.featured
+        }
         LazyColumn(
             modifier = Modifier
                 .fillMaxSize()
@@ -296,6 +419,7 @@ fun StoreScreen(
                         query.isBlank() -> "Featured"
                         searching -> "Searching…"
                         results.isEmpty() -> "Nothing matches “$query”."
+                        source == StoreSource.FLATHUB -> "Apps"
                         else -> "Packages"
                     },
                     fontSize = 14.sp,
@@ -324,6 +448,7 @@ private fun shellQuote(s: String): String = "'" + s.replace("'", "'\\''") + "'"
 private fun StoreSearchField(
     query: String,
     onQueryChange: (String) -> Unit,
+    placeholder: String,
     modifier: Modifier = Modifier,
 ) {
     Row(
@@ -338,7 +463,7 @@ private fun StoreSearchField(
         Spacer(Modifier.width(12.dp))
         Box(Modifier.weight(1f)) {
             if (query.isEmpty()) {
-                Text("Search Ubuntu packages", color = UbuntuPalette.LightOnSurfaceVariant, fontSize = 16.sp)
+                Text(placeholder, color = UbuntuPalette.LightOnSurfaceVariant, fontSize = 16.sp)
             }
             BasicTextField(
                 value = query,

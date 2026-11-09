@@ -1,0 +1,689 @@
+package com.ubuntumobile.ui
+
+import androidx.compose.animation.AnimatedContent
+import androidx.compose.animation.core.tween
+import androidx.compose.animation.fadeIn
+import androidx.compose.animation.fadeOut
+import androidx.compose.animation.slideInHorizontally
+import androidx.compose.animation.slideOutHorizontally
+import androidx.compose.animation.togetherWith
+import androidx.compose.foundation.background
+import androidx.compose.foundation.border
+import androidx.compose.foundation.clickable
+import androidx.compose.foundation.layout.Arrangement
+import androidx.compose.foundation.layout.Box
+import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.Row
+import androidx.compose.foundation.layout.Spacer
+import androidx.compose.foundation.layout.aspectRatio
+import androidx.compose.foundation.layout.fillMaxHeight
+import androidx.compose.foundation.layout.fillMaxSize
+import androidx.compose.foundation.layout.fillMaxWidth
+import androidx.compose.foundation.layout.height
+import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.layout.size
+import androidx.compose.foundation.layout.systemBarsPadding
+import androidx.compose.foundation.layout.width
+import androidx.compose.foundation.layout.widthIn
+import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.shape.CircleShape
+import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.foundation.verticalScroll
+import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.filled.Apps
+import androidx.compose.material.icons.filled.Check
+import androidx.compose.material.icons.filled.Computer
+import androidx.compose.material.icons.filled.Inventory2
+import androidx.compose.material.icons.filled.Movie
+import androidx.compose.material.icons.filled.Public
+import androidx.compose.material.icons.filled.Send
+import androidx.compose.material.icons.filled.Email
+import androidx.compose.material.icons.filled.Smartphone
+import androidx.compose.material.icons.filled.Storefront
+import androidx.compose.material3.Icon
+import androidx.compose.material3.LinearProgressIndicator
+import androidx.compose.material3.Switch
+import androidx.compose.material3.SwitchDefaults
+import androidx.compose.material3.Text
+import androidx.compose.runtime.Composable
+import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableIntStateOf
+import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.remember
+import androidx.compose.runtime.setValue
+import androidx.compose.ui.Alignment
+import androidx.compose.ui.Modifier
+import androidx.compose.ui.draw.clip
+import androidx.compose.ui.graphics.Brush
+import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.vector.ImageVector
+import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.text.style.TextAlign
+import androidx.compose.ui.unit.dp
+import androidx.compose.ui.unit.sp
+import com.ubuntumobile.ui.theme.UbuntuPalette
+
+/** How much Linux to set up. */
+enum class SetupProfile(val label: String, val detail: String) {
+    LIGHT("Light", "The desktop, terminal and files. Add apps whenever you like."),
+    STANDARD("Standard", "Adds Firefox and a document viewer. A good start."),
+    FULL("Full", "Adds an office suite, photo editing and a video player."),
+}
+
+/** Yaru's accent colours (the theme names are Yaru-<id>). */
+enum class Accent(val id: String, val label: String, val color: Long) {
+    ORANGE("orange", "Orange", 0xFFE95420),
+    RED("red", "Red", 0xFFDA3450),
+    MAGENTA("magenta", "Magenta", 0xFFB34CB3),
+    PURPLE("purple", "Purple", 0xFF7764D8),
+    BLUE("blue", "Blue", 0xFF0073E5),
+    TEAL("prussiangreen", "Teal", 0xFF308280),
+    SAGE("sage", "Sage", 0xFF657B69),
+    OLIVE("olive", "Olive", 0xFF4B8501),
+}
+
+/** An app from Flathub that onboarding offers. */
+data class FlathubPick(val id: String, val name: String, val summary: String, val icon: ImageVector)
+
+/** Everything onboarding asks. */
+data class SetupChoices(
+    val profile: SetupProfile = SetupProfile.STANDARD,
+    val dark: Boolean = false,
+    val accent: Accent = Accent.ORANGE,
+    val desktopSize: DesktopSize = DesktopSize.STANDARD,
+    val browser: Boolean = true,
+    /** Packages of [StoreCatalog.featured] apps (not Firefox). */
+    val apps: Set<String> = defaultApps(SetupProfile.STANDARD),
+    val flathub: Boolean = false,
+    val flatpaks: Set<String> = emptySet(),
+) {
+    /** The packages to install with apt. */
+    val aptPackages: List<String>
+        get() = StoreCatalog.featured.filter { it.pkg in apps && it.installer == null }
+            .flatMap { it.packages }.distinct()
+
+    /** About how much there is to download, in MB. */
+    val downloadMb: Int
+        get() {
+            var mb = 60 // sound, Yaru and the Ubuntu font
+            if (browser) mb += 90
+            if (apps.any { it.startsWith("libreoffice") }) mb += 190
+            mb += apps.sumOf { APP_SIZES[it] ?: 20 }
+            if (flathub) mb += 5
+            if (flatpaks.isNotEmpty()) mb += 350 + flatpaks.size * 60
+            return mb
+        }
+
+    /** /etc/linx/setup.conf, as linx-setup.sh reads it. */
+    fun toConf(): String = buildString {
+        append("# Written by the app's onboarding; read by linx-setup.sh and linx-look.sh.\n")
+        append("LINX_PROFILE=${profile.name.lowercase()}\n")
+        append("LINX_BROWSER=${if (browser) 1 else 0}\n")
+        append("LINX_APPS=\"${aptPackages.joinToString(" ")}\"\n")
+        append("LINX_FLATHUB=${if (flathub) 1 else 0}\n")
+        append("LINX_FLATPAKS=\"${if (flathub) flatpaks.joinToString(" ") else ""}\"\n")
+        append("LINX_DARK=${if (dark) 1 else 0}\n")
+        append("LINX_ACCENT=${accent.id}\n")
+    }
+
+    companion object {
+        private val APP_SIZES = mapOf(
+            "libreoffice-writer" to 15, "libreoffice-calc" to 15, "libreoffice-impress" to 15,
+            "gimp" to 110, "inkscape" to 90, "vlc" to 50, "geany" to 10, "evince" to 15, "keepassxc" to 15,
+        )
+
+        fun defaultApps(profile: SetupProfile): Set<String> = when (profile) {
+            SetupProfile.LIGHT -> emptySet()
+            SetupProfile.STANDARD -> setOf("evince")
+            SetupProfile.FULL -> setOf(
+                "libreoffice-writer", "libreoffice-calc", "libreoffice-impress", "gimp", "vlc", "evince",
+            )
+        }
+
+        val flathubPicks = listOf(
+            FlathubPick("org.mozilla.Thunderbird", "Thunderbird", "Email and calendar", Icons.Default.Email),
+            FlathubPick("org.telegram.desktop", "Telegram", "Messaging", Icons.Default.Send),
+            FlathubPick("io.mpv.Mpv", "mpv", "A light video player", Icons.Default.Movie),
+        )
+
+        /** Read back what [toConf] wrote (for "Set up again"). */
+        fun fromConf(text: String, desktopSize: DesktopSize): SetupChoices {
+            val values = text.lines().mapNotNull { line ->
+                val i = line.indexOf('=')
+                if (line.startsWith("#") || i <= 0) null
+                else line.substring(0, i).trim() to line.substring(i + 1).trim().trim('"')
+            }.toMap()
+            val packages = values["LINX_APPS"].orEmpty().split(' ').filter { it.isNotBlank() }.toSet()
+            return SetupChoices(
+                profile = SetupProfile.entries.firstOrNull { it.name.lowercase() == values["LINX_PROFILE"] }
+                    ?: SetupProfile.STANDARD,
+                dark = values["LINX_DARK"] == "1",
+                accent = Accent.entries.firstOrNull { it.id == values["LINX_ACCENT"] } ?: Accent.ORANGE,
+                desktopSize = desktopSize,
+                browser = values["LINX_BROWSER"] != "0",
+                apps = StoreCatalog.featured.filter { it.installer == null && it.pkg in packages }.map { it.pkg }.toSet(),
+                flathub = values["LINX_FLATHUB"] == "1",
+                flatpaks = values["LINX_FLATPAKS"].orEmpty().split(' ').filter { it.isNotBlank() }.toSet(),
+            )
+        }
+    }
+}
+
+private enum class Page { WELCOME, PROFILE, LOOK, APPS, STORES, READY }
+
+/**
+ * The first thing a new user sees: a few questions, Ubuntu-installer
+ * style, that decide how big Linux gets and how it looks. Ubuntu itself
+ * unpacks in the background meanwhile ([unpackFraction]); what was chosen
+ * is installed once the desktop is up (linx-setup.sh).
+ */
+@Composable
+fun OnboardingScreen(
+    initial: SetupChoices,
+    /** Unpacking Ubuntu: 0..1, or null once it is done (or was before). */
+    unpackFraction: Float?,
+    unpackDetail: String,
+    /** Called once, when the user leaves the welcome page. */
+    onStarted: () -> Unit,
+    onFinish: (SetupChoices) -> Unit,
+    /** Shown from Settings: no welcome page, and a way back. */
+    again: Boolean = false,
+    onCancel: () -> Unit = {},
+) {
+    var page by remember { mutableStateOf(if (again) Page.PROFILE else Page.WELCOME) }
+    var choices by remember { mutableStateOf(initial) }
+    var forward by remember { mutableIntStateOf(1) }
+    fun go(to: Page) {
+        forward = if (to.ordinal > page.ordinal) 1 else -1
+        page = to
+    }
+
+    Box(
+        Modifier
+            .fillMaxSize()
+            .background(
+                Brush.verticalGradient(listOf(Color(0xFF2C001E), UbuntuPalette.AubergineDark, Color(0xFF3B0A33))),
+            )
+            .systemBarsPadding(),
+    ) {
+        Column(
+            Modifier
+                .fillMaxSize()
+                .widthIn(max = 620.dp)
+                .align(Alignment.TopCenter)
+                .padding(horizontal = 20.dp),
+        ) {
+            if (page != Page.WELCOME) {
+                StepDots(page.ordinal - 1, Page.entries.size - 1, Modifier.padding(top = 16.dp))
+            }
+            AnimatedContent(
+                targetState = page,
+                transitionSpec = {
+                    (slideInHorizontally(tween(260)) { it / 3 * forward } + fadeIn(tween(260))) togetherWith
+                        (slideOutHorizontally(tween(200)) { -it / 3 * forward } + fadeOut(tween(200)))
+                },
+                modifier = Modifier.weight(1f).fillMaxWidth(),
+                label = "onboarding",
+            ) { shown ->
+                Column(
+                    Modifier
+                        .fillMaxSize()
+                        .verticalScroll(rememberScrollState())
+                        .padding(vertical = 20.dp),
+                ) {
+                    when (shown) {
+                        Page.WELCOME -> WelcomePage()
+                        Page.PROFILE -> ProfilePage(choices) { choices = it }
+                        Page.LOOK -> LookPage(choices) { choices = it }
+                        Page.APPS -> AppsPage(choices) { choices = it }
+                        Page.STORES -> StoresPage(choices) { choices = it }
+                        Page.READY -> ReadyPage(choices, unpackFraction)
+                    }
+                }
+            }
+
+            if (unpackFraction != null && page != Page.WELCOME) {
+                UnpackBar(unpackFraction, unpackDetail)
+            }
+
+            Row(
+                Modifier.fillMaxWidth().padding(vertical = 16.dp),
+                verticalAlignment = Alignment.CenterVertically,
+            ) {
+                when {
+                    page == Page.WELCOME -> Spacer(Modifier.weight(1f))
+                    again && page == Page.PROFILE -> TextButton("Cancel", onCancel)
+                    else -> TextButton("Back") { go(Page.entries[page.ordinal - 1]) }
+                }
+                Spacer(Modifier.weight(1f))
+                val last = page == Page.READY
+                PrimaryButton(
+                    when (page) {
+                        Page.WELCOME -> "Get started"
+                        Page.READY -> if (again) "Apply" else "Start Ubuntu"
+                        else -> "Next"
+                    },
+                    // The desktop needs Ubuntu unpacked first.
+                    enabled = !last || unpackFraction == null,
+                ) {
+                    when {
+                        page == Page.WELCOME -> { onStarted(); go(Page.PROFILE) }
+                        last -> onFinish(choices)
+                        else -> go(Page.entries[page.ordinal + 1])
+                    }
+                }
+            }
+        }
+    }
+}
+
+@Composable
+private fun WelcomePage() {
+    Column(
+        Modifier.fillMaxWidth().padding(top = 32.dp),
+        horizontalAlignment = Alignment.CenterHorizontally,
+    ) {
+        UbuntuLogo(88.dp)
+        Spacer(Modifier.height(28.dp))
+        Text(
+            "Welcome to Ubuntu",
+            color = Color.White,
+            fontSize = 30.sp,
+            fontWeight = FontWeight.Bold,
+            textAlign = TextAlign.Center,
+        )
+        Spacer(Modifier.height(8.dp))
+        Text(
+            "A full Linux desktop, in your pocket",
+            color = Color.White.copy(alpha = 0.8f),
+            fontSize = 16.sp,
+            textAlign = TextAlign.Center,
+        )
+        Spacer(Modifier.height(36.dp))
+        Feature(Icons.Default.Smartphone, "In your hand", "A desktop sized for the phone's screen, with touch and a trackpad")
+        Feature(Icons.Default.Computer, "At your desk", "Plug into a USB-C monitor and the phone becomes the trackpad")
+        Feature(Icons.Default.Storefront, "Yours to shape", "Keep it light, or add apps from Ubuntu and Flathub")
+    }
+}
+
+@Composable
+private fun Feature(icon: ImageVector, title: String, detail: String) {
+    Row(Modifier.fillMaxWidth().padding(vertical = 8.dp), verticalAlignment = Alignment.CenterVertically) {
+        Box(
+            Modifier.size(44.dp).clip(CircleShape).background(Color.White.copy(alpha = 0.1f)),
+            contentAlignment = Alignment.Center,
+        ) {
+            Icon(icon, contentDescription = null, tint = UbuntuPalette.UbuntuOrangeLight)
+        }
+        Spacer(Modifier.width(16.dp))
+        Column {
+            Text(title, color = Color.White, fontSize = 16.sp, fontWeight = FontWeight.Medium)
+            Text(detail, color = Color.White.copy(alpha = 0.7f), fontSize = 13.sp)
+        }
+    }
+}
+
+@Composable
+private fun PageTitle(title: String, subtitle: String) {
+    Text(title, color = Color.White, fontSize = 26.sp, fontWeight = FontWeight.Bold)
+    Spacer(Modifier.height(6.dp))
+    Text(subtitle, color = Color.White.copy(alpha = 0.75f), fontSize = 14.sp)
+    Spacer(Modifier.height(22.dp))
+}
+
+@Composable
+private fun ProfilePage(choices: SetupChoices, onChange: (SetupChoices) -> Unit) {
+    PageTitle("How much Linux?", "Pick a starting point. Everything can be added or removed later.")
+    SetupProfile.entries.forEach { profile ->
+        val selected = choices.profile == profile
+        val sample = SetupChoices(profile = profile, browser = profile != SetupProfile.LIGHT, apps = SetupChoices.defaultApps(profile))
+        SelectCard(selected = selected, onClick = {
+            onChange(choices.copy(profile = profile, browser = sample.browser, apps = sample.apps))
+        }) {
+            Row(verticalAlignment = Alignment.CenterVertically) {
+                Text(profile.label, color = Color.White, fontSize = 18.sp, fontWeight = FontWeight.SemiBold, modifier = Modifier.weight(1f))
+                Text(sizeLabel(sample.downloadMb), color = Color.White.copy(alpha = 0.7f), fontSize = 13.sp)
+            }
+            Spacer(Modifier.height(4.dp))
+            Text(profile.detail, color = Color.White.copy(alpha = 0.75f), fontSize = 13.sp)
+        }
+    }
+}
+
+@Composable
+private fun LookPage(choices: SetupChoices, onChange: (SetupChoices) -> Unit) {
+    PageTitle("Make it yours", "Ubuntu's Yaru look, in light or dark, with the colour you like.")
+    Row(horizontalArrangement = Arrangement.spacedBy(12.dp)) {
+        listOf(false, true).forEach { dark ->
+            ModePreview(
+                dark = dark,
+                accent = Color(choices.accent.color),
+                selected = choices.dark == dark,
+                onClick = { onChange(choices.copy(dark = dark)) },
+                modifier = Modifier.weight(1f),
+            )
+        }
+    }
+    Spacer(Modifier.height(22.dp))
+    SectionLabel("Accent colour")
+    Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
+        Accent.entries.forEach { accent ->
+            val selected = choices.accent == accent
+            Box(
+                Modifier
+                    .size(36.dp)
+                    .clip(CircleShape)
+                    .background(Color(accent.color))
+                    .border(if (selected) 3.dp else 0.dp, Color.White, CircleShape)
+                    .clickable { onChange(choices.copy(accent = accent)) },
+                contentAlignment = Alignment.Center,
+            ) {
+                if (selected) Icon(Icons.Default.Check, contentDescription = accent.label, tint = Color.White, modifier = Modifier.size(18.dp))
+            }
+        }
+    }
+    Spacer(Modifier.height(24.dp))
+    SectionLabel("Size on the phone")
+    Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+        DesktopSize.entries.forEach { size ->
+            val selected = choices.desktopSize == size
+            Box(
+                Modifier
+                    .weight(1f)
+                    .clip(RoundedCornerShape(12.dp))
+                    .background(if (selected) Color.White.copy(alpha = 0.18f) else Color.White.copy(alpha = 0.06f))
+                    .border(if (selected) 2.dp else 1.dp, if (selected) Color(choices.accent.color) else Color.White.copy(alpha = 0.15f), RoundedCornerShape(12.dp))
+                    .clickable { onChange(choices.copy(desktopSize = size)) }
+                    .padding(vertical = 12.dp),
+                contentAlignment = Alignment.Center,
+            ) {
+                Text(size.label, color = Color.White, fontSize = 14.sp, fontWeight = FontWeight.Medium)
+            }
+        }
+    }
+    Spacer(Modifier.height(8.dp))
+    Text(
+        choices.desktopSize.detail + ". A monitor always gets a full-size desktop.",
+        color = Color.White.copy(alpha = 0.65f),
+        fontSize = 12.sp,
+    )
+}
+
+/** A small drawing of the desktop in light or dark. */
+@Composable
+private fun ModePreview(dark: Boolean, accent: Color, selected: Boolean, onClick: () -> Unit, modifier: Modifier) {
+    val window = if (dark) Color(0xFF2C2C2C) else Color(0xFFFAFAFA)
+    val bar = if (dark) Color(0xFF242424) else Color(0xFFEDEDED)
+    val line = if (dark) Color(0xFF5A5A5A) else Color(0xFFD0D0D0)
+    Column(
+        modifier
+            .clip(RoundedCornerShape(16.dp))
+            .border(if (selected) 2.dp else 1.dp, if (selected) accent else Color.White.copy(alpha = 0.15f), RoundedCornerShape(16.dp))
+            .clickable(onClick = onClick)
+            .padding(10.dp),
+        horizontalAlignment = Alignment.CenterHorizontally,
+    ) {
+        Box(
+            Modifier
+                .fillMaxWidth()
+                .aspectRatio(1.3f)
+                .clip(RoundedCornerShape(10.dp))
+                .background(Brush.linearGradient(listOf(Color(0xFF77216F), Color(0xFFE95420)))),
+        ) {
+            Column(
+                Modifier
+                    .padding(start = 12.dp, top = 12.dp, end = 12.dp, bottom = 20.dp)
+                    .fillMaxSize()
+                    .clip(RoundedCornerShape(6.dp))
+                    .background(window),
+            ) {
+                Row(
+                    Modifier.fillMaxWidth().background(bar).padding(horizontal = 6.dp, vertical = 4.dp),
+                    horizontalArrangement = Arrangement.End,
+                ) {
+                    Box(Modifier.size(6.dp).clip(CircleShape).background(line))
+                    Spacer(Modifier.width(3.dp))
+                    Box(Modifier.size(6.dp).clip(CircleShape).background(line))
+                    Spacer(Modifier.width(3.dp))
+                    Box(Modifier.size(6.dp).clip(CircleShape).background(accent))
+                }
+                Column(Modifier.padding(8.dp), verticalArrangement = Arrangement.spacedBy(4.dp)) {
+                    Box(Modifier.fillMaxWidth(0.8f).height(4.dp).clip(RoundedCornerShape(2.dp)).background(line))
+                    Box(Modifier.fillMaxWidth(0.6f).height(4.dp).clip(RoundedCornerShape(2.dp)).background(line))
+                    Box(Modifier.width(28.dp).height(9.dp).clip(RoundedCornerShape(5.dp)).background(accent))
+                }
+            }
+            Box(Modifier.fillMaxWidth().height(12.dp).align(Alignment.BottomCenter).background(Color(0xE0222222)))
+        }
+        Spacer(Modifier.height(8.dp))
+        Text(if (dark) "Dark" else "Light", color = Color.White, fontSize = 14.sp, fontWeight = FontWeight.Medium)
+    }
+}
+
+@Composable
+private fun AppsPage(choices: SetupChoices, onChange: (SetupChoices) -> Unit) {
+    PageTitle("Apps", "From Ubuntu's own archive. Ubuntu Software has thousands more.")
+    val firefox = StoreCatalog.featured.first { it.installer != null }
+    AppToggle(firefox.name, "The web browser", firefox.icon ?: Icons.Default.Public, Color(firefox.accent), choices.browser) {
+        onChange(choices.copy(browser = it))
+    }
+    StoreCatalog.featured.filter { it.installer == null }.forEach { app ->
+        val on = app.pkg in choices.apps
+        AppToggle(app.name, app.summary, app.icon ?: Icons.Default.Inventory2, Color(app.accent), on) { checked ->
+            onChange(choices.copy(apps = if (checked) choices.apps + app.pkg else choices.apps - app.pkg))
+        }
+    }
+}
+
+@Composable
+private fun StoresPage(choices: SetupChoices, onChange: (SetupChoices) -> Unit) {
+    PageTitle("App stores", "Where new apps come from.")
+    SelectCard(selected = true, onClick = {}) {
+        Row(verticalAlignment = Alignment.CenterVertically) {
+            Icon(Icons.Default.Apps, contentDescription = null, tint = Color.White)
+            Spacer(Modifier.width(12.dp))
+            Column(Modifier.weight(1f)) {
+                Text("Ubuntu Software", color = Color.White, fontSize = 16.sp, fontWeight = FontWeight.Medium)
+                Text("Ubuntu's archive: tens of thousands of packages", color = Color.White.copy(alpha = 0.7f), fontSize = 13.sp)
+            }
+            Text("Always on", color = Color.White.copy(alpha = 0.6f), fontSize = 12.sp)
+        }
+    }
+    SelectCard(selected = choices.flathub, onClick = { onChange(choices.copy(flathub = !choices.flathub)) }) {
+        Row(verticalAlignment = Alignment.CenterVertically) {
+            Icon(Icons.Default.Storefront, contentDescription = null, tint = Color.White)
+            Spacer(Modifier.width(12.dp))
+            Column(Modifier.weight(1f)) {
+                Text("Flathub", color = Color.White, fontSize = 16.sp, fontWeight = FontWeight.Medium)
+                Text(
+                    "The newest versions of thousands of Linux apps. Each brings its own runtime, " +
+                        "so the first one is a few hundred MB.",
+                    color = Color.White.copy(alpha = 0.7f),
+                    fontSize = 13.sp,
+                )
+            }
+            Spacer(Modifier.width(8.dp))
+            Switch(
+                checked = choices.flathub,
+                onCheckedChange = { onChange(choices.copy(flathub = it)) },
+                colors = SwitchDefaults.colors(checkedTrackColor = Color(choices.accent.color)),
+            )
+        }
+    }
+    if (choices.flathub) {
+        Spacer(Modifier.height(8.dp))
+        SectionLabel("From Flathub")
+        SetupChoices.flathubPicks.forEach { pick ->
+            val on = pick.id in choices.flatpaks
+            AppToggle(pick.name, pick.summary, pick.icon, Color(0xFF4A86CF), on) { checked ->
+                onChange(choices.copy(flatpaks = if (checked) choices.flatpaks + pick.id else choices.flatpaks - pick.id))
+            }
+        }
+    }
+}
+
+@Composable
+private fun ReadyPage(choices: SetupChoices, unpackFraction: Float?) {
+    PageTitle(
+        "Ready",
+        if (unpackFraction == null) "Ubuntu starts now. Your apps install in the background."
+        else "Ubuntu is still unpacking. It only takes a minute or two.",
+    )
+    SummaryRow("Setup", choices.profile.label)
+    SummaryRow("Look", "${if (choices.dark) "Dark" else "Light"}, ${choices.accent.label.lowercase()}")
+    SummaryRow("Size on the phone", choices.desktopSize.label)
+    val apps = buildList {
+        if (choices.browser) add("Firefox")
+        StoreCatalog.featured.filter { it.pkg in choices.apps }.forEach { add(it.name) }
+        if (choices.flathub) SetupChoices.flathubPicks.filter { it.id in choices.flatpaks }.forEach { add(it.name) }
+    }
+    SummaryRow("Apps", if (apps.isEmpty()) "None yet" else apps.joinToString(", "))
+    SummaryRow("Flathub", if (choices.flathub) "On" else "Off")
+    SummaryRow("To download", "about ${sizeLabel(choices.downloadMb)}")
+    Spacer(Modifier.height(12.dp))
+    Text(
+        "Best on Wi-Fi. The desktop is usable while the rest downloads; the side menu shows how far it got.",
+        color = Color.White.copy(alpha = 0.65f),
+        fontSize = 12.sp,
+    )
+}
+
+@Composable
+private fun SummaryRow(label: String, value: String) {
+    Row(Modifier.fillMaxWidth().padding(vertical = 8.dp)) {
+        Text(label, color = Color.White.copy(alpha = 0.65f), fontSize = 14.sp, modifier = Modifier.width(140.dp))
+        Text(value, color = Color.White, fontSize = 14.sp, modifier = Modifier.weight(1f))
+    }
+}
+
+@Composable
+private fun SectionLabel(text: String) {
+    Text(
+        text.uppercase(),
+        color = Color.White.copy(alpha = 0.6f),
+        fontSize = 12.sp,
+        fontWeight = FontWeight.Medium,
+        letterSpacing = 1.sp,
+        modifier = Modifier.padding(bottom = 10.dp),
+    )
+}
+
+@Composable
+private fun SelectCard(selected: Boolean, onClick: () -> Unit, content: @Composable () -> Unit) {
+    Column(
+        Modifier
+            .fillMaxWidth()
+            .padding(bottom = 12.dp)
+            .clip(RoundedCornerShape(16.dp))
+            .background(if (selected) Color.White.copy(alpha = 0.14f) else Color.White.copy(alpha = 0.06f))
+            .border(
+                if (selected) 2.dp else 1.dp,
+                if (selected) UbuntuPalette.UbuntuOrange else Color.White.copy(alpha = 0.12f),
+                RoundedCornerShape(16.dp),
+            )
+            .clickable(onClick = onClick)
+            .padding(16.dp),
+    ) { content() }
+}
+
+@Composable
+private fun AppToggle(name: String, summary: String, icon: ImageVector, accent: Color, checked: Boolean, onChange: (Boolean) -> Unit) {
+    Row(
+        Modifier
+            .fillMaxWidth()
+            .clip(RoundedCornerShape(14.dp))
+            .clickable { onChange(!checked) }
+            .padding(vertical = 8.dp, horizontal = 4.dp),
+        verticalAlignment = Alignment.CenterVertically,
+    ) {
+        Box(Modifier.size(42.dp).clip(RoundedCornerShape(12.dp)).background(accent), contentAlignment = Alignment.Center) {
+            Icon(icon, contentDescription = null, tint = Color.White, modifier = Modifier.size(22.dp))
+        }
+        Spacer(Modifier.width(14.dp))
+        Column(Modifier.weight(1f)) {
+            Text(name, color = Color.White, fontSize = 15.sp, fontWeight = FontWeight.Medium)
+            Text(summary, color = Color.White.copy(alpha = 0.65f), fontSize = 12.sp)
+        }
+        Box(
+            Modifier
+                .size(26.dp)
+                .clip(RoundedCornerShape(8.dp))
+                .background(if (checked) UbuntuPalette.UbuntuOrange else Color.Transparent)
+                .border(2.dp, if (checked) UbuntuPalette.UbuntuOrange else Color.White.copy(alpha = 0.4f), RoundedCornerShape(8.dp)),
+            contentAlignment = Alignment.Center,
+        ) {
+            if (checked) Icon(Icons.Default.Check, contentDescription = null, tint = Color.White, modifier = Modifier.size(18.dp))
+        }
+    }
+}
+
+@Composable
+private fun StepDots(index: Int, count: Int, modifier: Modifier = Modifier) {
+    Row(modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+        repeat(count) { i ->
+            Box(
+                Modifier
+                    .weight(1f)
+                    .height(4.dp)
+                    .clip(RoundedCornerShape(2.dp))
+                    .background(if (i <= index) UbuntuPalette.UbuntuOrange else Color.White.copy(alpha = 0.18f)),
+            )
+        }
+    }
+}
+
+@Composable
+private fun UnpackBar(fraction: Float, detail: String) {
+    Column(
+        Modifier
+            .fillMaxWidth()
+            .clip(RoundedCornerShape(12.dp))
+            .background(Color.Black.copy(alpha = 0.25f))
+            .padding(horizontal = 14.dp, vertical = 10.dp),
+    ) {
+        Row {
+            Text(
+                detail.ifBlank { "Unpacking Ubuntu…" },
+                color = Color.White.copy(alpha = 0.8f),
+                fontSize = 12.sp,
+                modifier = Modifier.weight(1f),
+                maxLines = 1,
+            )
+            Text("${(fraction * 100).toInt()}%", color = Color.White.copy(alpha = 0.8f), fontSize = 12.sp)
+        }
+        Spacer(Modifier.height(6.dp))
+        LinearProgressIndicator(
+            progress = { fraction },
+            modifier = Modifier.fillMaxWidth().height(4.dp).clip(RoundedCornerShape(2.dp)),
+            color = UbuntuPalette.UbuntuOrange,
+            trackColor = Color.White.copy(alpha = 0.15f),
+        )
+    }
+}
+
+@Composable
+private fun PrimaryButton(label: String, enabled: Boolean = true, onClick: () -> Unit) {
+    Box(
+        Modifier
+            .clip(RoundedCornerShape(24.dp))
+            .background(if (enabled) UbuntuPalette.UbuntuOrange else Color.White.copy(alpha = 0.15f))
+            .clickable(enabled = enabled, onClick = onClick)
+            .padding(horizontal = 28.dp, vertical = 12.dp),
+    ) {
+        Text(label, color = if (enabled) Color.White else Color.White.copy(alpha = 0.5f), fontSize = 15.sp, fontWeight = FontWeight.SemiBold)
+    }
+}
+
+@Composable
+private fun TextButton(label: String, onClick: () -> Unit) {
+    Box(
+        Modifier
+            .clip(RoundedCornerShape(24.dp))
+            .clickable(onClick = onClick)
+            .padding(horizontal = 18.dp, vertical = 12.dp),
+    ) {
+        Text(label, color = Color.White.copy(alpha = 0.85f), fontSize = 15.sp, fontWeight = FontWeight.Medium)
+    }
+}
+
+private fun sizeLabel(mb: Int): String = if (mb >= 1000) "%.1f GB".format(mb / 1000f) else "$mb MB"

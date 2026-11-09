@@ -83,26 +83,62 @@ behave normally. A small ANSI parser handles SGR colour, erase and cursor
 sequences.
 
 ### Ubuntu Software
-A native store for desktop applications that run in the container: a
-featured page (Firefox, LibreOffice, GIMP, Inkscape, VLC, Geany, ...) and a
-search of the Ubuntu archive, with Install and Open. Backed by
-`apt-install.sh`, which fetches apt's package lists the first time (the
-image ships without them) and installs with `apt-get`. Installed apps also
-appear in the desktop's Applications menu.
+A native store with two sources, switched at the top:
 
-Flathub stays configured in the image, but the store no longer offers
-Flatpak apps: they install, then cannot start, because Flatpak runs every
-app in a bwrap sandbox that needs user namespaces proot cannot provide.
+- **Ubuntu**: a featured page (Firefox, LibreOffice, GIMP, Inkscape, VLC,
+  Geany, ...) and a search of the Ubuntu archive. Backed by
+  `apt-install.sh`, which fetches apt's package lists the first time (the
+  image ships without them) and installs with `apt-get`.
+- **Flathub**: a featured page (Thunderbird, Telegram, Signal, VS Code,
+  Krita, Blender, OBS Studio, mpv, Flatseal) and a search of the whole
+  Flathub catalogue. The first install turns Flatpak on (`linx-flatpak.sh`)
+  and brings the app's runtime, a few hundred MB.
 
-### The first-run pack
-The first time the desktop comes up, the app installs what makes it a
-complete one, in the background (about 150 MB; `install-extras.sh`):
-Firefox, PulseAudio for sound, and Ubuntu's Yaru theme, icons and font.
-None of it is in the image: Firefox cannot be (see below) and the rest keeps
-the APK small. Settings can start it again if it was interrupted.
+Installed apps from either appear in the desktop's Applications menu.
+
+### Flatpak under proot
+Flatpak runs every app in a bubblewrap sandbox, which needs kernel
+namespaces proot cannot provide, so out of the box Flatpak apps install and
+then cannot start. `tools/linx-bwrap` takes `/usr/bin/bwrap`'s place
+(through `dpkg-divert`, so upgrades keep it): it reads bwrap's arguments
+and works out the same file system - an empty root plus the runtime at
+`/usr`, the app at `/app`, and Flatpak's other bind mounts, directories,
+symlinks and files - then asks the app, over an abstract unix socket, to
+start it (`SandboxSpawner.kt`). The app starts a fresh proot next to the
+container's, with the container paths turned into the phone's, so a Flatpak
+app runs as fast as anything else in the container. What it cannot give is
+the sandbox itself: Flatpak apps run with the same access as the rest of
+Linux.
+
+Flatpak's D-Bus filter is handed file descriptors that cannot cross to the
+app, so it alone runs in a proot nested inside the container's (slow, but
+it mostly waits). Only Flatpak gets a sandbox: anyone else calling bwrap
+(GTK's glycin image loaders) gets the answer bwrap gives without namespace
+support, as before.
+
+### Onboarding
+The first time the app starts it asks, Ubuntu-installer style, how the
+Linux should be (`OnboardingScreen.kt`), while Ubuntu unpacks behind it:
+
+- **How much**: Light (the desktop, terminal and files), Standard (adds
+  Firefox and a document viewer) or Full (adds LibreOffice, GIMP and VLC),
+  with the download each means.
+- **Look**: light or dark, one of Yaru's eight accent colours, and the
+  desktop's size on the phone (a monitor always gets a full-size desktop).
+- **Apps**: the starting set, ticked by the choice above, to add to or
+  take from.
+- **App stores**: Ubuntu's archive always; Flathub on or off, with a few of
+  its apps to start with.
+
+The choices go to `/etc/linx/setup.conf`, and once the desktop is up
+`linx-setup.sh` installs them in the background - sound and Ubuntu's look
+always, then the rest - while the side menu shows which step it is on. It
+copies the file to `setup.done` when everything is in, so an interrupted
+setup carries on next time. Settings' "Set up" goes through it again: the
+look changes at once, and only what is missing is installed.
 
 ### Firefox
-Firefox is the desktop's browser, installed with the first-run pack. Ubuntu's own `firefox` package only
+Firefox is the desktop's browser, installed by setup unless left out. Ubuntu's own `firefox` package only
 installs the snap, which cannot run here, so it comes from Mozilla's apt
 repository (`install-firefox.sh`), pinned above Ubuntu's. Mozilla builds it
 for amd64 and arm64; on 32-bit ARM the app installs GNOME Web instead.
@@ -127,11 +163,11 @@ are the phone's own (`linx-folders.sh`), so a file saved in Firefox shows
 up in the phone's Downloads, and a photo is one click away in GIMP.
 
 ### Look
-Ubuntu's Yaru theme and icons and the Ubuntu font (`linx-look.sh`), a dark
-bottom panel, and window borders drawn for the app by
-`make-xfwm4-theme.py` in Yaru's colours - a flat title bar with round
-minimise, maximise and close buttons - at 1x for a monitor and 2x for the
-phone.
+Ubuntu's Yaru theme and icons, light or dark in the chosen accent colour,
+and the Ubuntu font (`linx-look.sh`), a dark bottom panel, and window
+borders drawn for the app by `make-xfwm4-theme.py` to match - a flat title
+bar with round minimise and maximise buttons and a close button in the
+accent colour - at 1x for a monitor and 2x for the phone.
 
 ### The app around the desktop
 The desktop fills the screen; the status and navigation bars hide until
@@ -242,9 +278,10 @@ UbuntuMobile/
 │   │   │   │   ├── LinuxRuntime.kt       proot invocation
 │   │   │   │   ├── ProotInstaller.kt     proot + loader extraction
 │   │   │   │   ├── RootfsInstaller.kt    first-run provisioning
+│   │   │   │   ├── SandboxSpawner.kt     starts Flatpak apps for linx-bwrap
 │   │   │   │   ├── TarExtractor.kt       streaming tar (unit tested)
 │   │   │   │   └── Pty.kt                PTY session
-│   │   │   ├── ui/                       desktop, terminal, store
+│   │   │   ├── ui/                       onboarding, store, settings, terminal
 │   │   │   └── gamepad/                  virtual controller
 │   │   ├── cpp/linx_pty.cpp              PTY implementation (NDK)
 │   │   ├── assets/proot/<abi>/           proot, loader, libtalloc, libandroid-shmem
@@ -252,7 +289,7 @@ UbuntuMobile/
 │   ├── src/arm64/assets/rootfs/          Ubuntu 26.04 arm64 image
 │   ├── src/armhf/assets/rootfs/          Ubuntu 26.04 armhf image
 │   └── src/amd64/assets/rootfs/          Ubuntu 26.04 amd64 image
-├── tools/                                rootfs build pipeline (WSL)
+├── tools/                                rootfs build, and the scripts run in the container
 └── dist/                                 release APKs
 ```
 
@@ -361,6 +398,25 @@ rootfs, runs the unit tests, builds the APK and uploads it as an artifact
 ---
 
 ## Design notes and hard-won lessons
+
+**proot inside proot works, but is slow.** A nested proot needs
+`PROOT_NO_SECCOMP` (with seccomp, some system calls escape the inner
+proot's path translation and the "sandbox" shows the container's root), and
+then every system call stops in two tracers: about thirteen times slower.
+That is why Flatpak apps are started by the app, in a proot of their own.
+
+**proot's fake hard links point at the phone's paths.** `--link2symlink`
+turns each hard link (all of Flatpak's files are hard links into its
+repository) into a symlink to an absolute path under `/data/data/...`, so a
+proot that starts a Flatpak app must bind `/data` too.
+
+**`os.path.normpath("//usr")` is `//usr`.** POSIX allows two leading
+slashes to mean something special, so Python keeps them. Joining "/" onto
+an absolute path and normalising it made every bind mount miss.
+
+**bwrap's `--args` can carry empty arguments.** `--setenv NAME ""` is
+three NUL-terminated strings, one of them empty; dropping empty strings
+shifted every argument after it.
 
 These are the things that will bite you if you change the build pipeline.
 
@@ -586,9 +642,10 @@ asked for it.
 - **Microphone.** Sound goes from Linux to the phone, not back.
 - **A physical phone.** Everything has run on the x86_64 emulator; the arm64
   APK has not been tried on real hardware yet.
-- **Flatpak apps.** Flatpak starts every app inside bwrap, which needs user
-  namespaces that proot cannot provide, so the store offers apt packages
-  instead.
+- **Flatpak's sandbox.** Flatpak apps run (see Flatpak under proot), but
+  without their sandbox, and Flatpak's portals (file choosers that reach
+  outside the app, for instance) are untested. Several Flathub apps were
+  not tried at all; mpv was.
 - **Snaps.** Ubuntu ships some apps (Chromium, Thunderbird) only as snaps,
   which need snapd and mounts; they are not available.
 - **Clipboard beyond Latin-1.** The basic RFB clipboard cannot carry

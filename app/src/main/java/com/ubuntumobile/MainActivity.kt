@@ -182,7 +182,7 @@ class MainActivity : ComponentActivity() {
 }
 
 /** Which surface is currently on screen. */
-private enum class Screen { DESKTOP, TERMINAL, STORE, GAMEPAD, DISPLAY, SETTINGS }
+private enum class Screen { DESKTOP, TERMINAL, STORE, GAMEPAD, DISPLAY, SETTINGS, ONBOARDING }
 
 /** Port the in-container X display exports its RFB stream on. */
 private const val DISPLAY_PORT = 5901
@@ -403,15 +403,12 @@ fun UbuntuApp(
         }
     }
 
-    // The first-run pack (install-extras.sh): Firefox, the sound server and
-    // Ubuntu's look. None of it is in the image - Firefox cannot be (Ubuntu's
-    // package is a snap), the rest keeps the APK small - so it is installed
-    // the first time the desktop is up, in the background.
+    // What makes the desktop a complete one - sound, Ubuntu's look, Firefox
+    // and whatever else onboarding chose - is not in the image: Firefox
+    // cannot be (Ubuntu's package is a snap), and the rest keeps the APK
+    // small. It is installed the first time the desktop is up, in the
+    // background (linx-setup.sh).
     val firefoxBinary = remember { java.io.File(vm.paths.root, "usr/lib/firefox/firefox") }
-    fun extrasInstalled(): Boolean =
-        (firefoxBinary.exists() || java.io.File(vm.paths.root, "usr/bin/epiphany").exists()) &&
-            java.io.File(vm.paths.root, "usr/bin/pulseaudio").exists() &&
-            java.io.File(vm.paths.root, "usr/share/themes/Yaru").isDirectory
     var browserInstalled by remember { mutableStateOf<Boolean?>(null) }
     var browserBusy by remember { mutableStateOf(false) }
     var browserNote by remember { mutableStateOf<String?>(null) }
@@ -429,32 +426,78 @@ fun UbuntuApp(
         )
     }
 
-    suspend fun installExtras() {
+    // What onboarding chose (OnboardingScreen) lives in the container, in
+    // /etc/linx/setup.conf; linx-setup.sh copies it to setup.done once
+    // everything in it is installed.
+    var onboarded by remember { mutableStateOf(prefs.getBoolean("onboarded", false)) }
+    val setupConf = remember { java.io.File(vm.paths.root, "etc/linx/setup.conf") }
+    val setupDoneFile = remember { java.io.File(vm.paths.root, "etc/linx/setup.done") }
+    fun setupDone(): Boolean = try {
+        setupDoneFile.isFile && setupDoneFile.readText() == setupConf.readText()
+    } catch (_: Exception) {
+        false
+    }
+
+    suspend fun runSetup() {
         if (browserBusy) return
         browserBusy = true
-        browserNote = "Setting up Firefox, sound and the Ubuntu look…"
-        vm.paths.appendLog("installing the first-run pack")
-        val out = withContext(Dispatchers.IO) {
-            vm.runtime.shell("/usr/local/lib/linx/install-extras.sh 2>&1 | tail -n 4", 2400).output
+        browserNote = "Setting up your apps…"
+        vm.paths.appendLog("setting up: ${setupConf.readText().lines().filter { it.startsWith("LINX_") }}")
+        val log = java.io.File(vm.paths.sharedTmpDir, "linx-setup.log")
+        log.delete()
+        // The script's "STEP n/total what" lines tell how far it got.
+        val progress = scope.launch(Dispatchers.IO) {
+            while (true) {
+                delay(1500)
+                val step = try {
+                    log.readLines().lastOrNull { it.startsWith("STEP ") }
+                } catch (_: Exception) {
+                    null
+                } ?: continue
+                val parts = step.removePrefix("STEP ").split(" ", limit = 2)
+                browserNote = "Setting up (${parts[0].replace("/", " of ")}): ${parts.getOrElse(1) { "" }}…"
+            }
         }
+        val out = withContext(Dispatchers.IO) {
+            vm.runtime.shell("/usr/local/lib/linx/linx-setup.sh > /tmp/linx-setup.log 2>&1; tail -n 1 /tmp/linx-setup.log", 3600).output
+        }
+        progress.cancel()
         browserInstalled = firefoxBinary.exists()
         browserNote = when {
-            extrasInstalled() && browserInstalled == true -> null
-            extrasInstalled() -> "This phone gets GNOME Web instead (no Firefox for 32-bit ARM)"
+            setupDone() -> null
             else -> "Setup did not finish; check the connection and try again"
         }
-        vm.paths.appendLog("first-run pack: ${out.trim().lines().lastOrNull()}")
+        vm.paths.appendLog("setup: ${out.trim().lines().lastOrNull()}")
         withContext(Dispatchers.IO) {
             vm.runtime.shell("/usr/local/lib/linx/linx-look.sh", 120)
             startAudio()
         }
         browserBusy = false
     }
-    LaunchedEffect(session.connected) {
-        if (!session.connected) return@LaunchedEffect
+    LaunchedEffect(session.connected, onboarded) {
+        if (!session.connected || !onboarded) return@LaunchedEffect
         browserInstalled = firefoxBinary.exists()
         withContext(Dispatchers.IO) { startAudio() }
-        if (!extrasInstalled()) installExtras()
+        if (!setupDone()) runSetup()
+    }
+
+    /** Keep what onboarding chose, and set Linux up to match. */
+    fun applyChoices(choices: com.ubuntumobile.ui.SetupChoices) {
+        desktopSize = choices.desktopSize
+        prefs.edit()
+            .putBoolean("onboarded", true)
+            .putString("desktop_size", choices.desktopSize.name)
+            .apply()
+        scope.launch(Dispatchers.IO) {
+            setupConf.parentFile?.mkdirs()
+            setupConf.writeText(choices.toConf())
+            withContext(Dispatchers.Main) {
+                onboarded = true
+                // Already up: the look changes at once, the rest installs.
+                if (session.connected && !setupDone()) runSetup()
+            }
+            vm.runtime.shell("/usr/local/lib/linx/linx-look.sh", 120)
+        }
     }
 
     // The clipboard, shared both ways. Android only lets the app in the
@@ -521,9 +564,9 @@ fun UbuntuApp(
             ),
         )
     }
-    LaunchedEffect(session.connected) {
+    LaunchedEffect(session.connected, onboarded) {
         // Asked once, the first time the desktop is up; Settings can ask again.
-        if (session.connected && !storageAllowed && !prefs.getBoolean("storage_asked", false)) {
+        if (session.connected && onboarded && !storageAllowed && !prefs.getBoolean("storage_asked", false)) {
             prefs.edit().putBoolean("storage_asked", true).apply()
             askForStorage()
         }
@@ -609,7 +652,35 @@ fun UbuntuApp(
         imm?.showSoftInput(view, InputMethodManager.SHOW_IMPLICIT)
     }
 
-    // Install / setup screen
+    // Onboarding: the first time, or again from Settings. Ubuntu unpacks
+    // behind it.
+    val failed = state.installPhase == RootfsInstaller.Progress.Phase.FAILED
+    if ((!onboarded && !failed) || screen == Screen.ONBOARDING) {
+        val again = onboarded
+        com.ubuntumobile.ui.OnboardingScreen(
+            initial = remember {
+                val saved = try {
+                    setupConf.takeIf { it.isFile }?.readText()
+                } catch (_: Exception) {
+                    null
+                }
+                saved?.let { com.ubuntumobile.ui.SetupChoices.fromConf(it, desktopSize) }
+                    ?: com.ubuntumobile.ui.SetupChoices(desktopSize = desktopSize)
+            },
+            unpackFraction = if (state.isInstalled) null else state.installFraction,
+            unpackDetail = state.installDetail,
+            onStarted = { if (!state.isInstalled) vm.installUbuntu() },
+            onFinish = {
+                applyChoices(it)
+                screen = Screen.DISPLAY
+            },
+            again = again,
+            onCancel = { screen = Screen.SETTINGS },
+        )
+        return
+    }
+
+    // Unpacking Ubuntu failed (or onboarding is done and it is still going).
     if (!state.isInstalled) {
         SetupScreen(
             state = state,
@@ -619,6 +690,9 @@ fun UbuntuApp(
     }
 
     when (screen) {
+        // Shown above, before the rest.
+        Screen.ONBOARDING -> {}
+
         Screen.DESKTOP -> {
             val apps = remember(state.installedApps) {
                 (AppCatalog.builtin + state.installedApps).distinctBy { it.id }
@@ -696,7 +770,8 @@ fun UbuntuApp(
                 browserInstalled = browserInstalled ?: firefoxBinary.exists(),
                 browserBusy = browserBusy,
                 browserNote = browserNote,
-                onInstallBrowser = { scope.launch { installExtras() } },
+                onInstallBrowser = { scope.launch { runSetup() } },
+                onSetUpAgain = { screen = Screen.ONBOARDING },
                 storageAllowed = storageAllowed,
                 onAllowStorage = { askForStorage() },
                 versionName = BuildConfig.VERSION_NAME,
@@ -780,7 +855,7 @@ fun UbuntuApp(
                     if (firefoxBinary.exists()) {
                         launchOnDisplay(listOf("firefox"))
                     } else if (!browserBusy) {
-                        scope.launch { installExtras() }
+                        scope.launch { runSetup() }
                     }
                 },
                 onOpenSettings = { screen = Screen.SETTINGS },

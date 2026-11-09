@@ -31,6 +31,7 @@ class UbuntuViewModel(app: Application) : AndroidViewModel(app) {
     val terminalOutput: StateFlow<String> = _terminalOutput.asStateFlow()
 
     init {
+        com.ubuntumobile.linux.SandboxSpawner.start(app.packageName, paths, runtime)
         _state.value = _state.value.copy(
             isInstalled = paths.isInstalled,
             isProotReady = paths.isProotReady,
@@ -69,6 +70,7 @@ class UbuntuViewModel(app: Application) : AndroidViewModel(app) {
                     installPhase = RootfsInstaller.Progress.Phase.DONE,
                     installDetail = "",
                 )
+                com.ubuntumobile.linux.SandboxSpawner.start(getApplication<Application>().packageName, paths, runtime)
                 refreshSystemInfo()
             }.onFailure { e ->
                 _state.value = _state.value.copy(
