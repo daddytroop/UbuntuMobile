@@ -76,4 +76,25 @@ fi
 # xfwm4 only rereads a theme whose name changes.
 [ -n "$REDRAWN" ] && xfconf-query -c xfwm4 -p /general/theme -n -t string -s Default && sleep 0.3
 xfconf-query -c xfwm4 -p /general/theme -n -t string -s "$THEME"
+
+# The wallpaper the user picked: the app draws them (Wallpapers.kt) into
+# /usr/local/share/linx/wallpapers. xfdesktop draws the desktop on the
+# phone; feh draws it under Openbox, where there is no xfdesktop.
+LINX_WALLPAPER="${LINX_WALLPAPER:-aubergine}"
+WALL="/usr/local/share/linx/wallpapers/$LINX_WALLPAPER.jpg"
+[ -f "$WALL" ] || WALL=/usr/share/xfce4/backdrops/xubuntu-wallpaper.png
+echo "$WALL" >/tmp/linx-wallpaper
+MONITORS="$(xrandr 2>/dev/null | awk '/ connected/ {print $1}')"
+for m in ${MONITORS:-VNC-0} 0; do
+  B="/backdrop/screen0/monitor$m/workspace0"
+  xfconf-query -c xfce4-desktop -p "$B/image-style" -n -t int -s 5
+  xfconf-query -c xfce4-desktop -p "$B/last-image" -n -t string -s "$WALL"
+done
+# A clean desktop: the home folder, not the whole file system.
+xfconf-query -c xfce4-desktop -p /desktop-icons/file-icons/show-filesystem -n -t bool -s false
+xfconf-query -c xfce4-desktop -p /desktop-icons/file-icons/show-removable -n -t bool -s false
+command -v feh >/dev/null && ! pgrep -x xfdesktop >/dev/null && feh --no-fehbg --bg-fill "$WALL" 2>/dev/null
+
+# The app menu (Whisker Menu once it is installed).
+/usr/local/lib/linx/linx-panel.sh --restart >/dev/null 2>&1
 echo "LOOK=$THEME"

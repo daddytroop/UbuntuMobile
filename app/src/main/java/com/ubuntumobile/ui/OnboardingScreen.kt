@@ -7,8 +7,10 @@ import androidx.compose.animation.fadeOut
 import androidx.compose.animation.slideInHorizontally
 import androidx.compose.animation.slideOutHorizontally
 import androidx.compose.animation.togetherWith
+import androidx.compose.foundation.Image
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
+import androidx.compose.foundation.horizontalScroll
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
@@ -32,7 +34,9 @@ import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Apps
 import androidx.compose.material.icons.filled.Check
+import androidx.compose.material.icons.filled.Code
 import androidx.compose.material.icons.filled.Computer
+import androidx.compose.material.icons.filled.DoneAll
 import androidx.compose.material.icons.filled.Inventory2
 import androidx.compose.material.icons.filled.Movie
 import androidx.compose.material.icons.filled.Public
@@ -49,6 +53,7 @@ import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableIntStateOf
 import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.produceState
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
@@ -56,18 +61,23 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.ImageBitmap
+import androidx.compose.ui.graphics.asImageBitmap
 import androidx.compose.ui.graphics.vector.ImageVector
+import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import com.ubuntumobile.ui.theme.UbuntuPalette
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.withContext
 
 /** How much Linux to set up. */
 enum class SetupProfile(val label: String, val detail: String) {
     LIGHT("Light", "The desktop, terminal and files. Add apps whenever you like."),
     STANDARD("Standard", "Adds Firefox and a document viewer. A good start."),
-    FULL("Full", "Adds an office suite, photo editing and a video player."),
+    FULL("Full", "Adds an office suite, photo editing, a video player and developer tools."),
 }
 
 /** Yaru's accent colours (the theme names are Yaru-<id>). */
@@ -81,6 +91,9 @@ enum class Accent(val id: String, val label: String, val color: Long) {
     SAGE("sage", "Sage", 0xFF657B69),
     OLIVE("olive", "Olive", 0xFF4B8501),
 }
+
+/** A developer tool that onboarding offers: an Ubuntu package of a GitHub project. */
+data class DevPick(val pkg: String, val name: String, val summary: String, val repo: String, val mb: Int)
 
 /** An app from Flathub that onboarding offers. */
 data class FlathubPick(val id: String, val name: String, val summary: String, val icon: ImageVector)
@@ -96,11 +109,16 @@ data class SetupChoices(
     val apps: Set<String> = defaultApps(SetupProfile.STANDARD),
     val flathub: Boolean = false,
     val flatpaks: Set<String> = emptySet(),
+    val wallpaper: Wallpaper = Wallpaper.AUBERGINE,
+    /** Packages of [devPicks]. */
+    val devTools: Set<String> = emptySet(),
 ) {
     /** The packages to install with apt. */
     val aptPackages: List<String>
-        get() = StoreCatalog.featured.filter { it.pkg in apps && it.installer == null }
-            .flatMap { it.packages }.distinct()
+        get() = (
+            StoreCatalog.featured.filter { it.pkg in apps && it.installer == null }.flatMap { it.packages } +
+                devPicks.filter { it.pkg in devTools }.map { it.pkg }
+            ).distinct()
 
     /** About how much there is to download, in MB. */
     val downloadMb: Int
@@ -109,6 +127,7 @@ data class SetupChoices(
             if (browser) mb += 90
             if (apps.any { it.startsWith("libreoffice") }) mb += 190
             mb += apps.sumOf { APP_SIZES[it] ?: 20 }
+            mb += devPicks.filter { it.pkg in devTools }.sumOf { it.mb }
             if (flathub) mb += 5
             if (flatpaks.isNotEmpty()) mb += 350 + flatpaks.size * 60
             return mb
@@ -124,6 +143,7 @@ data class SetupChoices(
         append("LINX_FLATPAKS=\"${if (flathub) flatpaks.joinToString(" ") else ""}\"\n")
         append("LINX_DARK=${if (dark) 1 else 0}\n")
         append("LINX_ACCENT=${accent.id}\n")
+        append("LINX_WALLPAPER=${wallpaper.id}\n")
     }
 
     companion object {
@@ -143,8 +163,32 @@ data class SetupChoices(
         val flathubPicks = listOf(
             FlathubPick("org.mozilla.Thunderbird", "Thunderbird", "Email and calendar", Icons.Default.Email),
             FlathubPick("org.telegram.desktop", "Telegram", "Messaging", Icons.Default.Send),
+            FlathubPick("com.visualstudio.code", "VS Code", "Microsoft's code editor", Icons.Default.Code),
             FlathubPick("io.mpv.Mpv", "mpv", "A light video player", Icons.Default.Movie),
         )
+
+        /**
+         * Popular open-source tools from GitHub. All of them are in
+         * Ubuntu's archive, so they install with apt, signed and small.
+         */
+        val devPicks = listOf(
+            DevPick("git", "Git", "Version control", "git/git", 12),
+            DevPick("gh", "GitHub CLI", "Pull requests and issues from the terminal", "cli/cli", 15),
+            DevPick("neovim", "Neovim", "The hyperextensible text editor", "neovim/neovim", 10),
+            DevPick("lazygit", "lazygit", "Git in a friendly terminal UI", "jesseduffield/lazygit", 8),
+            DevPick("btop", "btop", "A beautiful resource monitor", "aristocratic/btop", 2),
+            DevPick("fastfetch", "fastfetch", "Your system at a glance", "fastfetch-cli/fastfetch", 2),
+            DevPick("ripgrep", "ripgrep", "Search code, fast", "BurntSushi/ripgrep", 2),
+            DevPick("fzf", "fzf", "A fuzzy finder for everything", "junegunn/fzf", 2),
+            DevPick("bat", "bat", "cat with wings (run it as batcat)", "sharkdp/bat", 3),
+            DevPick("zoxide", "zoxide", "A smarter cd", "ajeetdsouza/zoxide", 1),
+            DevPick("tmux", "tmux", "Terminals that keep running", "tmux/tmux", 1),
+        )
+
+        fun defaultDevTools(profile: SetupProfile): Set<String> = when (profile) {
+            SetupProfile.FULL -> setOf("git", "gh", "btop", "fastfetch")
+            else -> emptySet()
+        }
 
         /** Read back what [toConf] wrote (for "Set up again"). */
         fun fromConf(text: String, desktopSize: DesktopSize): SetupChoices {
@@ -164,12 +208,14 @@ data class SetupChoices(
                 apps = StoreCatalog.featured.filter { it.installer == null && it.pkg in packages }.map { it.pkg }.toSet(),
                 flathub = values["LINX_FLATHUB"] == "1",
                 flatpaks = values["LINX_FLATPAKS"].orEmpty().split(' ').filter { it.isNotBlank() }.toSet(),
+                wallpaper = Wallpaper.byId(values["LINX_WALLPAPER"]),
+                devTools = devPicks.map { it.pkg }.filter { it in packages }.toSet(),
             )
         }
     }
 }
 
-private enum class Page { WELCOME, PROFILE, LOOK, APPS, STORES, READY }
+private enum class Page { WELCOME, PROFILE, LOOK, APPS, DEV, STORES, READY }
 
 /**
  * The first thing a new user sees: a few questions, Ubuntu-installer
@@ -236,6 +282,7 @@ fun OnboardingScreen(
                         Page.PROFILE -> ProfilePage(choices) { choices = it }
                         Page.LOOK -> LookPage(choices) { choices = it }
                         Page.APPS -> AppsPage(choices) { choices = it }
+                        Page.DEV -> DevPage(choices) { choices = it }
                         Page.STORES -> StoresPage(choices) { choices = it }
                         Page.READY -> ReadyPage(choices, unpackFraction)
                     }
@@ -260,7 +307,7 @@ fun OnboardingScreen(
                 PrimaryButton(
                     when (page) {
                         Page.WELCOME -> "Get started"
-                        Page.READY -> if (again) "Apply" else "Start Ubuntu"
+                        Page.READY -> if (again) "Apply" else "Start Mobuntu"
                         else -> "Next"
                     },
                     // The desktop needs Ubuntu unpacked first.
@@ -286,7 +333,7 @@ private fun WelcomePage() {
         UbuntuLogo(88.dp)
         Spacer(Modifier.height(28.dp))
         Text(
-            "Welcome to Ubuntu",
+            "Welcome to Mobuntu",
             color = Color.White,
             fontSize = 30.sp,
             fontWeight = FontWeight.Bold,
@@ -338,7 +385,14 @@ private fun ProfilePage(choices: SetupChoices, onChange: (SetupChoices) -> Unit)
         val selected = choices.profile == profile
         val sample = SetupChoices(profile = profile, browser = profile != SetupProfile.LIGHT, apps = SetupChoices.defaultApps(profile))
         SelectCard(selected = selected, onClick = {
-            onChange(choices.copy(profile = profile, browser = sample.browser, apps = sample.apps))
+            onChange(
+                choices.copy(
+                    profile = profile,
+                    browser = sample.browser,
+                    apps = sample.apps,
+                    devTools = SetupChoices.defaultDevTools(profile),
+                ),
+            )
         }) {
             Row(verticalAlignment = Alignment.CenterVertically) {
                 Text(profile.label, color = Color.White, fontSize = 18.sp, fontWeight = FontWeight.SemiBold, modifier = Modifier.weight(1f))
@@ -357,6 +411,7 @@ private fun LookPage(choices: SetupChoices, onChange: (SetupChoices) -> Unit) {
         listOf(false, true).forEach { dark ->
             ModePreview(
                 dark = dark,
+                wallpaper = choices.wallpaper,
                 accent = Color(choices.accent.color),
                 selected = choices.dark == dark,
                 onClick = { onChange(choices.copy(dark = dark)) },
@@ -379,6 +434,28 @@ private fun LookPage(choices: SetupChoices, onChange: (SetupChoices) -> Unit) {
                 contentAlignment = Alignment.Center,
             ) {
                 if (selected) Icon(Icons.Default.Check, contentDescription = accent.label, tint = Color.White, modifier = Modifier.size(18.dp))
+            }
+        }
+    }
+    Spacer(Modifier.height(24.dp))
+    SectionLabel("Wallpaper")
+    Row(
+        Modifier.fillMaxWidth().horizontalScroll(rememberScrollState()),
+        horizontalArrangement = Arrangement.spacedBy(10.dp),
+    ) {
+        Wallpaper.entries.forEach { w ->
+            val selected = choices.wallpaper == w
+            Column(horizontalAlignment = Alignment.CenterHorizontally) {
+                WallpaperThumb(
+                    w,
+                    Modifier
+                        .size(width = 64.dp, height = 104.dp)
+                        .clip(RoundedCornerShape(12.dp))
+                        .border(if (selected) 3.dp else 1.dp, if (selected) Color.White else Color.White.copy(alpha = 0.15f), RoundedCornerShape(12.dp))
+                        .clickable { onChange(choices.copy(wallpaper = w)) },
+                )
+                Spacer(Modifier.height(4.dp))
+                Text(w.label, color = Color.White.copy(alpha = if (selected) 1f else 0.65f), fontSize = 11.sp)
             }
         }
     }
@@ -411,7 +488,7 @@ private fun LookPage(choices: SetupChoices, onChange: (SetupChoices) -> Unit) {
 
 /** A small drawing of the desktop in light or dark. */
 @Composable
-private fun ModePreview(dark: Boolean, accent: Color, selected: Boolean, onClick: () -> Unit, modifier: Modifier) {
+private fun ModePreview(dark: Boolean, wallpaper: Wallpaper, accent: Color, selected: Boolean, onClick: () -> Unit, modifier: Modifier) {
     val window = if (dark) Color(0xFF2C2C2C) else Color(0xFFFAFAFA)
     val bar = if (dark) Color(0xFF242424) else Color(0xFFEDEDED)
     val line = if (dark) Color(0xFF5A5A5A) else Color(0xFFD0D0D0)
@@ -427,9 +504,9 @@ private fun ModePreview(dark: Boolean, accent: Color, selected: Boolean, onClick
             Modifier
                 .fillMaxWidth()
                 .aspectRatio(1.3f)
-                .clip(RoundedCornerShape(10.dp))
-                .background(Brush.linearGradient(listOf(Color(0xFF77216F), Color(0xFFE95420)))),
+                .clip(RoundedCornerShape(10.dp)),
         ) {
+            WallpaperThumb(wallpaper, Modifier.matchParentSize())
             Column(
                 Modifier
                     .padding(start = 12.dp, top = 12.dp, end = 12.dp, bottom = 20.dp)
@@ -462,15 +539,40 @@ private fun ModePreview(dark: Boolean, accent: Color, selected: Boolean, onClick
 
 @Composable
 private fun AppsPage(choices: SetupChoices, onChange: (SetupChoices) -> Unit) {
-    PageTitle("Apps", "From Ubuntu's own archive. Ubuntu Software has thousands more.")
+    PageTitle("Apps", "From Ubuntu's own archive. The Software store has thousands more.")
     val firefox = StoreCatalog.featured.first { it.installer != null }
-    AppToggle(firefox.name, "The web browser", firefox.icon ?: Icons.Default.Public, Color(firefox.accent), choices.browser) {
+    AppToggle(firefox.name, "The web browser", firefox.icon ?: Icons.Default.Public, Color(firefox.accent), choices.browser, Color(choices.accent.color)) {
         onChange(choices.copy(browser = it))
     }
     StoreCatalog.featured.filter { it.installer == null }.forEach { app ->
         val on = app.pkg in choices.apps
-        AppToggle(app.name, app.summary, app.icon ?: Icons.Default.Inventory2, Color(app.accent), on) { checked ->
+        AppToggle(app.name, app.summary, app.icon ?: Icons.Default.Inventory2, Color(app.accent), on, Color(choices.accent.color)) { checked ->
             onChange(choices.copy(apps = if (checked) choices.apps + app.pkg else choices.apps - app.pkg))
+        }
+    }
+}
+
+@Composable
+private fun DevPage(choices: SetupChoices, onChange: (SetupChoices) -> Unit) {
+    PageTitle(
+        "For developers",
+        "Popular open-source tools from GitHub, packaged by Ubuntu. Skip this if you just want a desktop.",
+    )
+    val all = SetupChoices.devPicks.map { it.pkg }.toSet()
+    val tick = Color(choices.accent.color)
+    AppToggle(
+        "All of them",
+        "About ${SetupChoices.devPicks.sumOf { it.mb }} MB",
+        Icons.Default.DoneAll,
+        Color.White.copy(alpha = 0.15f),
+        choices.devTools.containsAll(all),
+        tick,
+    ) { checked -> onChange(choices.copy(devTools = if (checked) all else emptySet())) }
+    Spacer(Modifier.height(8.dp))
+    SetupChoices.devPicks.forEach { pick ->
+        val on = pick.pkg in choices.devTools
+        AppToggle(pick.name, "${pick.summary} · ${pick.repo}", Icons.Default.Code, Color(0xFF24292F), on, tick) { checked ->
+            onChange(choices.copy(devTools = if (checked) choices.devTools + pick.pkg else choices.devTools - pick.pkg))
         }
     }
 }
@@ -483,7 +585,7 @@ private fun StoresPage(choices: SetupChoices, onChange: (SetupChoices) -> Unit) 
             Icon(Icons.Default.Apps, contentDescription = null, tint = Color.White)
             Spacer(Modifier.width(12.dp))
             Column(Modifier.weight(1f)) {
-                Text("Ubuntu Software", color = Color.White, fontSize = 16.sp, fontWeight = FontWeight.Medium)
+                Text("Ubuntu archive", color = Color.White, fontSize = 16.sp, fontWeight = FontWeight.Medium)
                 Text("Ubuntu's archive: tens of thousands of packages", color = Color.White.copy(alpha = 0.7f), fontSize = 13.sp)
             }
             Text("Always on", color = Color.White.copy(alpha = 0.6f), fontSize = 12.sp)
@@ -515,7 +617,7 @@ private fun StoresPage(choices: SetupChoices, onChange: (SetupChoices) -> Unit) 
         SectionLabel("From Flathub")
         SetupChoices.flathubPicks.forEach { pick ->
             val on = pick.id in choices.flatpaks
-            AppToggle(pick.name, pick.summary, pick.icon, Color(0xFF4A86CF), on) { checked ->
+            AppToggle(pick.name, pick.summary, pick.icon, Color(0xFF4A86CF), on, Color(choices.accent.color)) { checked ->
                 onChange(choices.copy(flatpaks = if (checked) choices.flatpaks + pick.id else choices.flatpaks - pick.id))
             }
         }
@@ -530,7 +632,7 @@ private fun ReadyPage(choices: SetupChoices, unpackFraction: Float?) {
         else "Ubuntu is still unpacking. It only takes a minute or two.",
     )
     SummaryRow("Setup", choices.profile.label)
-    SummaryRow("Look", "${if (choices.dark) "Dark" else "Light"}, ${choices.accent.label.lowercase()}")
+    SummaryRow("Look", "${if (choices.dark) "Dark" else "Light"}, ${choices.accent.label.lowercase()}, ${choices.wallpaper.label}")
     SummaryRow("Size on the phone", choices.desktopSize.label)
     val apps = buildList {
         if (choices.browser) add("Firefox")
@@ -538,11 +640,13 @@ private fun ReadyPage(choices: SetupChoices, unpackFraction: Float?) {
         if (choices.flathub) SetupChoices.flathubPicks.filter { it.id in choices.flatpaks }.forEach { add(it.name) }
     }
     SummaryRow("Apps", if (apps.isEmpty()) "None yet" else apps.joinToString(", "))
+    val dev = SetupChoices.devPicks.filter { it.pkg in choices.devTools }.map { it.name }
+    if (dev.isNotEmpty()) SummaryRow("Developer tools", dev.joinToString(", "))
     SummaryRow("Flathub", if (choices.flathub) "On" else "Off")
     SummaryRow("To download", "about ${sizeLabel(choices.downloadMb)}")
     Spacer(Modifier.height(12.dp))
     Text(
-        "Best on Wi-Fi. The desktop is usable while the rest downloads; the side menu shows how far it got.",
+        "Best on Wi-Fi. The desktop is usable while the rest downloads; a bar at the top shows how far it got.",
         color = Color.White.copy(alpha = 0.65f),
         fontSize = 12.sp,
     )
@@ -587,7 +691,15 @@ private fun SelectCard(selected: Boolean, onClick: () -> Unit, content: @Composa
 }
 
 @Composable
-private fun AppToggle(name: String, summary: String, icon: ImageVector, accent: Color, checked: Boolean, onChange: (Boolean) -> Unit) {
+private fun AppToggle(
+    name: String,
+    summary: String,
+    icon: ImageVector,
+    accent: Color,
+    checked: Boolean,
+    tick: Color = UbuntuPalette.UbuntuOrange,
+    onChange: (Boolean) -> Unit,
+) {
     Row(
         Modifier
             .fillMaxWidth()
@@ -608,14 +720,34 @@ private fun AppToggle(name: String, summary: String, icon: ImageVector, accent: 
             Modifier
                 .size(26.dp)
                 .clip(RoundedCornerShape(8.dp))
-                .background(if (checked) UbuntuPalette.UbuntuOrange else Color.Transparent)
-                .border(2.dp, if (checked) UbuntuPalette.UbuntuOrange else Color.White.copy(alpha = 0.4f), RoundedCornerShape(8.dp)),
+                .background(if (checked) tick else Color.Transparent)
+                .border(2.dp, if (checked) tick else Color.White.copy(alpha = 0.4f), RoundedCornerShape(8.dp)),
             contentAlignment = Alignment.Center,
         ) {
             if (checked) Icon(Icons.Default.Check, contentDescription = null, tint = Color.White, modifier = Modifier.size(18.dp))
         }
     }
 }
+
+/** A wallpaper, drawn small (and in software: the designs use blur). */
+@Composable
+fun WallpaperThumb(wallpaper: Wallpaper, modifier: Modifier = Modifier) {
+    val picture by produceState(thumbs[wallpaper], wallpaper) {
+        if (value != null) return@produceState
+        value = withContext(Dispatchers.Default) {
+            val bmp = android.graphics.Bitmap.createBitmap(240, 240, android.graphics.Bitmap.Config.ARGB_8888)
+            wallpaper.draw(android.graphics.Canvas(bmp), 240f, 240f)
+            bmp.asImageBitmap().also { thumbs[wallpaper] = it }
+        }
+    }
+    Box(modifier.background(Color(0xFF2C001E))) {
+        picture?.let {
+            Image(it, contentDescription = wallpaper.label, contentScale = ContentScale.Crop, modifier = Modifier.matchParentSize())
+        }
+    }
+}
+
+private val thumbs = java.util.concurrent.ConcurrentHashMap<Wallpaper, ImageBitmap>()
 
 @Composable
 private fun StepDots(index: Int, count: Int, modifier: Modifier = Modifier) {

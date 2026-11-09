@@ -155,7 +155,7 @@ fun DesktopMenu(
                     StatusDot(connected)
                     Spacer(Modifier.width(10.dp))
                     Column {
-                        Text("Ubuntu", color = Color.White, fontSize = 20.sp, fontWeight = FontWeight.Medium)
+                        Text("Mobuntu", color = Color.White, fontSize = 20.sp, fontWeight = FontWeight.Medium)
                         Text(
                             if (connected) "Desktop running" else "Starting…",
                             color = Color.White.copy(alpha = 0.6f),
@@ -175,7 +175,7 @@ fun DesktopMenu(
                 MenuItem(Icons.Default.Public, "Firefox", go(actions.onOpenBrowser), note = actions.browserNote)
                 MenuItem(Icons.Default.Terminal, "Terminal", go(actions.onOpenTerminal))
                 MenuItem(Icons.Default.Folder, "Files", go(actions.onOpenFiles))
-                MenuItem(Icons.Default.ShoppingBag, "Ubuntu Software", go(actions.onOpenStore))
+                MenuItem(Icons.Default.ShoppingBag, "Software", go(actions.onOpenStore))
 
                 MenuSection("Controls")
                 MenuItem(Icons.Default.Keyboard, "Keyboard", go(actions.onShowKeyboard))

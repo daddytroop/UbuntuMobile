@@ -128,6 +128,8 @@ object ContainerSetup {
         "linx-bwrap" to "usr/local/lib/linx/linx-bwrap",
         "linx-flatpak.sh" to "usr/local/lib/linx/linx-flatpak.sh",
         "linx-setup.sh" to "usr/local/lib/linx/linx-setup.sh",
+        "linx-apps.py" to "usr/local/lib/linx/linx-apps.py",
+        "linx-panel.sh" to "usr/local/lib/linx/linx-panel.sh",
         "make-xfwm4-theme.py" to "usr/local/lib/linx/make-xfwm4-theme.py",
         "gamepad-helper.py" to "usr/local/lib/linx/gamepad-helper.py",
         "tint2rc" to "usr/local/share/linx/tint2rc",

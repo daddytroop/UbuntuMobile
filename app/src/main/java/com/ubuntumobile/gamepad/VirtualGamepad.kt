@@ -2,6 +2,7 @@ package com.ubuntumobile.gamepad
 
 import androidx.compose.foundation.Canvas
 import androidx.compose.foundation.background
+import androidx.compose.foundation.border
 import androidx.compose.foundation.gestures.detectDragGestures
 import androidx.compose.foundation.gestures.detectTapGestures
 import androidx.compose.foundation.layout.Arrangement
@@ -25,6 +26,7 @@ import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.draw.alpha
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.graphics.Color
@@ -93,60 +95,125 @@ class GamepadState {
 }
 
 /**
- * The on-screen gamepad.
+ * The on-screen gamepad, drawn over the game.
  *
- * Layout adapts to the device orientation: in landscape the sticks sit on
- * the left/right edges (like a console), in portrait they are stacked.
+ * It is an overlay: the controls are see-through ([opacity]) and sit at
+ * the edges like a handheld's, and nothing but the controls themselves
+ * takes touches, so the game stays visible - and touchable - in between.
+ * In landscape the left hand gets the left stick and the D-pad, the right
+ * hand the face buttons and the right stick; in portrait they all sit in
+ * the lower half, under the game.
  */
 @Composable
 fun VirtualGamepad(
     state: GamepadState,
     landscape: Boolean,
     modifier: Modifier = Modifier,
+    opacity: Float = 0.6f,
     onHaptic: (String) -> Unit = {},
 ) {
-    if (landscape) {
-        Row(
-            modifier = modifier.fillMaxSize().padding(16.dp),
-            horizontalArrangement = Arrangement.SpaceBetween,
-            verticalAlignment = Alignment.CenterVertically,
-        ) {
-            Column(horizontalAlignment = Alignment.CenterHorizontally) {
-                AnalogStick(state.leftX, state.leftY, { x, y ->
-                    state.leftX = x; state.leftY = y
-                }, { state.leftX = 0f; state.leftY = 0f })
-                Spacer(Modifier.height(12.dp))
-                DPad(state)
-            }
-            Column(horizontalAlignment = Alignment.CenterHorizontally) {
-                FaceButtons(state, onHaptic)
-                Spacer(Modifier.height(12.dp))
-                AnalogStick(state.rightX, state.rightY, { x, y ->
-                    state.rightX = x; state.rightY = y
-                }, { state.rightX = 0f; state.rightY = 0f })
-            }
+    val leftStick = @Composable {
+        AnalogStick(state.leftX, state.leftY, { x, y ->
+            state.leftX = x; state.leftY = y
+        }, { state.leftX = 0f; state.leftY = 0f })
+    }
+    val rightStick = @Composable {
+        AnalogStick(state.rightX, state.rightY, { x, y ->
+            state.rightX = x; state.rightY = y
+        }, { state.rightX = 0f; state.rightY = 0f })
+    }
+    val leftShoulder = @Composable {
+        Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+            ShoulderButton("LT", state.leftTrigger > 0f, { state.leftTrigger = 1f }, { state.leftTrigger = 0f })
+            ShoulderButton("LB", state.l1, { state.l1 = true }, { state.l1 = false })
         }
-    } else {
-        Column(
-            modifier = modifier.fillMaxSize().padding(12.dp),
-            verticalArrangement = Arrangement.SpaceEvenly,
-            horizontalAlignment = Alignment.CenterHorizontally,
-        ) {
-            Row(
-                modifier = Modifier.fillMaxWidth(),
-                horizontalArrangement = Arrangement.SpaceEvenly,
-                verticalAlignment = Alignment.CenterVertically,
+    }
+    val rightShoulder = @Composable {
+        Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+            ShoulderButton("RB", state.r1, { state.r1 = true }, { state.r1 = false })
+            ShoulderButton("RT", state.rightTrigger > 0f, { state.rightTrigger = 1f }, { state.rightTrigger = 0f })
+        }
+    }
+    val middle = @Composable {
+        Row(horizontalArrangement = Arrangement.spacedBy(16.dp)) {
+            ShoulderButton("SELECT", state.select, { state.select = true }, { state.select = false }, small = true)
+            ShoulderButton("START", state.start, { state.start = true }, { state.start = false }, small = true)
+        }
+    }
+
+    Box(modifier.fillMaxSize().alpha(opacity).padding(horizontal = 20.dp, vertical = 12.dp)) {
+        if (landscape) {
+            Box(Modifier.align(Alignment.TopStart)) { leftShoulder() }
+            Box(Modifier.align(Alignment.TopEnd)) { rightShoulder() }
+            Column(
+                Modifier.align(Alignment.BottomStart),
+                horizontalAlignment = Alignment.CenterHorizontally,
+                verticalArrangement = Arrangement.spacedBy(8.dp),
             ) {
-                AnalogStick(state.leftX, state.leftY, { x, y ->
-                    state.leftX = x; state.leftY = y
-                }, { state.leftX = 0f; state.leftY = 0f })
+                leftStick()
                 DPad(state)
-                AnalogStick(state.rightX, state.rightY, { x, y ->
-                    state.rightX = x; state.rightY = y
-                }, { state.rightX = 0f; state.rightY = 0f })
             }
-            FaceButtons(state, onHaptic)
+            Column(
+                Modifier.align(Alignment.BottomEnd),
+                horizontalAlignment = Alignment.CenterHorizontally,
+                verticalArrangement = Arrangement.spacedBy(8.dp),
+            ) {
+                FaceButtons(state, onHaptic)
+                rightStick()
+            }
+            Box(Modifier.align(Alignment.BottomCenter)) { middle() }
+        } else {
+            Column(
+                Modifier.align(Alignment.BottomCenter).fillMaxWidth(),
+                verticalArrangement = Arrangement.spacedBy(12.dp),
+            ) {
+                Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
+                    leftShoulder()
+                    rightShoulder()
+                }
+                Row(
+                    Modifier.fillMaxWidth(),
+                    horizontalArrangement = Arrangement.SpaceBetween,
+                    verticalAlignment = Alignment.CenterVertically,
+                ) {
+                    DPad(state)
+                    FaceButtons(state, onHaptic)
+                }
+                Row(
+                    Modifier.fillMaxWidth(),
+                    horizontalArrangement = Arrangement.SpaceBetween,
+                    verticalAlignment = Alignment.CenterVertically,
+                ) {
+                    leftStick()
+                    middle()
+                    rightStick()
+                }
+            }
         }
+    }
+}
+
+/** A shoulder button or trigger, or (small) Select and Start. */
+@Composable
+private fun ShoulderButton(label: String, pressed: Boolean, onDown: () -> Unit, onUp: () -> Unit, small: Boolean = false) {
+    Box(
+        modifier = Modifier
+            .size(width = if (small) 64.dp else 72.dp, height = if (small) 30.dp else 40.dp)
+            .clip(RoundedCornerShape(if (small) 15.dp else 12.dp))
+            .background(if (pressed) Color.White.copy(alpha = 0.6f) else Color.Black.copy(alpha = 0.35f))
+            .border(1.5.dp, Color.White.copy(alpha = 0.55f), RoundedCornerShape(if (small) 15.dp else 12.dp))
+            .pointerInput(Unit) {
+                detectTapGestures(
+                    onPress = {
+                        onDown()
+                        tryAwaitRelease()
+                        onUp()
+                    },
+                )
+            },
+        contentAlignment = Alignment.Center,
+    ) {
+        Text(label, color = Color.White, fontSize = if (small) 10.sp else 13.sp)
     }
 }
 
@@ -167,7 +234,7 @@ private fun AnalogStick(
         modifier = Modifier
             .size(radius * 2)
             .clip(CircleShape)
-            .background(Color.White.copy(alpha = 0.12f))
+            .background(Color.Black.copy(alpha = 0.3f))
             .pointerInput(Unit) {
                 detectDragGestures(
                     onDragStart = { center = it },
@@ -234,22 +301,22 @@ private val UbuntuOrangeKnob = Color(0xFFE95420)
 private fun DPad(state: GamepadState) {
     Box(modifier = Modifier.size(150.dp)) {
         PadButton(
-            label = "UP", pressed = state.dpadUp,
+            label = "▲", pressed = state.dpadUp,
             modifier = Modifier.align(Alignment.TopCenter).size(50.dp),
             onDown = { state.dpadUp = true }, onUp = { state.dpadUp = false },
         )
         PadButton(
-            label = "DOWN", pressed = state.dpadDown,
+            label = "▼", pressed = state.dpadDown,
             modifier = Modifier.align(Alignment.BottomCenter).size(50.dp),
             onDown = { state.dpadDown = true }, onUp = { state.dpadDown = false },
         )
         PadButton(
-            label = "L", pressed = state.dpadLeft,
+            label = "◀", pressed = state.dpadLeft,
             modifier = Modifier.align(Alignment.CenterStart).size(50.dp),
             onDown = { state.dpadLeft = true }, onUp = { state.dpadLeft = false },
         )
         PadButton(
-            label = "R", pressed = state.dpadRight,
+            label = "▶", pressed = state.dpadRight,
             modifier = Modifier.align(Alignment.CenterEnd).size(50.dp),
             onDown = { state.dpadRight = true }, onUp = { state.dpadRight = false },
         )
@@ -323,7 +390,8 @@ private fun PadButton(
     Box(
         modifier = modifier
             .clip(RoundedCornerShape(10.dp))
-            .background(if (pressed) Color.White.copy(alpha = 0.55f) else Color.White.copy(alpha = 0.18f))
+            .background(if (pressed) Color.White.copy(alpha = 0.55f) else Color.Black.copy(alpha = 0.35f))
+            .border(1.5.dp, Color.White.copy(alpha = 0.5f), RoundedCornerShape(10.dp))
             .pointerInput(Unit) {
                 detectTapGestures(
                     onPress = {
@@ -335,6 +403,6 @@ private fun PadButton(
             },
         contentAlignment = Alignment.Center,
     ) {
-        Text(label.takeLast(1), color = Color.White, fontSize = 14.sp)
+        Text(label, color = Color.White, fontSize = 16.sp)
     }
 }

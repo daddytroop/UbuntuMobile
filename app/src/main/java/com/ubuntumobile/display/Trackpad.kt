@@ -335,7 +335,7 @@ private fun TrackpadBar(connected: Boolean, actions: DisplayActions, onShowOnPho
         StatusDot(connected)
         Spacer(Modifier.width(8.dp))
         Column(Modifier.weight(1f)) {
-            Text("Ubuntu", color = Color.White, fontSize = 15.sp, fontWeight = FontWeight.Medium)
+            Text("Mobuntu", color = Color.White, fontSize = 15.sp, fontWeight = FontWeight.Medium)
             Text("On your monitor", color = Color.White.copy(alpha = 0.6f), fontSize = 11.sp)
         }
         IconButton(onClick = actions.onOpenTerminal) {
@@ -351,7 +351,7 @@ private fun TrackpadBar(connected: Boolean, actions: DisplayActions, onShowOnPho
             DropdownMenu(expanded = menu, onDismissRequest = { menu = false }) {
                 MenuEntry("Show on the phone", Icons.Default.PhoneAndroid) { menu = false; onShowOnPhone() }
                 MenuEntry("Files", Icons.Default.Folder) { menu = false; actions.onOpenFiles() }
-                MenuEntry("Ubuntu Software", Icons.Default.ShoppingBag) { menu = false; actions.onOpenStore() }
+                MenuEntry("Software", Icons.Default.ShoppingBag) { menu = false; actions.onOpenStore() }
                 MenuEntry("Reconnect display", Icons.Default.Refresh) { menu = false; actions.onReconnect() }
             }
         }

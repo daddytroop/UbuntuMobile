@@ -12,6 +12,7 @@ coroutines = "1.10.2"
 splashscreen = "1.0.1"
 profileinstaller = "1.4.1"
 junit = "4.13.2"
+androidsvg = "1.4"
 
 [libraries]
 androidx-core-ktx = { group = "androidx.core", name = "core-ktx", version.ref = "coreKtx" }
@@ -33,6 +34,7 @@ androidx-core-splashscreen = { group = "androidx.core", name = "core-splashscree
 androidx-profileinstaller = { group = "androidx.profileinstaller", name = "profileinstaller", version.ref = "profileinstaller" }
 kotlinx-coroutines-android = { group = "org.jetbrains.kotlinx", name = "kotlinx-coroutines-android", version.ref = "coroutines" }
 kotlinx-serialization-json = { group = "org.jetbrains.kotlinx", name = "kotlinx-serialization-json", version.ref = "serialization" }
+androidsvg = { group = "com.caverock", name = "androidsvg-aar", version.ref = "androidsvg" }
 junit = { group = "junit", name = "junit", version.ref = "junit" }
 
 [plugins]

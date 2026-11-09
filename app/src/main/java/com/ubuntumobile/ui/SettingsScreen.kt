@@ -101,7 +101,7 @@ fun SettingsScreen(
                     Column(Modifier.weight(1f)) {
                         Text("Apps, look and app stores", fontSize = 15.sp, fontWeight = FontWeight.Medium, color = UbuntuPalette.LightOnSurface)
                         Text(
-                            "Go through setup again: light or full, light or dark, Flathub on or off",
+                            "Go through setup again: apps, light or dark, wallpaper, developer tools, Flathub",
                             fontSize = 12.sp,
                             color = UbuntuPalette.LightOnSurfaceVariant,
                         )
@@ -210,7 +210,7 @@ fun SettingsScreen(
             }
 
             Card("About", null) {
-                AboutLine("UbuntuMobile", versionName)
+                AboutLine("Mobuntu", versionName)
                 AboutLine("Linux", ubuntuVersion)
                 AboutLine("Desktop", "XFCE on Xvnc")
             }

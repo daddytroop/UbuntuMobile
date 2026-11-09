@@ -28,10 +28,15 @@ TOTAL=1
 [ "$LINX_FLATHUB" = 1 ] && [ -n "$LINX_FLATPAKS" ] && TOTAL=$((TOTAL + 1))
 N=0
 FAILED=""
-step() { N=$((N + 1)); echo "STEP $N/$TOTAL $1"; }
+# How far each step's download and install are, for the app's progress bar:
+# apt's status lines ("dlstatus:3:42.5:...", "pmstatus:...") and Flatpak's
+# percentages ("flatpak:42%").
+export LINX_APT_STATUS=/tmp/linx-setup-progress
+step() { N=$((N + 1)); : >"$LINX_APT_STATUS"; echo "STEP $N/$TOTAL $1"; }
 
 step "Sound and the Ubuntu look"
 /usr/local/lib/linx/apt-install.sh pulseaudio yaru-theme-gtk yaru-theme-icon fonts-ubuntu \
+  xfce4-whiskermenu-plugin \
   >/tmp/linx-setup-base.log 2>&1 || FAILED="$FAILED base"
 
 if [ "$LINX_BROWSER" = 1 ]; then
@@ -51,8 +56,10 @@ if [ "$LINX_FLATHUB" = 1 ]; then
   if [ -n "$LINX_FLATPAKS" ]; then
     step "Apps from Flathub"
     # shellcheck disable=SC2086
-    flatpak install -y --noninteractive flathub $LINX_FLATPAKS >/tmp/linx-setup-flatpaks.log 2>&1 \
-      || FAILED="$FAILED flatpaks"
+    flatpak install -y --noninteractive flathub $LINX_FLATPAKS 2>&1 \
+      | tee /tmp/linx-setup-flatpaks.log | tr '\r' '\n' \
+      | grep --line-buffered -o '[0-9]\+%' | sed -u 's/^/flatpak:/' >>"$LINX_APT_STATUS"
+    [ "${PIPESTATUS[0]}" = 0 ] || FAILED="$FAILED flatpaks"
   fi
 fi
 

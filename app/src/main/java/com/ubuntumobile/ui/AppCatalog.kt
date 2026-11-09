@@ -17,6 +17,8 @@ data class AppEntry(
     val accent: Long = 0xFFE95420,
     /** One line shown under the name in the launcher. */
     val summary: String = "",
+    /** The app's icon, a PNG or SVG path inside the container; null draws a symbol. */
+    val iconPath: String? = null,
 ) {
     enum class Category { TERMINAL, LINUX, SYSTEM, FLATPAK }
 }
@@ -29,6 +31,31 @@ data class AppEntry(
  * installs from Mozilla's repository once the desktop is up.
  */
 object AppCatalog {
+
+    /** The phone app's own screens, which are always in the launcher. */
+    val device: List<AppEntry> get() = builtin.filter { it.command.isEmpty() }
+
+    /**
+     * The launcher's apps from linx-apps.py's lines ("id|name|comment|kind|icon"):
+     * everything the desktop's menu has, started the way its entry says.
+     */
+    fun parseInstalled(output: String): List<AppEntry> = output.lines().mapNotNull { line ->
+        val parts = line.split("|")
+        if (parts.size < 5 || parts[0].isBlank()) return@mapNotNull null
+        AppEntry(
+            id = parts[0],
+            name = parts[1].ifBlank { parts[0] },
+            summary = parts[2],
+            command = listOf("/usr/bin/python3", "/usr/local/lib/linx/linx-apps.py", "--run", parts[0]),
+            category = when (parts[3]) {
+                "flatpak" -> AppEntry.Category.FLATPAK
+                "system" -> AppEntry.Category.SYSTEM
+                else -> AppEntry.Category.LINUX
+            },
+            accent = 0xFF77216F,
+            iconPath = parts[4].ifBlank { null },
+        )
+    }
 
     val builtin: List<AppEntry> = listOf(
         AppEntry(
@@ -78,7 +105,7 @@ object AppCatalog {
         ),
         AppEntry(
             id = "store",
-            name = "Ubuntu Software",
+            name = "Software",
             summary = "Install desktop apps",
             command = emptyList(),
             category = AppEntry.Category.SYSTEM,

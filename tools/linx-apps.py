@@ -1,0 +1,205 @@
+#!/usr/bin/env python3
+"""The desktop's applications, for the app's launcher. Runs inside the container.
+
+    linx-apps.py                  one line per app: id|name|comment|kind|icon
+    linx-apps.py --run ID         start the app the way its menu entry says
+
+The list is what the desktop's own menu shows - every installed .desktop
+entry that is meant to be seen, from Ubuntu packages and from Flathub -
+minus XFCE's settings dialogs and the plumbing that comes with the image
+(xterm, Openbox, the VNC server). "kind" is "app", "system" or "flatpak". "icon" is
+the path of the best picture found in the icon themes (a PNG where there
+is one, else an SVG), or empty.
+"""
+
+import os
+import shlex
+import sys
+
+APP_DIRS = [
+    os.path.expanduser("~/.local/share/applications"),
+    "/var/lib/flatpak/exports/share/applications",
+    "/usr/local/share/applications",
+    "/usr/share/applications",
+]
+ICON_BASES = [
+    os.path.expanduser("~/.local/share/icons"),
+    "/var/lib/flatpak/exports/share/icons",
+    "/usr/local/share/icons",
+    "/usr/share/icons",
+]
+THEMES = ["Yaru", "hicolor", "Adwaita"]
+# Biggest first: the launcher draws them at about 48dp, which is 150 pixels
+# on most phones.
+SIZES = ["256x256@2x", "256x256", "128x128@2x", "128x128", "scalable", "96x96",
+         "64x64@2x", "64x64", "48x48@2x", "48x48", "32x32"]
+
+# Part of the image rather than something the user chose; or a duplicate of
+# another entry (XFCE's "preferred application" ones).
+HIDDEN = {
+    "debian-uxterm", "debian-xterm", "openbox", "tint2", "tint2conf", "x11vnc",
+    "feh", "xfa", "xfe", "xfi", "xfp", "xfw", "xfce4-about", "xfce4-run",
+    "xfce4-session-logout", "xfce4-mail-reader", "xfce4-web-browser",
+    "xfce4-file-manager", "xfce4-terminal-emulator", "thunar-bulk-rename",
+    "thunar-settings", "org.xfce.mousepad-settings", "org.gnome.Evince-previewer",
+    "panel-desktop-handler", "panel-preferences", "xfce4-appfinder",
+}
+
+# Plainer names for the image's own apps, as on a phone.
+NAMES = {
+    "xfce4-terminal": "Terminal",
+    "thunar": "Files",
+    "xfce-settings-manager": "Settings",
+    "org.xfce.mousepad": "Text Editor",
+    "org.gnome.Evince": "Document Viewer",
+    "xfce4-taskmanager": "Task Manager",
+}
+# Filed under System by their packages, but used every day.
+NAMES_EVERYDAY = {"xfce4-terminal", "thunar"}
+
+
+def read_entry(path):
+    """The [Desktop Entry] group of a .desktop file, unlocalised keys only."""
+    entry = {}
+    group = None
+    try:
+        with open(path, encoding="utf-8", errors="replace") as f:
+            for line in f:
+                line = line.strip()
+                if line.startswith("["):
+                    group = line
+                elif group == "[Desktop Entry]" and "=" in line and not line.startswith("#"):
+                    key, value = line.split("=", 1)
+                    key = key.strip()
+                    if "[" not in key:
+                        entry.setdefault(key, value.strip())
+    except OSError:
+        pass
+    return entry
+
+
+def entries():
+    """id -> (path, entry), the first directory winning as in the menu spec."""
+    found = {}
+    for d in APP_DIRS:
+        try:
+            names = sorted(os.listdir(d))
+        except OSError:
+            continue
+        for name in names:
+            if not name.endswith(".desktop"):
+                continue
+            app_id = name[: -len(".desktop")]
+            if app_id not in found:
+                found[app_id] = (os.path.join(d, name), read_entry(os.path.join(d, name)))
+    return found
+
+
+def shown(app_id, e):
+    if app_id in HIDDEN or app_id.startswith("python3"):
+        return False
+    if e.get("Type") != "Application" or not e.get("Exec") or not e.get("Name"):
+        return False
+    if e.get("NoDisplay", "").lower() == "true" or e.get("Hidden", "").lower() == "true":
+        return False
+    only = [x for x in e.get("OnlyShowIn", "").split(";") if x]
+    if only and "XFCE" not in only:
+        return False
+    if "XFCE" in e.get("NotShowIn", "").split(";"):
+        return False
+    cats = e.get("Categories", "").split(";")
+    # XFCE's own settings dialogs: the launcher has one Settings entry.
+    if "X-XFCE-SettingsDialog" in cats or "X-XFCE-SystemSettings" in cats:
+        return False
+    return True
+
+
+def icon_index():
+    """Icon name -> best path, from one walk over the themes' app folders."""
+    best = {}
+    for theme in THEMES:
+        for base in ICON_BASES:
+            for rank, size in enumerate(SIZES):
+                for sub in ("apps", "applications", "categories", "mimetypes"):
+                    d = os.path.join(base, theme, size, sub)
+                    try:
+                        names = os.listdir(d)
+                    except OSError:
+                        continue
+                    for n in names:
+                        stem, ext = os.path.splitext(n)
+                        if ext not in (".png", ".svg"):
+                            continue
+                        score = (THEMES.index(theme), rank)
+                        if stem not in best or score < best[stem][0]:
+                            best[stem] = (score, os.path.join(d, n))
+    return {k: v[1] for k, v in best.items()}
+
+
+def find_icon(name, index):
+    if not name:
+        return ""
+    if name.startswith("/"):
+        return name if os.path.isfile(name) else ""
+    if name in index:
+        return index[name]
+    for ext in (".png", ".svg", ".xpm"):
+        p = "/usr/share/pixmaps/" + name + ext
+        if os.path.isfile(p) and ext != ".xpm":
+            return p
+    return ""
+
+
+def real(path):
+    # Flathub's exported icons are symlinks to absolute container paths,
+    # which the app (reading the files from outside) could not follow.
+    return os.path.realpath(path) if path else ""
+
+
+def clean(text):
+    return text.replace("|", "/").replace("\n", " ")
+
+
+def list_apps():
+    index = icon_index()
+    rows = []
+    for app_id, (path, e) in entries().items():
+        if not shown(app_id, e):
+            continue
+        cats = e.get("Categories", "").split(";")
+        if path.startswith("/var/lib/flatpak/"):
+            kind = "flatpak"
+        elif ("System" in cats or "Settings" in cats) and app_id not in NAMES_EVERYDAY:
+            kind = "system"
+        else:
+            kind = "app"
+        name = NAMES.get(app_id, e["Name"])
+        rows.append((name.lower(), "|".join([
+            app_id, clean(name), clean(e.get("Comment", e.get("GenericName", ""))),
+            kind, real(find_icon(e.get("Icon", ""), index)),
+        ])))
+    for _, line in sorted(rows):
+        print(line)
+
+
+def run(app_id):
+    found = entries().get(app_id)
+    if not found:
+        sys.exit("no such application: " + app_id)
+    e = found[1]
+    # The field codes (%f, %U, ...) stand for files to open; there are none.
+    argv = [a for a in shlex.split(e["Exec"]) if not (len(a) == 2 and a[0] == "%")]
+    argv = [a.replace("%%", "%") for a in argv]
+    if e.get("Terminal", "").lower() == "true":
+        argv = ["xfce4-terminal", "-x"] + argv
+    path = e.get("Path")
+    if path and os.path.isdir(path):
+        os.chdir(path)
+    os.execvp(argv[0], argv)
+
+
+if __name__ == "__main__":
+    if len(sys.argv) == 3 and sys.argv[1] == "--run":
+        run(sys.argv[2])
+    else:
+        list_apps()

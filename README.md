@@ -1,7 +1,11 @@
-# UbuntuMobile
+# Mobuntu
 
 [![Build APK](https://github.com/daddytroop/UbuntuMobile/actions/workflows/build-apk.yml/badge.svg)](https://github.com/daddytroop/UbuntuMobile/actions/workflows/build-apk.yml)
 **A complete Ubuntu 26.04 Linux system that runs on an Android phone.**
+
+Light when you want it, a full desktop when you dock it. (The app was called
+UbuntuMobile; the repository and the Android package id keep that name so
+updates install over older versions.)
 
 One APK gives you a real Linux userland — bash, apt, GCC, Python, Git — and a
 full-screen XFCE desktop with Firefox and an app store for Ubuntu's desktop
@@ -123,16 +127,22 @@ Linux should be (`OnboardingScreen.kt`), while Ubuntu unpacks behind it:
 - **How much**: Light (the desktop, terminal and files), Standard (adds
   Firefox and a document viewer) or Full (adds LibreOffice, GIMP and VLC),
   with the download each means.
-- **Look**: light or dark, one of Yaru's eight accent colours, and the
-  desktop's size on the phone (a monitor always gets a full-size desktop).
+- **Look**: light or dark, one of Yaru's eight accent colours, a
+  wallpaper, and the desktop's size on the phone (a monitor always gets a
+  full-size desktop).
 - **Apps**: the starting set, ticked by the choice above, to add to or
   take from.
+- **For developers**: popular open-source tools from GitHub that Ubuntu
+  packages - Git, GitHub CLI, Neovim, lazygit, btop, fastfetch, ripgrep,
+  fzf, bat, zoxide, tmux - each on its own or all at once.
 - **App stores**: Ubuntu's archive always; Flathub on or off, with a few of
   its apps to start with.
 
 The choices go to `/etc/linx/setup.conf`, and once the desktop is up
 `linx-setup.sh` installs them in the background - sound and Ubuntu's look
-always, then the rest - while the side menu shows which step it is on. It
+always, then the rest - while a card at the top of the desktop shows the
+step, what apt or Flatpak is doing and a progress bar (`SetupBanner.kt`,
+from apt's `APT::Status-Fd` lines). If it fails, tapping the card retries. It
 copies the file to `setup.done` when everything is in, so an interrupted
 setup carries on next time. Settings' "Set up" goes through it again: the
 look changes at once, and only what is missing is installed.
@@ -169,11 +179,28 @@ borders drawn for the app by `make-xfwm4-theme.py` to match - a flat title
 bar with round minimise and maximise buttons and a close button in the
 accent colour - at 1x for a monitor and 2x for the phone.
 
+### Wallpapers
+Six wallpapers (Aubergine, Aurora, Dunes, Ridges, Graphite, Dawn), drawn by
+the app with Android's canvas (`Wallpapers.kt`) rather than shipped as
+pictures: the same code draws onboarding's previews and the 2048-pixel
+files it writes to `/usr/local/share/linx/wallpapers`, where `linx-look.sh`
+sets the chosen one for xfdesktop (and feh under Openbox).
+
+### Finding apps
+Every installed app is in two places. The app's own launcher ("All apps")
+reads the desktop's menu entries through `linx-apps.py` - Ubuntu packages
+and Flathub apps alike, with their own icons (PNG, or SVG drawn with
+AndroidSVG) - and is read afresh each time it opens, so what setup or the
+store just installed is there. The panel's app button is Whisker Menu
+(`linx-panel.sh`, installed by setup): a search field, favourites and every
+app in one list, instead of XFCE's categories menu that hid apps two levels
+down.
+
 ### The app around the desktop
 The desktop fills the screen; the status and navigation bars hide until
 swiped in. A small floating button at the right edge (drag it up or down)
 opens a side menu with everything that is the app's rather than Linux's: the
-app grid, Firefox, Terminal, Files, Ubuntu Software, the keyboard, the
+app grid, Firefox, Terminal, Files, Software, the keyboard, the
 gamepad, docking, reconnecting and **Settings**. Settings has the desktop
 size (Compact, Standard - the default, sized for a 6-inch phone - and
 Large; the desktop resizes as soon as it is changed), full screen on or off,
@@ -222,9 +249,12 @@ driven from the phone. A USB or Bluetooth mouse works as a real mouse
 
 ### Virtual gamepad
 An Xbox-layout on-screen controller (dual sticks, D-pad, ABXY, triggers,
-shoulders) that adapts between portrait and landscape. State is streamed to
-the container, where `gamepad-helper.py` turns it into a virtual uinput
-joystick.
+shoulders, Select and Start) drawn over the desktop: see-through (a slider
+sets how much, and is remembered), with the controls at the edges like a
+handheld's, and only the controls take touches, so the game stays visible
+and touchable in between. Docked, the game is on the monitor and the pad
+fills the phone's screen instead. State is streamed to the container, where
+`gamepad-helper.py` turns it into a virtual uinput joystick.
 
 > **Note:** `/dev/uinput` is not exposed to unprivileged apps on most Android
 > devices, so the Linux-side virtual pad only works on rooted devices or

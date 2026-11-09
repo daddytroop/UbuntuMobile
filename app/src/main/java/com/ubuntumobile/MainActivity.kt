@@ -29,6 +29,7 @@ import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Close
 import androidx.compose.material.icons.filled.Gamepad
+import androidx.compose.material.icons.filled.Opacity
 import androidx.compose.material.icons.filled.Terminal
 import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.Icon
@@ -412,6 +413,8 @@ fun UbuntuApp(
     var browserInstalled by remember { mutableStateOf<Boolean?>(null) }
     var browserBusy by remember { mutableStateOf(false) }
     var browserNote by remember { mutableStateOf<String?>(null) }
+    var setupStatus by remember { mutableStateOf<com.ubuntumobile.display.SetupStatus?>(null) }
+    var gamepadShown by remember { mutableStateOf(false) }
 
     // Linux's sound, played on the phone. The player waits for the stream
     // by itself; the server is started from the container (linx-audio.sh)
@@ -444,18 +447,25 @@ fun UbuntuApp(
         browserNote = "Setting up your apps…"
         vm.paths.appendLog("setting up: ${setupConf.readText().lines().filter { it.startsWith("LINX_") }}")
         val log = java.io.File(vm.paths.sharedTmpDir, "linx-setup.log")
+        val progressFile = java.io.File(vm.paths.sharedTmpDir, "linx-setup-progress")
         log.delete()
-        // The script's "STEP n/total what" lines tell how far it got.
+        progressFile.delete()
+        setupStatus = com.ubuntumobile.display.SetupStatus(0, 1, "Starting", "", 0f)
+        // The script's "STEP n/total what" lines, and apt's and Flatpak's
+        // progress, tell how far it got.
         val progress = scope.launch(Dispatchers.IO) {
             while (true) {
-                delay(1500)
-                val step = try {
-                    log.readLines().lastOrNull { it.startsWith("STEP ") }
+                delay(1000)
+                val status = try {
+                    com.ubuntumobile.display.SetupStatus.parse(
+                        log.readLines(),
+                        if (progressFile.isFile) progressFile.readLines().takeLast(20) else emptyList(),
+                    )
                 } catch (_: Exception) {
                     null
                 } ?: continue
-                val parts = step.removePrefix("STEP ").split(" ", limit = 2)
-                browserNote = "Setting up (${parts[0].replace("/", " of ")}): ${parts.getOrElse(1) { "" }}…"
+                setupStatus = status
+                browserNote = "Setting up (${status.step} of ${status.total}): ${status.title}…"
             }
         }
         val out = withContext(Dispatchers.IO) {
@@ -463,10 +473,11 @@ fun UbuntuApp(
         }
         progress.cancel()
         browserInstalled = firefoxBinary.exists()
-        browserNote = when {
-            setupDone() -> null
-            else -> "Setup did not finish; check the connection and try again"
-        }
+        val done = setupDone()
+        browserNote = if (done) null else "Setup did not finish; check the connection and try again"
+        setupStatus = if (done) null else setupStatus?.copy(failed = true)
+            ?: com.ubuntumobile.display.SetupStatus(0, 1, "", "", 0f, failed = true)
+        vm.refreshInstalledApps()
         vm.paths.appendLog("setup: ${out.trim().lines().lastOrNull()}")
         withContext(Dispatchers.IO) {
             vm.runtime.shell("/usr/local/lib/linx/linx-look.sh", 120)
@@ -477,7 +488,13 @@ fun UbuntuApp(
     LaunchedEffect(session.connected, onboarded) {
         if (!session.connected || !onboarded) return@LaunchedEffect
         browserInstalled = firefoxBinary.exists()
-        withContext(Dispatchers.IO) { startAudio() }
+        withContext(Dispatchers.IO) {
+            startAudio()
+            // The wallpapers are drawn by the app (once per design change).
+            if (com.ubuntumobile.ui.Wallpaper.ensure(vm.paths.root) && setupDone()) {
+                vm.runtime.shell("/usr/local/lib/linx/linx-look.sh", 120)
+            }
+        }
         if (!setupDone()) runSetup()
     }
 
@@ -491,6 +508,7 @@ fun UbuntuApp(
         scope.launch(Dispatchers.IO) {
             setupConf.parentFile?.mkdirs()
             setupConf.writeText(choices.toConf())
+            com.ubuntumobile.ui.Wallpaper.ensure(vm.paths.root)
             withContext(Dispatchers.Main) {
                 onboarded = true
                 // Already up: the look changes at once, the rest installs.
@@ -694,12 +712,18 @@ fun UbuntuApp(
         Screen.ONBOARDING -> {}
 
         Screen.DESKTOP -> {
+            // Everything the desktop's menu has, read afresh each time, so
+            // what was just installed is there; until the first read, the
+            // apps that come with the image.
+            LaunchedEffect(Unit) { vm.refreshInstalledApps() }
             val apps = remember(state.installedApps) {
-                (AppCatalog.builtin + state.installedApps).distinctBy { it.id }
+                if (state.installedApps.isEmpty()) AppCatalog.builtin
+                else state.installedApps + AppCatalog.device
             }
             UbuntuShell(
                 state = state,
                 apps = apps,
+                iconRoot = vm.paths.root,
                 wide = wide,
                 onLaunchApp = { entry ->
                     when (entry.id) {
@@ -782,53 +806,10 @@ fun UbuntuApp(
         }
 
         Screen.GAMEPAD -> {
-            val pad = remember { GamepadState() }
-            val bridge = remember { GamepadBridge(vm.runtime, vm.paths) }
-            var bridgeActive by remember { mutableStateOf(false) }
-
+            // The gamepad is an overlay on the desktop now.
             LaunchedEffect(Unit) {
-                bridgeActive = bridge.start()
-            }
-            DisposableEffect(Unit) {
-                onDispose {
-                    bridge.stop()
-                    pad.reset()
-                }
-            }
-            // Push the controller state into the container whenever it changes.
-            LaunchedEffect(pad.leftX, pad.leftY, pad.rightX, pad.rightY,
-                pad.leftTrigger, pad.rightTrigger, pad.pressedButtons()) {
-                bridge.pushState(pad)
-            }
-
-            Box(Modifier.fillMaxSize().background(Color(0xFF1C1B1A))) {
-                VirtualGamepad(
-                    state = pad,
-                    landscape = landscape,
-                    modifier = Modifier.systemBarsPadding(),
-                )
-                if (!bridgeActive) {
-                    Text(
-                        "On-screen controls only \u2014 this device does not expose /dev/uinput, " +
-                            "so Linux games cannot see a virtual pad.",
-                        color = Color.White.copy(alpha = 0.75f),
-                        fontSize = 12.sp,
-                        modifier = Modifier
-                            .align(Alignment.TopCenter)
-                            .padding(24.dp),
-                        textAlign = TextAlign.Center,
-                    )
-                }
-                IconButton(
-                    onClick = { screen = Screen.DISPLAY },
-                    modifier = Modifier
-                        .align(Alignment.TopEnd)
-                        .padding(12.dp)
-                        .clip(RoundedCornerShape(12.dp))
-                        .background(Color.Black.copy(alpha = 0.4f)),
-                ) {
-                    Icon(Icons.Default.Close, contentDescription = "Close", tint = Color.White)
-                }
+                gamepadShown = true
+                screen = Screen.DISPLAY
             }
         }
 
@@ -847,7 +828,7 @@ fun UbuntuApp(
                 onOpenTerminal = { launchOnDisplay(listOf("/usr/bin/xfce4-terminal")) },
                 onOpenFiles = { launchOnDisplay(listOf("/usr/bin/thunar")) },
                 onOpenStore = { screen = Screen.STORE },
-                onOpenGamepad = { screen = Screen.GAMEPAD },
+                onOpenGamepad = { gamepadShown = true },
                 onShowKeyboard = { showSoftKeyboard(view, context) },
                 onReconnect = { session.retry() },
                 onUseMonitor = if (externalDisplay != null && !docked) ({ preferMonitor = true }) else null,
@@ -860,6 +841,8 @@ fun UbuntuApp(
                 },
                 onOpenSettings = { screen = Screen.SETTINGS },
                 browserNote = browserNote,
+                setup = setupStatus,
+                onRetrySetup = { if (!browserBusy) scope.launch { runSetup() } },
             )
             Box(Modifier.fillMaxSize().background(Color.Black)) {
                 // Whatever the soft keyboard commits is typed into X and
@@ -887,15 +870,121 @@ fun UbuntuApp(
                         onShowOnPhone = { preferMonitor = false },
                         modifier = insets,
                     )
+                    com.ubuntumobile.display.SetupBanner(
+                        setupStatus,
+                        actions.onRetrySetup,
+                        insets.align(Alignment.TopCenter),
+                    )
+                    // Docked, the game is on the monitor and the phone is
+                    // the controller: the pad takes the whole screen.
+                    if (gamepadShown) {
+                        GamepadOverlay(vm, landscape, overGame = false, onClose = { gamepadShown = false }, modifier = insets)
+                    }
                 } else {
                     DisplayScreen(
                         session = session,
                         actions = actions,
                         onCanvasSize = { canvasSize = it },
                         modifier = insets,
+                        overlay = {
+                            if (gamepadShown) {
+                                GamepadOverlay(vm, landscape, overGame = true, onClose = { gamepadShown = false })
+                            }
+                        },
                     )
                 }
             }
+        }
+    }
+}
+
+/**
+ * The on-screen gamepad and its link into the container. Over the game
+ * ([overGame]) it is see-through and only its controls take touches; on a
+ * docked phone it is a controller filling the screen. A slider sets how
+ * see-through it is, and is remembered.
+ */
+@Composable
+private fun GamepadOverlay(
+    vm: UbuntuViewModel,
+    landscape: Boolean,
+    overGame: Boolean,
+    onClose: () -> Unit,
+    modifier: Modifier = Modifier,
+) {
+    val context = LocalContext.current
+    val prefs = remember { context.getSharedPreferences("settings", android.content.Context.MODE_PRIVATE) }
+    var opacity by remember { mutableStateOf(prefs.getFloat("gamepad_opacity", 0.55f)) }
+    val pad = remember { GamepadState() }
+    val bridge = remember { GamepadBridge(vm.runtime, vm.paths) }
+    var bridgeActive by remember { mutableStateOf(true) }
+
+    LaunchedEffect(Unit) {
+        bridgeActive = bridge.start()
+    }
+    DisposableEffect(Unit) {
+        onDispose {
+            bridge.stop()
+            pad.reset()
+        }
+    }
+    // Push the controller state into the container whenever it changes.
+    LaunchedEffect(pad.leftX, pad.leftY, pad.rightX, pad.rightY,
+        pad.leftTrigger, pad.rightTrigger, pad.pressedButtons()) {
+        bridge.pushState(pad)
+    }
+
+    Box(
+        modifier
+            .fillMaxSize()
+            .then(if (overGame) Modifier else Modifier.background(Color(0xFF1C1B1A))),
+    ) {
+        VirtualGamepad(
+            state = pad,
+            landscape = landscape,
+            opacity = if (overGame) opacity else 1f,
+            modifier = Modifier.systemBarsPadding(),
+        )
+        Row(
+            Modifier
+                .align(Alignment.TopCenter)
+                .systemBarsPadding()
+                .padding(top = 8.dp)
+                .clip(RoundedCornerShape(20.dp))
+                .background(Color.Black.copy(alpha = 0.45f))
+                .padding(horizontal = 6.dp),
+            verticalAlignment = Alignment.CenterVertically,
+        ) {
+            if (overGame) {
+                Icon(Icons.Default.Opacity, contentDescription = null, tint = Color.White.copy(alpha = 0.8f), modifier = Modifier.padding(start = 8.dp).size(18.dp))
+                androidx.compose.material3.Slider(
+                    value = opacity,
+                    onValueChange = { opacity = it },
+                    onValueChangeFinished = { prefs.edit().putFloat("gamepad_opacity", opacity).apply() },
+                    valueRange = 0.15f..1f,
+                    colors = androidx.compose.material3.SliderDefaults.colors(
+                        thumbColor = Color.White,
+                        activeTrackColor = Color.White.copy(alpha = 0.8f),
+                        inactiveTrackColor = Color.White.copy(alpha = 0.25f),
+                    ),
+                    modifier = Modifier.width(120.dp).height(36.dp),
+                )
+            }
+            IconButton(onClick = onClose, modifier = Modifier.size(40.dp)) {
+                Icon(Icons.Default.Close, contentDescription = "Hide the gamepad", tint = Color.White)
+            }
+        }
+        if (!bridgeActive) {
+            Text(
+                "On-screen controls only — this device does not expose /dev/uinput, " +
+                    "so Linux games cannot see a virtual pad.",
+                color = Color.White.copy(alpha = 0.75f),
+                fontSize = 12.sp,
+                modifier = Modifier
+                    .align(Alignment.Center)
+                    .padding(24.dp),
+                textAlign = TextAlign.Center,
+            )
         }
     }
 }

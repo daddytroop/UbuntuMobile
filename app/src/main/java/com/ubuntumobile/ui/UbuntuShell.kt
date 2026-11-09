@@ -1,5 +1,6 @@
 package com.ubuntumobile.ui
 
+import androidx.compose.foundation.Image
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
@@ -43,6 +44,7 @@ import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.produceState
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
@@ -50,7 +52,9 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.ImageBitmap
 import androidx.compose.ui.graphics.SolidColor
+import androidx.compose.ui.graphics.asImageBitmap
 import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.text.TextStyle
 import androidx.compose.ui.text.font.FontWeight
@@ -59,6 +63,8 @@ import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import com.ubuntumobile.ui.theme.UbuntuPalette
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.withContext
 
 /**
  * The application launcher, shown over the Linux desktop.
@@ -71,6 +77,8 @@ import com.ubuntumobile.ui.theme.UbuntuPalette
 fun UbuntuShell(
     state: UbuntuState,
     apps: List<AppEntry>,
+    /** The container's root, where the apps' icon files are. */
+    iconRoot: java.io.File? = null,
     wide: Boolean,
     onLaunchApp: (AppEntry) -> Unit,
     onOpenStore: () -> Unit,
@@ -85,8 +93,11 @@ fun UbuntuShell(
             it.name.contains(query, ignoreCase = true) || it.summary.contains(query, ignoreCase = true)
         }
     }
-    val linuxApps = filtered.filter { it.category != AppEntry.Category.FLATPAK }
+    val linuxApps = filtered.filter {
+        it.category == AppEntry.Category.LINUX || it.category == AppEntry.Category.TERMINAL
+    }
     val flatpaks = filtered.filter { it.category == AppEntry.Category.FLATPAK }
+    val system = filtered.filter { it.category == AppEntry.Category.SYSTEM }
 
     Column(
         modifier = modifier
@@ -143,12 +154,18 @@ fun UbuntuShell(
             verticalArrangement = Arrangement.spacedBy(8.dp),
         ) {
             items(linuxApps, key = { it.id }) { app ->
-                AppTile(app = app, onClick = { onLaunchApp(app) })
+                AppTile(app = app, iconRoot = iconRoot, onClick = { onLaunchApp(app) })
             }
             if (flatpaks.isNotEmpty()) {
-                item(span = { GridItemSpan(maxLineSpan) }) { SectionLabel("Installed from Flathub") }
+                item(span = { GridItemSpan(maxLineSpan) }) { SectionLabel("From Flathub") }
                 items(flatpaks, key = { it.id }) { app ->
-                    AppTile(app = app, onClick = { onLaunchApp(app) })
+                    AppTile(app = app, iconRoot = iconRoot, onClick = { onLaunchApp(app) })
+                }
+            }
+            if (system.isNotEmpty()) {
+                item(span = { GridItemSpan(maxLineSpan) }) { SectionLabel("System") }
+                items(system, key = { it.id }) { app ->
+                    AppTile(app = app, iconRoot = iconRoot, onClick = { onLaunchApp(app) })
                 }
             }
             if (filtered.isEmpty()) {
@@ -241,9 +258,51 @@ private fun iconFor(app: AppEntry): ImageVector = when (app.id) {
     else -> Icons.Default.Widgets
 }
 
+/** Decoded icons, by path: the grid is rebuilt often, the files do not change. */
+private val iconCache = android.util.LruCache<String, ImageBitmap>(96)
+
+/**
+ * An app's icon file from the container, as a bitmap; null while it loads
+ * or when there is none. PNGs decode directly; SVGs (many themes' only
+ * size for some apps) are rendered at 192 pixels.
+ */
+@Composable
+private fun rememberAppIcon(root: java.io.File?, path: String?): ImageBitmap? {
+    val icon by produceState(path?.let { iconCache.get(it) }, root, path) {
+        if (value != null || root == null || path == null) return@produceState
+        value = withContext(Dispatchers.IO) {
+            try {
+                val file = java.io.File(root, path.removePrefix("/"))
+                val bitmap = if (path.endsWith(".svg")) {
+                    val svg = com.caverock.androidsvg.SVG.getFromInputStream(file.inputStream())
+                    val size = 192
+                    // Without a viewBox a resized SVG is drawn at its own size in a corner.
+                    if (svg.documentViewBox == null && svg.documentWidth > 0f && svg.documentHeight > 0f) {
+                        svg.setDocumentViewBox(0f, 0f, svg.documentWidth, svg.documentHeight)
+                    }
+                    svg.documentWidth = size.toFloat()
+                    svg.documentHeight = size.toFloat()
+                    val bmp = android.graphics.Bitmap.createBitmap(size, size, android.graphics.Bitmap.Config.ARGB_8888)
+                    svg.renderToCanvas(android.graphics.Canvas(bmp))
+                    bmp
+                } else {
+                    android.graphics.BitmapFactory.decodeFile(file.absolutePath)
+                }
+                bitmap?.asImageBitmap()?.also { iconCache.put(path, it) }
+            } catch (_: Exception) {
+                null
+            } catch (_: OutOfMemoryError) {
+                null
+            }
+        }
+    }
+    return icon
+}
+
 /** A single app in the grid. */
 @Composable
-fun AppTile(app: AppEntry, onClick: () -> Unit, modifier: Modifier = Modifier) {
+fun AppTile(app: AppEntry, onClick: () -> Unit, modifier: Modifier = Modifier, iconRoot: java.io.File? = null) {
+    val picture = rememberAppIcon(iconRoot, app.iconPath)
     Column(
         modifier = modifier
             .clip(RoundedCornerShape(16.dp))
@@ -251,18 +310,23 @@ fun AppTile(app: AppEntry, onClick: () -> Unit, modifier: Modifier = Modifier) {
             .padding(vertical = 10.dp, horizontal = 4.dp),
         horizontalAlignment = Alignment.CenterHorizontally,
     ) {
-        Box(
-            modifier = Modifier
-                .size(60.dp)
-                .clip(RoundedCornerShape(18.dp))
-                .background(
-                    Brush.linearGradient(
-                        listOf(Color(app.accent), Color(app.accent).copy(alpha = 0.78f)),
+        if (picture != null) {
+            // The app's own icon, as the desktop's menu shows it.
+            Image(picture, contentDescription = null, modifier = Modifier.size(60.dp).padding(2.dp))
+        } else {
+            Box(
+                modifier = Modifier
+                    .size(60.dp)
+                    .clip(RoundedCornerShape(18.dp))
+                    .background(
+                        Brush.linearGradient(
+                            listOf(Color(app.accent), Color(app.accent).copy(alpha = 0.78f)),
+                        ),
                     ),
-                ),
-            contentAlignment = Alignment.Center,
-        ) {
-            Icon(iconFor(app), contentDescription = null, tint = Color.White, modifier = Modifier.size(30.dp))
+                contentAlignment = Alignment.Center,
+            ) {
+                Icon(iconFor(app), contentDescription = null, tint = Color.White, modifier = Modifier.size(30.dp))
+            }
         }
         Spacer(Modifier.height(8.dp))
         Text(

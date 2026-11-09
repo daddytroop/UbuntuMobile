@@ -185,6 +185,7 @@ val linxScripts = tasks.register<BundleLinxScripts>("bundleLinxScripts") {
             "nosandbox-bwrap", "linx-windows.py", "xfce4-panel.xml", "apt-install.sh",
             "install-firefox.sh", "firefox", "linx-audio.sh", "linx-look.sh",
             "make-xfwm4-theme.py", "linx-folders.sh", "linx-bwrap", "linx-flatpak.sh", "linx-setup.sh",
+            "linx-apps.py", "linx-panel.sh",
         )
             .map { rootProject.file("tools/$it") }
     )
@@ -219,6 +220,8 @@ dependencies {
     implementation(libs.androidx.webkit)
     implementation(libs.kotlinx.coroutines.android)
     implementation(libs.kotlinx.serialization.json)
+    // Draws the SVG icons of Linux apps in the launcher.
+    implementation(libs.androidsvg)
 
     testImplementation(libs.junit)
 }

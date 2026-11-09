@@ -43,7 +43,13 @@ case "${1:-}" in
     ;;
   *)
     refresh_lists || { echo "APT_FAILED could not download the package lists"; exit 1; }
-    if apt-get install -y -q --no-install-recommends "$@"; then
+    # LINX_APT_STATUS: a file for apt's machine-readable progress lines.
+    STATUS_OPT=()
+    if [ -n "${LINX_APT_STATUS:-}" ]; then
+      STATUS_OPT=(-o APT::Status-Fd=3)
+      exec 3>>"$LINX_APT_STATUS"
+    fi
+    if apt-get install -y -q --no-install-recommends "${STATUS_OPT[@]}" "$@"; then
       echo "APT_DONE"
     else
       echo "APT_FAILED"

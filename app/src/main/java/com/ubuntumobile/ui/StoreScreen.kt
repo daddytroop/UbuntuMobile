@@ -316,7 +316,7 @@ fun StoreScreen(
                     Icon(Icons.AutoMirrored.Filled.ArrowBack, contentDescription = "Back", tint = Color.White)
                 }
                 Column(Modifier.weight(1f)) {
-                    Text("Ubuntu Software", color = Color.White, fontSize = 20.sp, fontWeight = FontWeight.Medium)
+                    Text("Software", color = Color.White, fontSize = 20.sp, fontWeight = FontWeight.Medium)
                     Text(
                         if (source == StoreSource.FLATHUB) "Linux apps from Flathub" else "Desktop apps from Ubuntu",
                         color = Color.White.copy(alpha = 0.7f),

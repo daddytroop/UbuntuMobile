@@ -122,25 +122,14 @@ class UbuntuViewModel(app: Application) : AndroidViewModel(app) {
         }
     }
 
-    /** Query installed Flatpak apps so they appear in the grid. */
+    /** Read the desktop's applications (linx-apps.py) so they appear in the grid. */
     fun refreshInstalledApps() {
         viewModelScope.launch {
             val apps = withContext(Dispatchers.IO) {
-                val res = runtime.shell("/usr/local/lib/linx/flatpak-list.sh 2>/dev/null", 90)
-                res.output.lines().filter { it.isNotBlank() }.mapNotNull { line ->
-                    val parts = line.split("|")
-                    if (parts.size < 3) return@mapNotNull null
-                    AppEntry(
-                        id = parts[0],
-                        name = parts[2].ifBlank { parts[0] },
-                        summary = "Flatpak",
-                        command = listOf("/usr/bin/flatpak", "run", parts[0]),
-                        category = AppEntry.Category.FLATPAK,
-                        accent = 0xFF77216F,
-                    )
-                }
+                val res = runtime.shell("python3 /usr/local/lib/linx/linx-apps.py 2>/dev/null", 60)
+                AppCatalog.parseInstalled(res.output)
             }
-            _state.value = _state.value.copy(installedApps = apps)
+            if (apps.isNotEmpty()) _state.value = _state.value.copy(installedApps = apps)
         }
     }
 

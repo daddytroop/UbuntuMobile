@@ -90,6 +90,9 @@ class DisplayActions(
     val onOpenSettings: () -> Unit = {},
     /** What is happening with the browser, e.g. "Installing Firefox…"; null when it is ready. */
     val browserNote: String? = null,
+    /** The apps chosen at setup installing; null when there is nothing to show. */
+    val setup: SetupStatus? = null,
+    val onRetrySetup: () -> Unit = {},
 )
 
 /**
@@ -107,6 +110,8 @@ fun DisplayScreen(
     /** Reports the size, in pixels, of the area the desktop is drawn in. */
     onCanvasSize: (IntSize) -> Unit = {},
     modifier: Modifier = Modifier,
+    /** Drawn over the desktop, e.g. the gamepad; touches it leaves alone reach the desktop. */
+    overlay: @Composable () -> Unit = {},
 ) {
     var menuOpen by remember { mutableStateOf(false) }
     Box(modifier.fillMaxSize().background(Color.Black)) {
@@ -116,6 +121,8 @@ fun DisplayScreen(
             modifier = Modifier.fillMaxSize(),
             showHint = true,
         )
+        overlay()
+        SetupBanner(actions.setup, actions.onRetrySetup, Modifier.align(Alignment.TopCenter))
         MenuHandle(connected = session.connected, onClick = { menuOpen = true })
         DesktopMenu(
             open = menuOpen,

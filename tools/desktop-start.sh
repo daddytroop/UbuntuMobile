@@ -63,8 +63,11 @@ start_panel() {
   xfce4-panel >/tmp/linx-panel.log 2>&1 &
   # The wallpaper. feh is a plain X11 program, so it draws where the GTK
   # ones cannot.
-  feh --no-fehbg --bg-fill /usr/share/xfce4/backdrops/xubuntu-wallpaper.png \
-      >/tmp/linx-feh.log 2>&1 &
+  # The wallpaper chosen at setup (linx-look.sh says which).
+  local wall
+  wall="$(cat /tmp/linx-wallpaper 2>/dev/null)"
+  [ -f "$wall" ] || wall=/usr/share/xfce4/backdrops/xubuntu-wallpaper.png
+  feh --no-fehbg --bg-fill "$wall" >/tmp/linx-feh.log 2>&1 &
 }
 
 # The XFCE programs are started as well. They add the desktop icons and
