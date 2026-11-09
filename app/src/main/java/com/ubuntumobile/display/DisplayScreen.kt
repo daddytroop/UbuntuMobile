@@ -93,6 +93,7 @@ class DisplayActions(
     /** The apps chosen at setup installing; null when there is nothing to show. */
     val setup: SetupStatus? = null,
     val onRetrySetup: () -> Unit = {},
+    val onShareSetupLog: (() -> Unit)? = null,
 )
 
 /**
@@ -122,7 +123,7 @@ fun DisplayScreen(
             showHint = true,
         )
         overlay()
-        SetupBanner(actions.setup, actions.onRetrySetup, Modifier.align(Alignment.TopCenter))
+        SetupBanner(actions.setup, actions.onRetrySetup, Modifier.align(Alignment.TopCenter), actions.onShareSetupLog)
         MenuHandle(connected = session.connected, onClick = { menuOpen = true })
         DesktopMenu(
             open = menuOpen,

@@ -54,6 +54,23 @@ rm -f "/tmp/.X${DISPLAY_NUM}-lock" "/tmp/.X11-unix/X${DISPLAY_NUM}"
 # The desktop session writes its bus address when it starts; one left from
 # an earlier run points at a bus that is gone.
 rm -f /tmp/linx-session-bus
+# Every shell the app opens in the container (setup, the store, the
+# console) joins the desktop's session bus. Without an address, the first
+# program that wants a bus - Flatpak does - auto-launches a dbus-daemon of
+# its own, which outlives it and keeps the app's shell (and proot) from
+# ever finishing: setup then looks stuck at its last step. "disabled:" is
+# not an address at all, so until the desktop is up nothing launches one.
+mkdir -p /etc/profile.d
+cat >/etc/profile.d/linx-session.sh <<'EOF'
+if [ -z "${DBUS_SESSION_BUS_ADDRESS:-}" ]; then
+  if [ -s /tmp/linx-session-bus ]; then
+    DBUS_SESSION_BUS_ADDRESS="$(cat /tmp/linx-session-bus)"
+  else
+    DBUS_SESSION_BUS_ADDRESS="disabled:"
+  fi
+  export DBUS_SESSION_BUS_ADDRESS
+fi
+EOF
 # The starting scale. display-scale.sh replaces it if the app changes its
 # mind while the desktop is still starting.
 echo "${LINX_UI_SCALE:-2}" >/tmp/linx-ui-scale

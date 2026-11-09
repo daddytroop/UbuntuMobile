@@ -97,7 +97,13 @@ data class SetupStatus(
  * how far it is; or, when it failed, a way to try again.
  */
 @Composable
-fun SetupBanner(status: SetupStatus?, onRetry: () -> Unit, modifier: Modifier = Modifier) {
+fun SetupBanner(
+    status: SetupStatus?,
+    onRetry: () -> Unit,
+    modifier: Modifier = Modifier,
+    /** Hand the setup logs to another app (mail, chat); null hides the button. */
+    onShareLog: (() -> Unit)? = null,
+) {
     AnimatedVisibility(
         visible = status != null,
         enter = slideInVertically { -it } + fadeIn(),
@@ -112,7 +118,6 @@ fun SetupBanner(status: SetupStatus?, onRetry: () -> Unit, modifier: Modifier = 
                 .fillMaxWidth()
                 .clip(RoundedCornerShape(16.dp))
                 .background(Color(0xF21E1E1E))
-                .then(if (s.failed) Modifier.clickable(onClick = onRetry) else Modifier)
                 .padding(horizontal = 14.dp, vertical = 10.dp),
         ) {
             Row(verticalAlignment = Alignment.CenterVertically) {
@@ -133,11 +138,12 @@ fun SetupBanner(status: SetupStatus?, onRetry: () -> Unit, modifier: Modifier = 
                         overflow = TextOverflow.Ellipsis,
                     )
                     Text(
-                        if (s.failed) "Check the connection, then tap to try again"
+                        // Failed: what went wrong, from the step's own log.
+                        if (s.failed) s.detail.ifBlank { "Check the connection and try again" }
                         else listOf("Step ${s.step} of ${s.total}", s.detail).filter { it.isNotBlank() }.joinToString(" · "),
                         color = Color.White.copy(alpha = 0.7f),
                         fontSize = 12.sp,
-                        maxLines = 1,
+                        maxLines = if (s.failed) 3 else 1,
                         overflow = TextOverflow.Ellipsis,
                     )
                 }
@@ -145,7 +151,14 @@ fun SetupBanner(status: SetupStatus?, onRetry: () -> Unit, modifier: Modifier = 
                     Text("${(s.fraction * 100).toInt()}%", color = Color.White.copy(alpha = 0.85f), fontSize = 13.sp)
                 }
             }
-            if (!s.failed) {
+            if (s.failed) {
+                Spacer(Modifier.height(8.dp))
+                Row(Modifier.fillMaxWidth(), horizontalArrangement = androidx.compose.foundation.layout.Arrangement.End) {
+                    if (onShareLog != null) BannerButton("Share log", onShareLog)
+                    Spacer(Modifier.width(8.dp))
+                    BannerButton("Try again", onRetry)
+                }
+            } else {
                 Spacer(Modifier.height(8.dp))
                 Box(Modifier.fillMaxWidth()) {
                     LinearProgressIndicator(
@@ -158,4 +171,18 @@ fun SetupBanner(status: SetupStatus?, onRetry: () -> Unit, modifier: Modifier = 
             }
         }
     }
+}
+
+@Composable
+private fun BannerButton(label: String, onClick: () -> Unit) {
+    Text(
+        label,
+        color = UbuntuPalette.UbuntuOrangeLight,
+        fontSize = 13.sp,
+        fontWeight = FontWeight.Medium,
+        modifier = Modifier
+            .clip(RoundedCornerShape(12.dp))
+            .clickable(onClick = onClick)
+            .padding(horizontal = 12.dp, vertical = 8.dp),
+    )
 }

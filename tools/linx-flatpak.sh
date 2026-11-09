@@ -14,8 +14,16 @@ if ! command -v proot >/dev/null 2>&1; then
 fi
 
 if [ ! -e /usr/bin/bwrap.real ]; then
-  dpkg-divert --quiet --local --rename --add --divert /usr/bin/bwrap.real /usr/bin/bwrap || {
-    echo "FLATPAK_FAILED divert"; exit 1; }
+  if ! dpkg-divert --quiet --local --rename --add --divert /usr/bin/bwrap.real /usr/bin/bwrap 2>/dev/null; then
+    # Run from the app, dpkg-divert fails with "Function not implemented":
+    # it checks the file with faccessat2, which Android's seccomp filter
+    # for apps rejects (proot passes the call through). So the diversion
+    # is written by hand - three lines in dpkg's own format, ":" for a
+    # local one - and the file moved the way --rename would.
+    grep -qx /usr/bin/bwrap /var/lib/dpkg/diversions 2>/dev/null ||
+      printf '/usr/bin/bwrap\n/usr/bin/bwrap.real\n:\n' >>/var/lib/dpkg/diversions
+    mv /usr/bin/bwrap /usr/bin/bwrap.real || { echo "FLATPAK_FAILED divert"; exit 1; }
+  fi
 fi
 if ! cmp -s /usr/local/lib/linx/linx-bwrap /usr/bin/bwrap; then
   install -m 0755 /usr/local/lib/linx/linx-bwrap /usr/bin/bwrap

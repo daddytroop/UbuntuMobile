@@ -194,7 +194,22 @@ AndroidSVG) - and is read afresh each time it opens, so what setup or the
 store just installed is there. The panel's app button is Whisker Menu
 (`linx-panel.sh`, installed by setup): a search field, favourites and every
 app in one list, instead of XFCE's categories menu that hid apps two levels
-down.
+down. Next to it is a dock (`xfce4-docklike-plugin`) in place of XFCE's
+launchers and window list: pinned apps and open windows as one row of
+icons, with a dot under the running ones, as in Ubuntu's dock.
+
+`linx-apps.py --tidy` keeps the menu clean. It hides XFCE's settings dialogs
+(the Settings app reaches them all), About, Log Out and the image's plumbing,
+and gives the image's own apps plain names and Yaru's icons: Terminal, Files,
+Text Editor, Settings. It does this with copies in
+`/usr/local/share/applications`, which the menu prefers to the packages' own
+entries and which upgrades leave alone. It also rebuilds icon caches that are
+older than their themes; otherwise an app installed later (Firefox, by setup)
+shows as a missing icon. It runs with the look and after every apt install.
+
+When setup fails, the card at the top says why (the step's last error, from
+`/tmp/linx-setup-error`) and offers **Share log**, which hands the last lines
+of every step's log to mail or chat as text.
 
 ### The app around the desktop
 The desktop fills the screen; the status and navigation bars hide until
@@ -428,6 +443,22 @@ rootfs, runs the unit tests, builds the APK and uploads it as an artifact
 ---
 
 ## Design notes and hard-won lessons
+
+**Android's seccomp filter returns ENOSYS for `faccessat2`.** Apps run under
+a filter that the adb shell does not have, and proot passes the call
+through. `dpkg-divert` checks files with `faccessat2`, so when the app runs it,
+it fails with "Function not implemented"; run from `adb shell` it works. That
+is how Flathub setup failed on phones but passed every emulator test, where
+`bwrap` had been diverted long before. `linx-flatpak.sh` now writes the
+diversion by hand when `dpkg-divert` fails. To test anything setup does, run
+it from the app.
+
+**A program that wants a session bus and finds none starts one.** The first
+`flatpak install` auto-launched a `dbus-daemon`. It outlived the install, and
+proot waits for every process it traced, so the app's shell never returned and
+the progress card stayed on its last step. `/etc/profile.d/linx-session.sh`
+(written by `display-start.sh`) points every login shell at the desktop's bus,
+or at `disabled:` before there is one.
 
 **proot inside proot works, but is slow.** A nested proot needs
 `PROOT_NO_SECCOMP` (with seccomp, some system calls escape the inner

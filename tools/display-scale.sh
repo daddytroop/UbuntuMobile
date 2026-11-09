@@ -26,7 +26,7 @@ fi
 echo "$SCALE" >/tmp/linx-ui-scale
 # Before the session is up there is no bus to talk to; the session reads
 # /tmp/linx-ui-scale when it starts instead.
-if [ -n "${DBUS_SESSION_BUS_ADDRESS:-}" ] && command -v xfconf-query >/dev/null 2>&1; then
+if [ "${DBUS_SESSION_BUS_ADDRESS:-disabled:}" != disabled: ] && command -v xfconf-query >/dev/null 2>&1; then
   xfconf-query -c xsettings -p /Gdk/WindowScalingFactor -n -t int -s "$SCALE"
   # The window borders come in sizes; xfwm4 follows the change.
   /usr/local/lib/linx/linx-look.sh >/dev/null 2>&1

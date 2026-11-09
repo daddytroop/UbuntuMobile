@@ -50,6 +50,8 @@ case "${1:-}" in
       exec 3>>"$LINX_APT_STATUS"
     fi
     if apt-get install -y -q --no-install-recommends "${STATUS_OPT[@]}" "$@"; then
+      # New menu entries get the same clean-up as the image's.
+      python3 /usr/local/lib/linx/linx-apps.py --tidy >/dev/null 2>&1
       echo "APT_DONE"
     else
       echo "APT_FAILED"

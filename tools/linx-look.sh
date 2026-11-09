@@ -8,11 +8,12 @@
 # make-xfwm4-theme.py in the Yaru colours, in a 1x and a 2x size.
 set -u
 export DISPLAY="${DISPLAY:-:${LINX_DISPLAY:-99}}"
-if [ -z "${DBUS_SESSION_BUS_ADDRESS:-}" ] && [ -s /tmp/linx-session-bus ]; then
+# ("disabled:" is what /etc/profile.d/linx-session.sh sets while there is no desktop.)
+if [ "${DBUS_SESSION_BUS_ADDRESS:-disabled:}" = disabled: ] && [ -s /tmp/linx-session-bus ]; then
   DBUS_SESSION_BUS_ADDRESS="$(cat /tmp/linx-session-bus)"
   export DBUS_SESSION_BUS_ADDRESS
 fi
-[ -n "${DBUS_SESSION_BUS_ADDRESS:-}" ] || exit 0
+[ "${DBUS_SESSION_BUS_ADDRESS:-disabled:}" != disabled: ] || exit 0
 command -v xfconf-query >/dev/null 2>&1 || exit 0
 
 set_xsettings() { xfconf-query -c xsettings -p "$1" -n -t "$2" -s "$3"; }
@@ -94,6 +95,10 @@ done
 xfconf-query -c xfce4-desktop -p /desktop-icons/file-icons/show-filesystem -n -t bool -s false
 xfconf-query -c xfce4-desktop -p /desktop-icons/file-icons/show-removable -n -t bool -s false
 command -v feh >/dev/null && ! pgrep -x xfdesktop >/dev/null && feh --no-fehbg --bg-fill "$WALL" 2>/dev/null
+
+# A tidy menu: Yaru icons and plain names for the image's apps, XFCE's
+# settings dialogs out of the way (linx-apps.py --tidy).
+python3 /usr/local/lib/linx/linx-apps.py --tidy >/dev/null 2>&1
 
 # The app menu (Whisker Menu once it is installed).
 /usr/local/lib/linx/linx-panel.sh --restart >/dev/null 2>&1

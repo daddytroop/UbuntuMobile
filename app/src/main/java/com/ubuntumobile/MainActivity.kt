@@ -474,9 +474,15 @@ fun UbuntuApp(
         progress.cancel()
         browserInstalled = firefoxBinary.exists()
         val done = setupDone()
-        browserNote = if (done) null else "Setup did not finish; check the connection and try again"
-        setupStatus = if (done) null else setupStatus?.copy(failed = true)
-            ?: com.ubuntumobile.display.SetupStatus(0, 1, "", "", 0f, failed = true)
+        // Why it failed, as linx-setup.sh put it ("Flathub: error: ...").
+        val why = try {
+            java.io.File(vm.paths.sharedTmpDir, "linx-setup-error").readText().trim()
+        } catch (_: Exception) {
+            ""
+        }
+        browserNote = if (done) null else "Setup did not finish" + if (why.isNotEmpty()) ": $why" else ""
+        setupStatus = if (done) null else (setupStatus ?: com.ubuntumobile.display.SetupStatus(0, 1, "", "", 0f))
+            .copy(failed = true, detail = why)
         vm.refreshInstalledApps()
         vm.paths.appendLog("setup: ${out.trim().lines().lastOrNull()}")
         withContext(Dispatchers.IO) {
@@ -843,6 +849,7 @@ fun UbuntuApp(
                 browserNote = browserNote,
                 setup = setupStatus,
                 onRetrySetup = { if (!browserBusy) scope.launch { runSetup() } },
+                onShareSetupLog = { shareSetupLog(context, vm.paths.sharedTmpDir) },
             )
             Box(Modifier.fillMaxSize().background(Color.Black)) {
                 // Whatever the soft keyboard commits is typed into X and
@@ -874,6 +881,7 @@ fun UbuntuApp(
                         setupStatus,
                         actions.onRetrySetup,
                         insets.align(Alignment.TopCenter),
+                        actions.onShareSetupLog,
                     )
                     // Docked, the game is on the monitor and the phone is
                     // the controller: the pad takes the whole screen.
@@ -987,6 +995,31 @@ private fun GamepadOverlay(
             )
         }
     }
+}
+
+/**
+ * Send setup's logs to another app - mail, a chat - as text, so a failure
+ * on someone's phone can be looked at: the last lines of each step's log.
+ */
+private fun shareSetupLog(context: android.content.Context, tmp: java.io.File) {
+    val text = buildString {
+        append("Mobuntu ${BuildConfig.VERSION_NAME}, Android ${android.os.Build.VERSION.RELEASE}, ")
+        append("${android.os.Build.MANUFACTURER} ${android.os.Build.MODEL}, ${android.os.Build.SUPPORTED_ABIS.firstOrNull()}\n")
+        val logs = listOf("linx-setup.log", "linx-setup-error") +
+            (tmp.list()?.filter { it.startsWith("linx-setup-") && it.endsWith(".log") }?.sorted() ?: emptyList())
+        for (name in logs.distinct()) {
+            val f = java.io.File(tmp, name)
+            if (!f.isFile) continue
+            append("\n== $name ==\n")
+            append(f.readLines().takeLast(40).joinToString("\n"))
+            append("\n")
+        }
+    }
+    val send = android.content.Intent(android.content.Intent.ACTION_SEND)
+        .setType("text/plain")
+        .putExtra(android.content.Intent.EXTRA_SUBJECT, "Mobuntu setup log")
+        .putExtra(android.content.Intent.EXTRA_TEXT, text.takeLast(90_000))
+    context.startActivity(android.content.Intent.createChooser(send, "Share the setup log"))
 }
 
 /** The size and UI scale the X screen should have. */
