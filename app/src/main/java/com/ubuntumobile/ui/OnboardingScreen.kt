@@ -238,6 +238,10 @@ fun OnboardingScreen(
 ) {
     var page by remember { mutableStateOf(if (again) Page.PROFILE else Page.WELCOME) }
     var choices by remember { mutableStateOf(initial) }
+    // The app takes the accent as it is chosen, so the choice can be seen.
+    androidx.compose.runtime.LaunchedEffect(choices.accent) {
+        UbuntuPalette.accent = Color(choices.accent.color)
+    }
     var forward by remember { mutableIntStateOf(1) }
     fun go(to: Page) {
         forward = if (to.ordinal > page.ordinal) 1 else -1
@@ -248,7 +252,7 @@ fun OnboardingScreen(
         Modifier
             .fillMaxSize()
             .background(
-                Brush.verticalGradient(listOf(Color(0xFF2C001E), UbuntuPalette.AubergineDark, Color(0xFF3B0A33))),
+                Brush.verticalGradient(listOf(UbuntuPalette.AubergineDeep, UbuntuPalette.AubergineDark, UbuntuPalette.AubergineDeep)),
             )
             .systemBarsPadding(),
     ) {

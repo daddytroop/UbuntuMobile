@@ -104,7 +104,7 @@ fun UbuntuShell(
             .fillMaxSize()
             .background(
                 Brush.verticalGradient(
-                    listOf(UbuntuPalette.Aubergine, UbuntuPalette.AubergineDark, Color(0xFF2A0B27)),
+                    listOf(UbuntuPalette.Aubergine, UbuntuPalette.AubergineDark, UbuntuPalette.AubergineDeep),
                 ),
             ),
     ) {

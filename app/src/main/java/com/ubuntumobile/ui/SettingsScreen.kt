@@ -1,6 +1,8 @@
 package com.ubuntumobile.ui
 
 import androidx.compose.foundation.background
+import androidx.compose.foundation.horizontalScroll
+import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
@@ -63,6 +65,9 @@ fun SettingsScreen(
     onAllowStorage: () -> Unit,
     /** Run onboarding again: apps, look and app stores. */
     onSetUpAgain: () -> Unit,
+    /** The look chosen at setup, changed here at once: dark, accent, wallpaper. */
+    look: SetupChoices? = null,
+    onLook: (SetupChoices) -> Unit = {},
     versionName: String,
     ubuntuVersion: String,
     onClose: () -> Unit,
@@ -108,6 +113,70 @@ fun SettingsScreen(
                     }
                     Spacer(Modifier.width(12.dp))
                     ActionChip("Set up", onSetUpAgain)
+                }
+            }
+
+            if (look != null) {
+                Card("Look", "Light or dark, the accent colour and the wallpaper - for Linux and for this app.") {
+                    Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                        listOf(false to "Light", true to "Dark").forEach { (dark, label) ->
+                            val selected = look.dark == dark
+                            Box(
+                                Modifier
+                                    .weight(1f)
+                                    .clip(RoundedCornerShape(12.dp))
+                                    .border(
+                                        if (selected) 2.dp else 1.dp,
+                                        if (selected) UbuntuPalette.UbuntuOrange else UbuntuPalette.LightOutline,
+                                        RoundedCornerShape(12.dp),
+                                    )
+                                    .clickable { onLook(look.copy(dark = dark)) }
+                                    .padding(vertical = 12.dp),
+                                contentAlignment = Alignment.Center,
+                            ) {
+                                Text(label, fontSize = 14.sp, fontWeight = FontWeight.Medium, color = UbuntuPalette.LightOnSurface)
+                            }
+                        }
+                    }
+                    Spacer(Modifier.height(14.dp))
+                    Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
+                        Accent.entries.forEach { accent ->
+                            val selected = look.accent == accent
+                            Box(
+                                Modifier
+                                    .size(34.dp)
+                                    .clip(androidx.compose.foundation.shape.CircleShape)
+                                    .background(Color(accent.color))
+                                    .border(
+                                        if (selected) 3.dp else 1.dp,
+                                        if (selected) UbuntuPalette.LightOnSurface else Color.Transparent,
+                                        androidx.compose.foundation.shape.CircleShape,
+                                    )
+                                    .clickable { onLook(look.copy(accent = accent)) },
+                            )
+                        }
+                    }
+                    Spacer(Modifier.height(14.dp))
+                    Row(
+                        Modifier.fillMaxWidth().horizontalScroll(rememberScrollState()),
+                        horizontalArrangement = Arrangement.spacedBy(10.dp),
+                    ) {
+                        Wallpaper.entries.forEach { w ->
+                            val selected = look.wallpaper == w
+                            WallpaperThumb(
+                                w,
+                                Modifier
+                                    .size(width = 56.dp, height = 90.dp)
+                                    .clip(RoundedCornerShape(10.dp))
+                                    .border(
+                                        if (selected) 3.dp else 1.dp,
+                                        if (selected) UbuntuPalette.UbuntuOrange else Color.Transparent,
+                                        RoundedCornerShape(10.dp),
+                                    )
+                                    .clickable { onLook(look.copy(wallpaper = w)) },
+                            )
+                        }
+                    }
                 }
             }
 

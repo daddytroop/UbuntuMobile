@@ -209,12 +209,39 @@ def dock_installed():
 
 
 def hidden(app_id, e, dock=True):
+    """Whether --tidy marks an entry NoDisplay."""
     cats = e.get("Categories", "").split(";")
     settings = "X-XFCE-SettingsDialog" in cats or "X-XFCE-SystemSettings" in cats
     if app_id in PANEL_LAUNCHERS and not dock:
         return False
     return (app_id in HIDDEN or app_id.startswith("python3")
             or (settings and app_id != "xfce-settings-manager"))
+
+
+# XFCE's Settings app lists the settings dialogs from the same menu entries,
+# and leaves out the ones marked NoDisplay - so with them hidden from the
+# app menu it opened empty. (Whisker Menu adds them to its list whatever
+# the menu file says, so hiding them is the only way out of it.) This
+# stand-in, ahead of /usr/bin on the PATH, starts it without OVERRIDES in
+# its search path: it sees the packages' entries, every dialog visible.
+SETTINGS_WRAPPER = "/usr/local/bin/xfce4-settings-manager"
+SETTINGS_SCRIPT = """#!/bin/sh
+# Written by linx-apps.py --tidy: XFCE's Settings without the menu clean-up
+# in /usr/local/share/applications, which hides its dialogs.
+dirs=$(printf '%s' "${XDG_DATA_DIRS:-/usr/share}" | awk -v RS=: -v ORS=: '$0 != "/usr/local/share"')
+dirs="${dirs%:}"
+XDG_DATA_DIRS="${dirs:-/usr/share}" exec /usr/bin/xfce4-settings-manager "$@"
+"""
+
+
+def write_settings_wrapper():
+    if not os.path.exists("/usr/bin/xfce4-settings-manager"):
+        return
+    tmp = SETTINGS_WRAPPER + ".tmp"
+    with open(tmp, "w", encoding="utf-8") as f:
+        f.write(SETTINGS_SCRIPT)
+    os.chmod(tmp, 0o755)
+    os.replace(tmp, SETTINGS_WRAPPER)
 
 
 def write_override(src, dest, changes):
@@ -277,6 +304,7 @@ def tidy():
     them.
     """
     refresh_icon_caches()
+    write_settings_wrapper()
     os.makedirs(OVERRIDES, exist_ok=True)
     for name in os.listdir(OVERRIDES):
         path = os.path.join(OVERRIDES, name)

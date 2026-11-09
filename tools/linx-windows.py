@@ -15,6 +15,7 @@ It talks to X through ctypes, so it needs nothing beyond Python and libX11,
 and it waits for X events rather than polling.
 """
 import ctypes
+import os
 import select
 import time
 import sys
@@ -40,6 +41,11 @@ x11.XGetWindowProperty.argtypes = [
 x11.XGetTransientForHint.argtypes = [ctypes.c_void_p, Window, ctypes.POINTER(Window)]
 x11.XSendEvent.argtypes = [ctypes.c_void_p, Window, ctypes.c_int, ctypes.c_long, ctypes.c_void_p]
 x11.XFree.argtypes = [ctypes.c_void_p]
+x11.XGetWMNormalHints.argtypes = [ctypes.c_void_p, Window, ctypes.c_void_p, ctypes.POINTER(ctypes.c_long)]
+x11.XSetWMNormalHints.argtypes = [ctypes.c_void_p, Window, ctypes.c_void_p]
+x11.XDisplayWidth.argtypes = [ctypes.c_void_p, ctypes.c_int]
+x11.XDisplayHeight.argtypes = [ctypes.c_void_p, ctypes.c_int]
+x11.XResizeWindow.argtypes = [ctypes.c_void_p, Window, ctypes.c_uint, ctypes.c_uint]
 x11.XFlush.argtypes = [ctypes.c_void_p]
 
 PROPERTY_NOTIFY = 28
@@ -67,9 +73,38 @@ class ClientMessageEvent(ctypes.Structure):
     ]
 
 
+class SizeHints(ctypes.Structure):
+    _fields_ = [
+        ("flags", ctypes.c_long), ("x", ctypes.c_int), ("y", ctypes.c_int),
+        ("width", ctypes.c_int), ("height", ctypes.c_int),
+        ("min_width", ctypes.c_int), ("min_height", ctypes.c_int),
+        ("max_width", ctypes.c_int), ("max_height", ctypes.c_int),
+        ("width_inc", ctypes.c_int), ("height_inc", ctypes.c_int),
+        ("min_aspect_x", ctypes.c_int), ("min_aspect_y", ctypes.c_int),
+        ("max_aspect_x", ctypes.c_int), ("max_aspect_y", ctypes.c_int),
+        ("base_width", ctypes.c_int), ("base_height", ctypes.c_int),
+        ("win_gravity", ctypes.c_int),
+    ]
+
+
+P_MIN_SIZE = 1 << 4
+
+
+class CursorEvent(ctypes.Structure):
+    # XFixesCursorNotifyEvent
+    _fields_ = [
+        ("type", ctypes.c_int), ("serial", ctypes.c_ulong), ("send_event", ctypes.c_int),
+        ("display", ctypes.c_void_p), ("window", Window), ("subtype", ctypes.c_int),
+        ("cursor_serial", ctypes.c_ulong), ("timestamp", ctypes.c_ulong), ("cursor_name", Atom),
+    ]
+
+
 class Event(ctypes.Union):
     # XEvent is 24 longs; the members used here are views of it.
-    _fields_ = [("type", ctypes.c_int), ("property", PropertyEvent), ("pad", ctypes.c_long * 24)]
+    _fields_ = [
+        ("type", ctypes.c_int), ("property", PropertyEvent), ("cursor", CursorEvent),
+        ("pad", ctypes.c_long * 24),
+    ]
 
 
 display = x11.XOpenDisplay(None)
@@ -85,6 +120,7 @@ def atom(name):
 CLIENT_LIST = atom("_NET_CLIENT_LIST")
 WINDOW_TYPE = atom("_NET_WM_WINDOW_TYPE")
 TYPE_NORMAL = atom("_NET_WM_WINDOW_TYPE_NORMAL")
+TYPE_DIALOG = atom("_NET_WM_WINDOW_TYPE_DIALOG")
 WM_STATE = atom("_NET_WM_STATE")
 MAXIMIZED_VERT = atom("_NET_WM_STATE_MAXIMIZED_VERT")
 MAXIMIZED_HORZ = atom("_NET_WM_STATE_MAXIMIZED_HORZ")
@@ -114,15 +150,46 @@ def clients():
 
 
 def is_app_window(window):
-    """An ordinary application window: not a dialog, a menu or a panel."""
+    """An application's own window: an ordinary one, or a dialog that
+    belongs to no other window (XFCE's Settings is one). Not a dialog of
+    another window, a menu or a panel."""
     transient = Window()
     if x11.XGetTransientForHint(display, window, ctypes.byref(transient)) and transient.value:
         return False
     types = property_values(window, WINDOW_TYPE, XA_ATOM)
-    return not types or types[0] == TYPE_NORMAL
+    return not types or types[0] in (TYPE_NORMAL, TYPE_DIALOG)
+
+
+def fit_minimum(window):
+    """Let a window be made as small as the screen.
+
+    Some applications ask for a minimum size wider than a phone held
+    upright - Thunar 902 pixels on a 900-pixel screen - and the window
+    manager then cannot maximize them, so the title bar and its close
+    button end up off the edge. The minimum is lowered to the screen's
+    size; the application draws in the space it gets.
+    """
+    hints = SizeHints()
+    supplied = ctypes.c_long()
+    if not x11.XGetWMNormalHints(display, window, ctypes.byref(hints), ctypes.byref(supplied)):
+        return
+    if not hints.flags & P_MIN_SIZE:
+        return
+    # Leave room for the window's border and the panel.
+    width = x11.XDisplayWidth(display, 0) - 8
+    height = x11.XDisplayHeight(display, 0) - 120
+    if hints.min_width <= width and hints.min_height <= height:
+        return
+    hints.min_width = min(hints.min_width, width)
+    hints.min_height = min(hints.min_height, height)
+    x11.XSetWMNormalHints(display, window, ctypes.byref(hints))
+    # A window already marked maximized at its too-large size stays so;
+    # sizing it to the screen first lets the maximize take.
+    x11.XResizeWindow(display, window, width, height)
 
 
 def maximize(window):
+    fit_minimum(window)
     # The EWMH way: ask the window manager, which keeps the panel visible.
     event = ClientMessageEvent()
     event.type = CLIENT_MESSAGE
@@ -155,6 +222,42 @@ if "--all" in sys.argv:
     sys.exit(0)
 
 x11.XConnectionNumber.argtypes = [ctypes.c_void_p]
+x11.XGetAtomName.argtypes = [ctypes.c_void_p, Atom]
+x11.XGetAtomName.restype = ctypes.c_void_p
+
+# The pointer's cursor, for the app: it turns into a text cursor over a
+# field you can type into, and the app then brings up the phone's keyboard
+# after a tap. X says when it changes through the XFixes extension.
+CURSOR_FILE = "/tmp/linx-cursor"
+NEW_WINDOW_FILE = "/tmp/linx-new-window"
+CURSOR_EVENT = -1
+try:
+    xfixes = ctypes.cdll.LoadLibrary("libXfixes.so.3")
+    xfixes.XFixesQueryExtension.argtypes = [
+        ctypes.c_void_p, ctypes.POINTER(ctypes.c_int), ctypes.POINTER(ctypes.c_int)]
+    xfixes.XFixesSelectCursorInput.argtypes = [ctypes.c_void_p, Window, ctypes.c_ulong]
+    event_base = ctypes.c_int()
+    error_base = ctypes.c_int()
+    if xfixes.XFixesQueryExtension(display, ctypes.byref(event_base), ctypes.byref(error_base)):
+        CURSOR_EVENT = event_base.value + 1  # XFixesCursorNotify
+        xfixes.XFixesSelectCursorInput(display, root, 1)  # XFixesDisplayCursorNotifyMask
+except OSError:
+    pass
+
+
+def cursor_changed(name_atom):
+    name = ""
+    if name_atom:
+        raw = x11.XGetAtomName(display, name_atom)
+        if raw:
+            name = ctypes.string_at(raw).decode("ascii", "replace")
+            x11.XFree(raw)
+    try:
+        with open(CURSOR_FILE + ".tmp", "w") as f:
+            f.write(name)
+        os.replace(CURSOR_FILE + ".tmp", CURSOR_FILE)
+    except OSError:
+        pass
 x11.XPending.argtypes = [ctypes.c_void_p]
 
 # Some applications (Firefox) size their window again just after it
@@ -179,11 +282,22 @@ while True:
         select.select([fd], [], [], max(timeout, 0))
         continue
     x11.XNextEvent(display, ctypes.byref(event))
+    if event.type == CURSOR_EVENT:
+        cursor_changed(event.cursor.cursor_name)
+        continue
     if event.type != PROPERTY_NOTIFY or event.property.atom != CLIENT_LIST:
         continue
     current = clients()
     new = [w for w in current if w not in known]
     known = set(current)
+    if new:
+        # The app shows "Opening ..." from a tap in its launcher until a
+        # window appears; this file's time says one has.
+        try:
+            with open(NEW_WINDOW_FILE, "w") as f:
+                f.write(str(len(current)))
+        except OSError:
+            pass
     if on_phone():
         for w in new:
             if is_app_window(w):

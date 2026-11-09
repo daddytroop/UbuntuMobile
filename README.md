@@ -179,6 +179,22 @@ borders drawn for the app by `make-xfwm4-theme.py` to match - a flat title
 bar with round minimise and maximise buttons and a close button in the
 accent colour - at 1x for a monitor and 2x for the phone.
 
+### The app in your colours
+The accent colour chosen at setup colours the app as well as Linux: the
+floating button, menus, Settings, the store and the system bars
+(`UbuntuPalette.accent`, with dark backgrounds derived from it). Settings
+has a **Look** card for light or dark, the accent and the wallpaper. A
+change there applies to the app and the desktop at once, with nothing
+reinstalled.
+
+### Typing
+The phone's keyboard comes up by itself after a tap on a text field. X has no
+"a field has focus" signal, but over a text field the pointer becomes a text
+cursor. `linx-windows.py` follows cursor changes through XFixes and writes the
+cursor's name to `/tmp/linx-cursor`, and after a tap the app checks for
+"text". This needs a cursor theme, because the core X cursors have no names;
+`linx-look.sh` sets Yaru's.
+
 ### Wallpapers
 Six wallpapers (Aubergine, Aurora, Dunes, Ridges, Graphite, Dawn), drawn by
 the app with Android's canvas (`Wallpapers.kt`) rather than shipped as
@@ -264,12 +280,21 @@ driven from the phone. A USB or Bluetooth mouse works as a real mouse
 
 ### Virtual gamepad
 An Xbox-layout on-screen controller (dual sticks, D-pad, ABXY, triggers,
-shoulders, Select and Start) drawn over the desktop: see-through (a slider
-sets how much, and is remembered), with the controls at the edges like a
-handheld's, and only the controls take touches, so the game stays visible
-and touchable in between. Docked, the game is on the monitor and the pad
-fills the phone's screen instead. State is streamed to the container, where
-`gamepad-helper.py` turns it into a virtual uinput joystick.
+shoulders, Select and Start) drawn over the desktop, with the controls at the
+edges like a handheld's. Only the controls take touches, so the game stays
+visible and touchable in between. Docked, the game is on the monitor and the
+pad fills the phone's screen instead.
+
+The pencil in the corner opens the editor (`GamepadSettings.kt`). You can drag
+any part to a new place and set how see-through and how big the pad is. The
+style is classic colours, mono, or the accent colour. You also choose what
+Linux sees:
+- **Controller:** a virtual uinput joystick, through `gamepad-helper.py`.
+- **Keyboard keys:** these work with every game. You pick each button's key,
+  the left stick and D-pad act as the arrow keys or WASD, and the right stick
+  moves the mouse.
+
+When Linux cannot have a controller, keyboard keys is the default.
 
 > **Note:** `/dev/uinput` is not exposed to unprivileged apps on most Android
 > devices, so the Linux-side virtual pad only works on rooted devices or
@@ -452,6 +477,19 @@ is how Flathub setup failed on phones but passed every emulator test, where
 `bwrap` had been diverted long before. `linx-flatpak.sh` now writes the
 diversion by hand when `dpkg-divert` fails. To test anything setup does, run
 it from the app.
+
+**NoDisplay hides an entry from XFCE's Settings app too.** XFCE's Settings
+lists its dialogs from the same menu entries, so hiding them from the app
+menu left it empty. Whisker Menu adds every entry it finds whatever the menu
+file says. The way out: `/usr/local/bin/xfce4-settings-manager`, which
+`--tidy` writes, starts Settings without `/usr/local/share` in
+`XDG_DATA_DIRS`, so it sees the packages' own entries.
+
+**A minimum size wider than the screen stops a maximize.** Thunar asks for
+902 pixels on a 900-pixel phone, and xfwm4 then left its close button off
+the edge. `linx-windows.py` lowers such minimums to the screen size and
+resizes the window before maximizing it. It also maximizes standalone
+dialogs (XFCE's Settings is one).
 
 **A program that wants a session bus and finds none starts one.** The first
 `flatpak install` auto-launched a `dbus-daemon`. It outlived the install, and

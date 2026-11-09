@@ -173,6 +173,28 @@ fun SetupBanner(
     }
 }
 
+/** "Opening Telegram..." over the desktop while an app starts. */
+@Composable
+fun OpeningPill(name: String?, modifier: Modifier = Modifier) {
+    AnimatedVisibility(visible = name != null, enter = fadeIn(), exit = fadeOut(), modifier = modifier) {
+        Row(
+            Modifier
+                .clip(RoundedCornerShape(20.dp))
+                .background(Color(0xF21E1E1E))
+                .padding(horizontal = 16.dp, vertical = 10.dp),
+            verticalAlignment = Alignment.CenterVertically,
+        ) {
+            androidx.compose.material3.CircularProgressIndicator(
+                modifier = Modifier.size(16.dp),
+                color = UbuntuPalette.UbuntuOrangeLight,
+                strokeWidth = 2.dp,
+            )
+            Spacer(Modifier.width(10.dp))
+            Text("Opening ${name.orEmpty()}…", color = Color.White, fontSize = 13.sp)
+        }
+    }
+}
+
 @Composable
 private fun BannerButton(label: String, onClick: () -> Unit) {
     Text(

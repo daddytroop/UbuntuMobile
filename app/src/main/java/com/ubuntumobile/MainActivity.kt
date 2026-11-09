@@ -25,10 +25,15 @@ import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.systemBarsPadding
 import androidx.compose.foundation.layout.width
+import androidx.compose.foundation.layout.widthIn
+import androidx.compose.foundation.layout.heightIn
+import androidx.compose.foundation.verticalScroll
+import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Close
 import androidx.compose.material.icons.filled.Gamepad
+import androidx.compose.material.icons.filled.Edit
 import androidx.compose.material.icons.filled.Opacity
 import androidx.compose.material.icons.filled.Terminal
 import androidx.compose.material3.CircularProgressIndicator
@@ -190,6 +195,9 @@ private const val DISPLAY_PORT = 5901
 
 /** X display number used inside the container. */
 private const val DISPLAY_NUM = 99
+
+/** The X cursor names toolkits use over text you can type into. */
+private val TEXT_CURSORS = setOf("text", "xterm", "ibeam", "IBeam")
 
 @Composable
 fun UbuntuApp(
@@ -504,12 +512,61 @@ fun UbuntuApp(
         if (!setupDone()) runSetup()
     }
 
+    // The look chosen at setup (setup.conf), which Settings can change at
+    // once; its accent colours this app as well as Linux.
+    var look by remember { mutableStateOf<com.ubuntumobile.ui.SetupChoices?>(null) }
+    fun showAccent(accent: com.ubuntumobile.ui.Accent) {
+        UbuntuPalette.accent = Color(accent.color)
+    }
+    LaunchedEffect(Unit) {
+        // Remembered here too, so the app has its colour before Linux is up.
+        com.ubuntumobile.ui.Accent.entries.firstOrNull { it.id == prefs.getString("accent", null) }
+            ?.let { showAccent(it) }
+    }
+    LaunchedEffect(onboarded, state.isInstalled) {
+        if (!onboarded) return@LaunchedEffect
+        val text = withContext(Dispatchers.IO) {
+            try {
+                setupConf.takeIf { it.isFile }?.readText()
+            } catch (_: Exception) {
+                null
+            }
+        } ?: return@LaunchedEffect
+        val choices = com.ubuntumobile.ui.SetupChoices.fromConf(text, desktopSize)
+        look = choices
+        showAccent(choices.accent)
+    }
+
+    /** Change the look - dark, accent, wallpaper - without running setup again. */
+    fun changeLook(changed: com.ubuntumobile.ui.SetupChoices) {
+        look = changed
+        showAccent(changed.accent)
+        prefs.edit().putString("accent", changed.accent.id).apply()
+        scope.launch(Dispatchers.IO) {
+            try {
+                val wasDone = setupDone()
+                val saved = com.ubuntumobile.ui.SetupChoices.fromConf(setupConf.readText(), desktopSize)
+                val text = saved.copy(dark = changed.dark, accent = changed.accent, wallpaper = changed.wallpaper).toConf()
+                setupConf.writeText(text)
+                // Only the look changed: nothing new to install.
+                if (wasDone) setupDoneFile.writeText(text)
+            } catch (e: Exception) {
+                vm.paths.appendLog("could not save the look: $e")
+            }
+            com.ubuntumobile.ui.Wallpaper.ensure(vm.paths.root)
+            vm.runtime.shell("/usr/local/lib/linx/linx-look.sh", 120)
+        }
+    }
+
     /** Keep what onboarding chose, and set Linux up to match. */
     fun applyChoices(choices: com.ubuntumobile.ui.SetupChoices) {
         desktopSize = choices.desktopSize
+        look = choices
+        showAccent(choices.accent)
         prefs.edit()
             .putBoolean("onboarded", true)
             .putString("desktop_size", choices.desktopSize.name)
+            .putString("accent", choices.accent.id)
             .apply()
         scope.launch(Dispatchers.IO) {
             setupConf.parentFile?.mkdirs()
@@ -643,6 +700,22 @@ fun UbuntuApp(
     }
 
     /** Launch a Linux GUI app as a window in the running XFCE desktop. */
+    // "Opening Telegram..." from a tap in the launcher until a window
+    // appears: some apps (Flatpak ones, the first time) take a while, and
+    // without it the tap looked like it did nothing. linx-windows.py
+    // touches /tmp/linx-new-window when one does.
+    var opening by remember { mutableStateOf<String?>(null) }
+    LaunchedEffect(opening) {
+        if (opening == null) return@LaunchedEffect
+        val since = System.currentTimeMillis()
+        val marker = java.io.File(vm.paths.sharedTmpDir, "linx-new-window")
+        while (System.currentTimeMillis() - since < 240_000) {
+            delay(700)
+            if (withContext(Dispatchers.IO) { marker.lastModified() } > since) break
+        }
+        opening = null
+    }
+
     fun launchOnDisplay(command: List<String>) {
         // Set DISPLAY to the in-container X server. Because proot shares
         // the network namespace and /tmp, a separate proot process can
@@ -699,7 +772,11 @@ fun UbuntuApp(
                 screen = Screen.DISPLAY
             },
             again = again,
-            onCancel = { screen = Screen.SETTINGS },
+            onCancel = {
+                // Onboarding previews the accent it is showing; put it back.
+                look?.let { showAccent(it.accent) }
+                screen = Screen.SETTINGS
+            },
         )
         return
     }
@@ -746,6 +823,7 @@ fun UbuntuApp(
                             // Linux apps open as windows on the desktop, so
                             // go there to see them.
                             launchOnDisplay(entry.command)
+                            opening = entry.name
                             screen = Screen.DISPLAY
                         }
                     }
@@ -802,6 +880,8 @@ fun UbuntuApp(
                 browserNote = browserNote,
                 onInstallBrowser = { scope.launch { runSetup() } },
                 onSetUpAgain = { screen = Screen.ONBOARDING },
+                look = look,
+                onLook = { changeLook(it) },
                 storageAllowed = storageAllowed,
                 onAllowStorage = { askForStorage() },
                 versionName = BuildConfig.VERSION_NAME,
@@ -823,6 +903,29 @@ fun UbuntuApp(
             DisposableEffect(Unit) {
                 keyTarget(session)
                 onDispose { keyTarget(null) }
+            }
+            // A tap on a text field brings up the keyboard, as in a phone
+            // app. X has no "a text field has focus" signal, but the pointer
+            // turns into a text cursor over one: linx-windows.py writes the
+            // cursor's name to /tmp/linx-cursor whenever it changes.
+            val tapView = LocalView.current
+            val cursorFile = remember { java.io.File(vm.paths.sharedTmpDir, "linx-cursor") }
+            DisposableEffect(session, docked) {
+                session.onTapped = if (docked) null else ({
+                    scope.launch {
+                        // Long enough for the click to land and the cursor to change.
+                        delay(250)
+                        val name = withContext(Dispatchers.IO) {
+                            try {
+                                cursorFile.readText().trim()
+                            } catch (_: Exception) {
+                                ""
+                            }
+                        }
+                        if (name in TEXT_CURSORS) showSoftKeyboard(tapView, context)
+                    }
+                })
+                onDispose { session.onTapped = null }
             }
             // An invisible text field that captures key events for the VNC
             // session. It is shown behind the display so it never blocks
@@ -850,6 +953,7 @@ fun UbuntuApp(
                 setup = setupStatus,
                 onRetrySetup = { if (!browserBusy) scope.launch { runSetup() } },
                 onShareSetupLog = { shareSetupLog(context, vm.paths.sharedTmpDir) },
+                opening = opening,
             )
             Box(Modifier.fillMaxSize().background(Color.Black)) {
                 // Whatever the soft keyboard commits is typed into X and
@@ -886,7 +990,7 @@ fun UbuntuApp(
                     // Docked, the game is on the monitor and the phone is
                     // the controller: the pad takes the whole screen.
                     if (gamepadShown) {
-                        GamepadOverlay(vm, landscape, overGame = false, onClose = { gamepadShown = false }, modifier = insets)
+                        GamepadOverlay(vm, session, landscape, overGame = false, onClose = { gamepadShown = false }, modifier = insets)
                     }
                 } else {
                     DisplayScreen(
@@ -896,7 +1000,7 @@ fun UbuntuApp(
                         modifier = insets,
                         overlay = {
                             if (gamepadShown) {
-                                GamepadOverlay(vm, landscape, overGame = true, onClose = { gamepadShown = false })
+                                GamepadOverlay(vm, session, landscape, overGame = true, onClose = { gamepadShown = false })
                             }
                         },
                     )
@@ -907,14 +1011,17 @@ fun UbuntuApp(
 }
 
 /**
- * The on-screen gamepad and its link into the container. Over the game
- * ([overGame]) it is see-through and only its controls take touches; on a
- * docked phone it is a controller filling the screen. A slider sets how
- * see-through it is, and is remembered.
+ * The on-screen gamepad, over the game ([overGame]: see-through, only its
+ * controls take touches) or, on a docked phone, as a controller filling the
+ * screen. It reaches Linux as a game controller where Linux can have one
+ * (/dev/uinput; most phones need root) and as keys otherwise - which every
+ * game understands. The pencil opens [GamepadEditor]: move the parts, size,
+ * colours, see-through, and which key each button sends.
  */
 @Composable
 private fun GamepadOverlay(
     vm: UbuntuViewModel,
+    session: DisplaySession,
     landscape: Boolean,
     overGame: Boolean,
     onClose: () -> Unit,
@@ -922,24 +1029,64 @@ private fun GamepadOverlay(
 ) {
     val context = LocalContext.current
     val prefs = remember { context.getSharedPreferences("settings", android.content.Context.MODE_PRIVATE) }
-    var opacity by remember { mutableStateOf(prefs.getFloat("gamepad_opacity", 0.55f)) }
+    var settings by remember { mutableStateOf(com.ubuntumobile.gamepad.GamepadSettings.load(prefs)) }
+    fun update(changed: com.ubuntumobile.gamepad.GamepadSettings) {
+        settings = changed
+        changed.save(prefs)
+    }
+    var editing by remember { mutableStateOf(false) }
     val pad = remember { GamepadState() }
     val bridge = remember { GamepadBridge(vm.runtime, vm.paths) }
-    var bridgeActive by remember { mutableStateOf(true) }
+    var bridgeActive by remember { mutableStateOf<Boolean?>(null) }
+    val mode = settings.mode ?: if (bridgeActive == true) {
+        com.ubuntumobile.gamepad.PadMode.CONTROLLER
+    } else {
+        com.ubuntumobile.gamepad.PadMode.KEYBOARD
+    }
 
     LaunchedEffect(Unit) {
         bridgeActive = bridge.start()
     }
+    // Keys held down for the pad, so they can be let go.
+    val held = remember { mutableSetOf<Int>() }
+    fun releaseKeys() {
+        held.forEach { session.key(it, false) }
+        held.clear()
+    }
     DisposableEffect(Unit) {
         onDispose {
+            releaseKeys()
             bridge.stop()
             pad.reset()
         }
     }
-    // Push the controller state into the container whenever it changes.
+    // Push the controller state into Linux whenever it changes.
     LaunchedEffect(pad.leftX, pad.leftY, pad.rightX, pad.rightY,
-        pad.leftTrigger, pad.rightTrigger, pad.pressedButtons()) {
-        bridge.pushState(pad)
+        pad.leftTrigger, pad.rightTrigger, pad.pressedButtons(), mode, editing) {
+        if (editing) return@LaunchedEffect
+        if (mode == com.ubuntumobile.gamepad.PadMode.CONTROLLER) {
+            releaseKeys()
+            bridge.pushState(pad)
+        } else {
+            val want = com.ubuntumobile.gamepad.heldKeys(pad, settings)
+            (held - want).forEach { session.key(it, false) }
+            (want - held).forEach { session.key(it, true) }
+            held.clear()
+            held.addAll(want)
+        }
+    }
+    // Keyboard mode: the right stick moves the pointer, as in a game's
+    // mouse look.
+    LaunchedEffect(mode, editing) {
+        if (mode != com.ubuntumobile.gamepad.PadMode.KEYBOARD || editing) return@LaunchedEffect
+        while (true) {
+            val x = pad.rightX
+            val y = pad.rightY
+            if (kotlin.math.abs(x) > 0.15f || kotlin.math.abs(y) > 0.15f) {
+                session.movePointer((x * 14).toInt(), (y * 14).toInt(), 0)
+            }
+            delay(16)
+        }
     }
 
     Box(
@@ -950,49 +1097,184 @@ private fun GamepadOverlay(
         VirtualGamepad(
             state = pad,
             landscape = landscape,
-            opacity = if (overGame) opacity else 1f,
+            settings = if (overGame) settings else settings.copy(opacity = 1f),
+            accent = UbuntuPalette.UbuntuOrange,
+            editing = editing,
+            onMoved = { part, dx, dy ->
+                val (x, y) = settings.offset(part)
+                update(settings.copy(offsets = settings.offsets + (part to ((x + dx) to (y + dy)))))
+            },
             modifier = Modifier.systemBarsPadding(),
         )
+        // Out of the way, in the corner: edit, and hide.
         Row(
             Modifier
-                .align(Alignment.TopCenter)
+                .align(Alignment.TopEnd)
                 .systemBarsPadding()
-                .padding(top = 8.dp)
-                .clip(RoundedCornerShape(20.dp))
-                .background(Color.Black.copy(alpha = 0.45f))
-                .padding(horizontal = 6.dp),
-            verticalAlignment = Alignment.CenterVertically,
+                .padding(top = 8.dp, end = 64.dp),
+            horizontalArrangement = Arrangement.spacedBy(6.dp),
         ) {
-            if (overGame) {
-                Icon(Icons.Default.Opacity, contentDescription = null, tint = Color.White.copy(alpha = 0.8f), modifier = Modifier.padding(start = 8.dp).size(18.dp))
-                androidx.compose.material3.Slider(
-                    value = opacity,
-                    onValueChange = { opacity = it },
-                    onValueChangeFinished = { prefs.edit().putFloat("gamepad_opacity", opacity).apply() },
-                    valueRange = 0.15f..1f,
-                    colors = androidx.compose.material3.SliderDefaults.colors(
-                        thumbColor = Color.White,
-                        activeTrackColor = Color.White.copy(alpha = 0.8f),
-                        inactiveTrackColor = Color.White.copy(alpha = 0.25f),
-                    ),
-                    modifier = Modifier.width(120.dp).height(36.dp),
-                )
+            IconButton(
+                onClick = { editing = !editing },
+                modifier = Modifier.size(40.dp).clip(RoundedCornerShape(20.dp)).background(Color.Black.copy(alpha = 0.45f)),
+            ) {
+                Icon(Icons.Default.Edit, contentDescription = "Edit the gamepad", tint = Color.White, modifier = Modifier.size(20.dp))
             }
-            IconButton(onClick = onClose, modifier = Modifier.size(40.dp)) {
-                Icon(Icons.Default.Close, contentDescription = "Hide the gamepad", tint = Color.White)
+            IconButton(
+                onClick = onClose,
+                modifier = Modifier.size(40.dp).clip(RoundedCornerShape(20.dp)).background(Color.Black.copy(alpha = 0.45f)),
+            ) {
+                Icon(Icons.Default.Close, contentDescription = "Hide the gamepad", tint = Color.White, modifier = Modifier.size(20.dp))
             }
         }
-        if (!bridgeActive) {
-            Text(
-                "On-screen controls only — this device does not expose /dev/uinput, " +
-                    "so Linux games cannot see a virtual pad.",
-                color = Color.White.copy(alpha = 0.75f),
-                fontSize = 12.sp,
+        if (editing) {
+            GamepadEditor(
+                settings = settings,
+                mode = mode,
+                controllerAvailable = bridgeActive == true,
+                onChange = { update(it) },
+                onDone = { editing = false },
+                // In portrait the controls are in the lower half: the
+                // editor keeps to the top, so they can still be dragged.
                 modifier = Modifier
-                    .align(Alignment.Center)
-                    .padding(24.dp),
-                textAlign = TextAlign.Center,
+                    .align(if (landscape) Alignment.Center else Alignment.TopCenter)
+                    .systemBarsPadding()
+                    .padding(top = if (landscape) 0.dp else 56.dp),
             )
+        }
+    }
+}
+
+/** The gamepad's settings, over the pad while its parts can be dragged. */
+@Composable
+private fun GamepadEditor(
+    settings: com.ubuntumobile.gamepad.GamepadSettings,
+    mode: com.ubuntumobile.gamepad.PadMode,
+    controllerAvailable: Boolean,
+    onChange: (com.ubuntumobile.gamepad.GamepadSettings) -> Unit,
+    onDone: () -> Unit,
+    modifier: Modifier = Modifier,
+) {
+    val sliderColors = androidx.compose.material3.SliderDefaults.colors(
+        thumbColor = Color.White,
+        activeTrackColor = UbuntuPalette.UbuntuOrange,
+        inactiveTrackColor = Color.White.copy(alpha = 0.25f),
+    )
+    @Composable
+    fun Chip(label: String, selected: Boolean, onClick: () -> Unit) {
+        Text(
+            label,
+            color = Color.White,
+            fontSize = 13.sp,
+            modifier = Modifier
+                .clip(RoundedCornerShape(16.dp))
+                .background(if (selected) UbuntuPalette.UbuntuOrange else Color.White.copy(alpha = 0.12f))
+                .clickable(onClick = onClick)
+                .padding(horizontal = 12.dp, vertical = 7.dp),
+        )
+    }
+    @Composable
+    fun Label(text: String) {
+        Text(text, color = Color.White.copy(alpha = 0.7f), fontSize = 12.sp, modifier = Modifier.padding(top = 10.dp, bottom = 4.dp))
+    }
+    Column(
+        modifier
+            .widthIn(max = 380.dp)
+            .fillMaxWidth(0.88f)
+            .heightIn(max = if (LocalConfiguration.current.orientation == android.content.res.Configuration.ORIENTATION_LANDSCAPE) 520.dp else 330.dp)
+            .clip(RoundedCornerShape(20.dp))
+            .background(Color(0xF0222222))
+            .verticalScroll(rememberScrollState())
+            .padding(16.dp),
+    ) {
+        Text("Edit gamepad", color = Color.White, fontSize = 18.sp, fontWeight = FontWeight.Medium)
+        Text("Drag the controls to move them.", color = Color.White.copy(alpha = 0.7f), fontSize = 12.sp)
+
+        Label("See-through")
+        androidx.compose.material3.Slider(
+            value = settings.opacity,
+            onValueChange = { onChange(settings.copy(opacity = it)) },
+            valueRange = 0.15f..1f,
+            colors = sliderColors,
+        )
+        Label("Size")
+        androidx.compose.material3.Slider(
+            value = settings.size,
+            onValueChange = { onChange(settings.copy(size = it)) },
+            valueRange = 0.7f..1.4f,
+            colors = sliderColors,
+        )
+        Label("Style")
+        Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+            com.ubuntumobile.gamepad.PadStyle.entries.forEach { style ->
+                Chip(style.label, settings.style == style) { onChange(settings.copy(style = style)) }
+            }
+        }
+        Label("Linux sees it as")
+        Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+            com.ubuntumobile.gamepad.PadMode.entries.forEach { m ->
+                Chip(m.label, mode == m) { onChange(settings.copy(mode = m)) }
+            }
+        }
+        if (mode == com.ubuntumobile.gamepad.PadMode.CONTROLLER && !controllerAvailable) {
+            Text(
+                "This phone does not let apps create a game controller (it needs /dev/uinput, usually root). " +
+                    "Keyboard keys work with every game.",
+                color = UbuntuPalette.UbuntuOrangeLight,
+                fontSize = 12.sp,
+                modifier = Modifier.padding(top = 6.dp),
+            )
+        }
+        if (mode == com.ubuntumobile.gamepad.PadMode.KEYBOARD) {
+            Label("Stick and D-pad")
+            Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                Chip("Arrow keys", !settings.wasd) { onChange(settings.copy(wasd = false)) }
+                Chip("WASD", settings.wasd) { onChange(settings.copy(wasd = true)) }
+            }
+            Label("Buttons (tap to change the key)")
+            val names = mapOf("L1" to "LB", "R1" to "RB")
+            com.ubuntumobile.gamepad.PadParts.buttons.chunked(2).forEach { pair ->
+                Row(Modifier.fillMaxWidth().padding(vertical = 3.dp), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                    pair.forEach { button ->
+                        var open by remember { mutableStateOf(false) }
+                        val key = settings.keys[button] ?: 0
+                        Box(Modifier.weight(1f)) {
+                            Row(
+                                Modifier
+                                    .fillMaxWidth()
+                                    .clip(RoundedCornerShape(10.dp))
+                                    .background(Color.White.copy(alpha = 0.08f))
+                                    .clickable { open = true }
+                                    .padding(horizontal = 10.dp, vertical = 8.dp),
+                            ) {
+                                Text(names[button] ?: button.lowercase().replaceFirstChar { it.uppercase() },
+                                    color = Color.White, fontSize = 13.sp, modifier = Modifier.weight(1f))
+                                Text(com.ubuntumobile.gamepad.PadParts.label(key), color = UbuntuPalette.UbuntuOrangeLight, fontSize = 13.sp)
+                            }
+                            androidx.compose.material3.DropdownMenu(expanded = open, onDismissRequest = { open = false }) {
+                                com.ubuntumobile.gamepad.PadParts.keys.forEach { choice ->
+                                    androidx.compose.material3.DropdownMenuItem(
+                                        text = { Text(choice.label) },
+                                        onClick = {
+                                            open = false
+                                            onChange(settings.copy(keys = settings.keys + (button to choice.keysym)))
+                                        },
+                                    )
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+        }
+        Row(Modifier.fillMaxWidth().padding(top = 14.dp), horizontalArrangement = Arrangement.End) {
+            androidx.compose.material3.TextButton(onClick = {
+                onChange(com.ubuntumobile.gamepad.GamepadSettings(mode = settings.mode))
+            }) { Text("Reset", color = Color.White.copy(alpha = 0.8f)) }
+            Spacer(Modifier.width(8.dp))
+            androidx.compose.material3.TextButton(onClick = onDone) {
+                Text("Done", color = UbuntuPalette.UbuntuOrangeLight, fontWeight = FontWeight.Medium)
+            }
         }
     }
 }

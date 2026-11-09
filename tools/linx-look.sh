@@ -44,6 +44,14 @@ if [ -d "/usr/share/icons/$YARU" ]; then
 else
   set_xsettings /Net/IconThemeName string Adwaita
 fi
+# Ubuntu's pointer. A cursor theme also gives every cursor a name - the
+# core X cursors have none - and the app goes by the name: over a text
+# field it is "text", and a tap there brings up the phone's keyboard.
+if [ -d /usr/share/icons/Yaru/cursors ]; then
+  set_xsettings /Gtk/CursorThemeName string Yaru
+elif [ -d /usr/share/icons/Adwaita/cursors ]; then
+  set_xsettings /Gtk/CursorThemeName string Adwaita
+fi
 # GTK 4 and libadwaita apps ask for the colour scheme instead.
 xfconf-query -c xsettings -p /Gtk/ApplicationPreferDarkTheme -n -t bool -s \
   "$([ "$LINX_DARK" = 1 ] && echo true || echo false)" 2>/dev/null

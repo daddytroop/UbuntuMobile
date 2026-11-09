@@ -82,7 +82,7 @@ fun MenuHandle(connected: Boolean, onClick: () -> Unit) {
                 .padding(end = 6.dp)
                 .size(size)
                 .clip(CircleShape)
-                .background(Color(0xCC2C001E))
+                .background(UbuntuPalette.AubergineDeep.copy(alpha = 0.85f))
                 .border(1.dp, Color.White.copy(alpha = 0.25f), CircleShape)
                 .pointerInput(maxY) {
                     detectDragGestures { change, drag ->

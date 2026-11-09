@@ -94,6 +94,8 @@ class DisplayActions(
     val setup: SetupStatus? = null,
     val onRetrySetup: () -> Unit = {},
     val onShareSetupLog: (() -> Unit)? = null,
+    /** An app started from the launcher whose window has not appeared yet. */
+    val opening: String? = null,
 )
 
 /**
@@ -124,6 +126,7 @@ fun DisplayScreen(
         )
         overlay()
         SetupBanner(actions.setup, actions.onRetrySetup, Modifier.align(Alignment.TopCenter), actions.onShareSetupLog)
+        OpeningPill(actions.opening, Modifier.align(Alignment.BottomCenter).padding(bottom = 72.dp))
         MenuHandle(connected = session.connected, onClick = { menuOpen = true })
         DesktopMenu(
             open = menuOpen,
@@ -228,6 +231,7 @@ fun DesktopSurface(
                             session.pointer(fbX(p), fbY(p), 0)
                             session.pointer(fbX(p), fbY(p), 1)
                             session.pointer(fbX(p), fbY(p), 0)
+                            session.onTapped?.invoke()
                         },
                         onDoubleTap = { p ->
                             if (mouse) return@detectTapGestures
@@ -376,7 +380,7 @@ private fun ConnectingPanel(
             .fillMaxSize()
             .background(
                 Brush.verticalGradient(
-                    listOf(UbuntuPalette.AubergineDark, Color(0xFF2A0B27), Color(0xFF140512)),
+                    listOf(UbuntuPalette.AubergineDark, UbuntuPalette.AubergineDeep, Color(0xFF0E0E0E)),
                 ),
             ),
         contentAlignment = Alignment.Center,

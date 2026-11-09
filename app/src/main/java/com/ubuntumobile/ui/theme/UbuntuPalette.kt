@@ -1,6 +1,10 @@
 package com.ubuntumobile.ui.theme
 
+import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.setValue
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.lerp
 
 /**
  * Ubuntu 26.04 "Resolute Raccoon" palette.
@@ -11,13 +15,20 @@ import androidx.compose.ui.graphics.Color
  */
 object UbuntuPalette {
 
-    // Brand
-    val UbuntuOrange = Color(0xFFE95420)
-    val UbuntuOrangeHover = Color(0xFFD9481A)
-    val UbuntuOrangeLight = Color(0xFFFF8A52)
+    // Brand: Ubuntu's orange, or the accent colour chosen at setup. It is
+    // state, so every screen that draws with it follows a change at once.
+    var accent by mutableStateOf(Color(0xFFE95420))
+    val UbuntuOrange: Color get() = accent
+    val UbuntuOrangeHover: Color get() = lerp(accent, Color.Black, 0.1f)
+    val UbuntuOrangeLight: Color get() = lerp(accent, Color.White, 0.3f)
 
-    val Aubergine = Color(0xFF77216F)
-    val AubergineDark = Color(0xFF5C1B56)
+    private val Orange = Color(0xFFE95420)
+
+    // The app's own dark backgrounds: Ubuntu's aubergine with its orange,
+    // and a deep shade of the accent with any other.
+    val Aubergine: Color get() = if (accent == Orange) Color(0xFF77216F) else lerp(accent, Color(0xFF151515), 0.55f)
+    val AubergineDark: Color get() = if (accent == Orange) Color(0xFF5C1B56) else lerp(accent, Color.Black, 0.68f)
+    val AubergineDeep: Color get() = if (accent == Orange) Color(0xFF2A0B27) else lerp(accent, Color.Black, 0.84f)
     val AubergineLight = Color(0xFF9A5C93)
 
     // Light surfaces (Yaru light)

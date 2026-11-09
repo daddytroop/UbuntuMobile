@@ -86,6 +86,9 @@ class DisplaySession(
     /** Called (on the reader thread) when Linux puts text on its clipboard. */
     var onClipboard: ((String) -> Unit)? = null
 
+    /** Called (on the main thread) after a tap on the phone's screen has clicked in Linux. */
+    var onTapped: (() -> Unit)? = null
+
     /** Called (on the reader thread) whenever a new frame is available. */
     var onFrame: (() -> Unit)? = null
 

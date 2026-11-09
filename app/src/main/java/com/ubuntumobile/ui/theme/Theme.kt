@@ -9,6 +9,7 @@ import androidx.compose.material3.lightColorScheme
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.SideEffect
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.toArgb
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.LocalView
 import androidx.compose.ui.text.TextStyle
@@ -18,7 +19,7 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.core.view.WindowCompat
 
-private val LightColors = lightColorScheme(
+private fun lightColors() = lightColorScheme(
     primary = UbuntuPalette.UbuntuOrange,
     onPrimary = Color.White,
     primaryContainer = Color(0xFFFFDBCF),
@@ -43,7 +44,7 @@ private val LightColors = lightColorScheme(
     onErrorContainer = Color(0xFF410002),
 )
 
-private val DarkColors = darkColorScheme(
+private fun darkColors() = darkColorScheme(
     primary = UbuntuPalette.UbuntuOrangeLight,
     onPrimary = Color(0xFF561F0D),
     primaryContainer = Color(0xFF7A2E12),
@@ -124,7 +125,11 @@ fun UbuntuTheme(
     darkTheme: Boolean = isSystemInDarkTheme(),
     content: @Composable () -> Unit,
 ) {
-    val colors = if (darkTheme) DarkColors else LightColors
+    // Built afresh when the accent changes (UbuntuPalette.accent).
+    val accent = UbuntuPalette.accent
+    val colors = androidx.compose.runtime.remember(darkTheme, accent) {
+        if (darkTheme) darkColors() else lightColors()
+    }
     val view = LocalView.current
 
     if (!view.isInEditMode) {
@@ -134,6 +139,11 @@ fun UbuntuTheme(
             // bars, so their icons are always drawn light.
             WindowCompat.getInsetsController(window, view).isAppearanceLightStatusBars = false
             WindowCompat.getInsetsController(window, view).isAppearanceLightNavigationBars = false
+            // The bars take the app's colour, which follows the accent.
+            @Suppress("DEPRECATION")
+            window.statusBarColor = UbuntuPalette.Aubergine.toArgb()
+            @Suppress("DEPRECATION")
+            window.navigationBarColor = UbuntuPalette.AubergineDeep.toArgb()
         }
     }
 

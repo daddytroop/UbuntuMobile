@@ -13,6 +13,7 @@ import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
+import androidx.compose.foundation.layout.offset
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
@@ -20,6 +21,7 @@ import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.compositionLocalOf
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
@@ -28,6 +30,7 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.alpha
 import androidx.compose.ui.draw.clip
+import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.drawscope.Stroke
@@ -94,99 +97,139 @@ class GamepadState {
     }
 }
 
+/** The colours a [PadStyle] gives the face buttons and the sticks' knobs. */
+private class PadColors(val a: Color, val b: Color, val x: Color, val y: Color, val knob: Color)
+
+private val LocalPadColors = compositionLocalOf {
+    PadColors(Color(0xFF5BAE4A), Color(0xFFD43E3E), Color(0xFF3B78D8), Color(0xFFE8C02A), Color(0xFFE95420))
+}
+
+private fun padColors(style: PadStyle, accent: Color) = when (style) {
+    PadStyle.CLASSIC -> PadColors(Color(0xFF5BAE4A), Color(0xFFD43E3E), Color(0xFF3B78D8), Color(0xFFE8C02A), accent)
+    PadStyle.MONO -> Color(0xFF9A9A9A).let { PadColors(it, it, it, it, Color(0xFFDDDDDD)) }
+    PadStyle.ACCENT -> PadColors(accent, accent, accent, accent, accent)
+}
+
+/**
+ * Where each part of the pad sits before the user moves it: an edge or
+ * corner of the screen and a distance from it, in dp. In landscape the
+ * left hand gets the left stick and the D-pad, the right hand the face
+ * buttons and the right stick; in portrait they all sit in the lower half,
+ * under the game.
+ */
+private fun homes(landscape: Boolean): Map<String, Pair<Alignment, Pair<Float, Float>>> =
+    if (landscape) mapOf(
+        "lshoulder" to (Alignment.TopStart to (0f to 0f)),
+        "rshoulder" to (Alignment.TopEnd to (0f to 0f)),
+        "lstick" to (Alignment.BottomStart to (13f to -158f)),
+        "dpad" to (Alignment.BottomStart to (0f to 0f)),
+        "face" to (Alignment.BottomEnd to (0f to -132f)),
+        "rstick" to (Alignment.BottomEnd to (23f to 0f)),
+        "middle" to (Alignment.BottomCenter to (0f to 0f)),
+    ) else mapOf(
+        "lshoulder" to (Alignment.BottomStart to (0f to -330f)),
+        "rshoulder" to (Alignment.BottomEnd to (0f to -330f)),
+        "dpad" to (Alignment.BottomStart to (0f to -140f)),
+        "face" to (Alignment.BottomEnd to (0f to -136f)),
+        "lstick" to (Alignment.BottomStart to (0f to 0f)),
+        "rstick" to (Alignment.BottomEnd to (0f to 0f)),
+        "middle" to (Alignment.BottomCenter to (0f to -44f)),
+    )
+
 /**
  * The on-screen gamepad, drawn over the game.
  *
- * It is an overlay: the controls are see-through ([opacity]) and sit at
- * the edges like a handheld's, and nothing but the controls themselves
- * takes touches, so the game stays visible - and touchable - in between.
- * In landscape the left hand gets the left stick and the D-pad, the right
- * hand the face buttons and the right stick; in portrait they all sit in
- * the lower half, under the game.
+ * It is an overlay: the controls are see-through ([GamepadSettings.opacity])
+ * and sit at the edges like a handheld's, and nothing but the controls
+ * themselves takes touches, so the game stays visible - and touchable - in
+ * between. Each part can be moved ([editing]: drag it), and the whole pad
+ * resized and recoloured ([GamepadSettings]).
  */
 @Composable
 fun VirtualGamepad(
     state: GamepadState,
     landscape: Boolean,
+    settings: GamepadSettings,
     modifier: Modifier = Modifier,
-    opacity: Float = 0.6f,
+    accent: Color = Color(0xFFE95420),
+    /** Parts can be dragged to new places, and do not press. */
+    editing: Boolean = false,
+    onMoved: (part: String, dx: Float, dy: Float) -> Unit = { _, _, _ -> },
     onHaptic: (String) -> Unit = {},
 ) {
-    val leftStick = @Composable {
-        AnalogStick(state.leftX, state.leftY, { x, y ->
-            state.leftX = x; state.leftY = y
-        }, { state.leftX = 0f; state.leftY = 0f })
-    }
-    val rightStick = @Composable {
-        AnalogStick(state.rightX, state.rightY, { x, y ->
-            state.rightX = x; state.rightY = y
-        }, { state.rightX = 0f; state.rightY = 0f })
-    }
-    val leftShoulder = @Composable {
-        Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-            ShoulderButton("LT", state.leftTrigger > 0f, { state.leftTrigger = 1f }, { state.leftTrigger = 0f })
-            ShoulderButton("LB", state.l1, { state.l1 = true }, { state.l1 = false })
-        }
-    }
-    val rightShoulder = @Composable {
-        Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-            ShoulderButton("RB", state.r1, { state.r1 = true }, { state.r1 = false })
-            ShoulderButton("RT", state.rightTrigger > 0f, { state.rightTrigger = 1f }, { state.rightTrigger = 0f })
-        }
-    }
-    val middle = @Composable {
-        Row(horizontalArrangement = Arrangement.spacedBy(16.dp)) {
-            ShoulderButton("SELECT", state.select, { state.select = true }, { state.select = false }, small = true)
-            ShoulderButton("START", state.start, { state.start = true }, { state.start = false }, small = true)
-        }
-    }
-
-    Box(modifier.fillMaxSize().alpha(opacity).padding(horizontal = 20.dp, vertical = 12.dp)) {
-        if (landscape) {
-            Box(Modifier.align(Alignment.TopStart)) { leftShoulder() }
-            Box(Modifier.align(Alignment.TopEnd)) { rightShoulder() }
-            Column(
-                Modifier.align(Alignment.BottomStart),
-                horizontalAlignment = Alignment.CenterHorizontally,
-                verticalArrangement = Arrangement.spacedBy(8.dp),
-            ) {
-                leftStick()
-                DPad(state)
+    val parts: Map<String, @Composable () -> Unit> = mapOf(
+        "lstick" to {
+            AnalogStick(state.leftX, state.leftY, { x, y ->
+                state.leftX = x; state.leftY = y
+            }, { state.leftX = 0f; state.leftY = 0f })
+        },
+        "rstick" to {
+            AnalogStick(state.rightX, state.rightY, { x, y ->
+                state.rightX = x; state.rightY = y
+            }, { state.rightX = 0f; state.rightY = 0f })
+        },
+        "lshoulder" to {
+            Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                ShoulderButton("LT", state.leftTrigger > 0f, { state.leftTrigger = 1f }, { state.leftTrigger = 0f })
+                ShoulderButton("LB", state.l1, { state.l1 = true }, { state.l1 = false })
             }
-            Column(
-                Modifier.align(Alignment.BottomEnd),
-                horizontalAlignment = Alignment.CenterHorizontally,
-                verticalArrangement = Arrangement.spacedBy(8.dp),
-            ) {
-                FaceButtons(state, onHaptic)
-                rightStick()
+        },
+        "rshoulder" to {
+            Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                ShoulderButton("RB", state.r1, { state.r1 = true }, { state.r1 = false })
+                ShoulderButton("RT", state.rightTrigger > 0f, { state.rightTrigger = 1f }, { state.rightTrigger = 0f })
             }
-            Box(Modifier.align(Alignment.BottomCenter)) { middle() }
-        } else {
-            Column(
-                Modifier.align(Alignment.BottomCenter).fillMaxWidth(),
-                verticalArrangement = Arrangement.spacedBy(12.dp),
-            ) {
-                Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
-                    leftShoulder()
-                    rightShoulder()
-                }
-                Row(
-                    Modifier.fillMaxWidth(),
-                    horizontalArrangement = Arrangement.SpaceBetween,
-                    verticalAlignment = Alignment.CenterVertically,
+        },
+        "middle" to {
+            Row(horizontalArrangement = Arrangement.spacedBy(16.dp)) {
+                ShoulderButton("SELECT", state.select, { state.select = true }, { state.select = false }, small = true)
+                ShoulderButton("START", state.start, { state.start = true }, { state.start = false }, small = true)
+            }
+        },
+        "dpad" to { DPad(state) },
+        "face" to { FaceButtons(state, onHaptic) },
+    )
+    val density = LocalDensity.current
+    androidx.compose.runtime.CompositionLocalProvider(LocalPadColors provides padColors(settings.style, accent)) {
+        Box(
+            modifier
+                .fillMaxSize()
+                .alpha(if (editing) maxOf(settings.opacity, 0.85f) else settings.opacity)
+                .padding(horizontal = 20.dp, vertical = 12.dp),
+        ) {
+            for ((name, home) in homes(landscape)) {
+                val (align, base) = home
+                val (dx, dy) = settings.offset(name)
+                val origin = androidx.compose.ui.graphics.TransformOrigin(
+                    if (align == Alignment.TopEnd || align == Alignment.BottomEnd) 1f
+                    else if (align == Alignment.BottomCenter) 0.5f else 0f,
+                    if (align == Alignment.TopStart || align == Alignment.TopEnd) 0f else 1f,
+                )
+                Box(
+                    Modifier
+                        .align(align)
+                        .offset((base.first + dx).dp, (base.second + dy).dp)
+                        .graphicsLayer(scaleX = settings.size, scaleY = settings.size, transformOrigin = origin),
                 ) {
-                    DPad(state)
-                    FaceButtons(state, onHaptic)
-                }
-                Row(
-                    Modifier.fillMaxWidth(),
-                    horizontalArrangement = Arrangement.SpaceBetween,
-                    verticalAlignment = Alignment.CenterVertically,
-                ) {
-                    leftStick()
-                    middle()
-                    rightStick()
+                    parts.getValue(name)()
+                    if (editing) {
+                        // Over the part while editing: it takes the drags,
+                        // so nothing is pressed.
+                        Box(
+                            Modifier
+                                .matchParentSize()
+                                .border(2.dp, Color.White, RoundedCornerShape(12.dp))
+                                .background(Color.White.copy(alpha = 0.12f), RoundedCornerShape(12.dp))
+                                .pointerInput(name) {
+                                    detectDragGestures { change, drag ->
+                                        change.consume()
+                                        with(density) {
+                                            onMoved(name, drag.x.toDp().value * settings.size, drag.y.toDp().value * settings.size)
+                                        }
+                                    }
+                                },
+                        )
+                    }
                 }
             }
         }
@@ -226,6 +269,7 @@ private fun AnalogStick(
     onRelease: () -> Unit,
 ) {
     var center by remember { mutableStateOf<Offset?>(null) }
+    val knobColor = LocalPadColors.current.knob
     val radius = 62.dp
     val density = LocalDensity.current
     val maxRadiusPx = with(density) { radius.toPx() }
@@ -282,7 +326,7 @@ private fun AnalogStick(
                 val r = size.minDimension / 2f
                 val knob = r * 0.45f
                 drawCircle(
-                    color = UbuntuOrangeKnob,
+                    color = knobColor,
                     radius = knob,
                     center = Offset(
                         size.width / 2f + x * (r - knob),
@@ -294,7 +338,6 @@ private fun AnalogStick(
     }
 }
 
-private val UbuntuOrangeKnob = Color(0xFFE95420)
 
 /** Directional pad. */
 @Composable
@@ -326,24 +369,25 @@ private fun DPad(state: GamepadState) {
 /** The four face buttons, arranged like an Xbox pad. */
 @Composable
 private fun FaceButtons(state: GamepadState, onHaptic: (String) -> Unit) {
+    val colors = LocalPadColors.current
     Box(modifier = Modifier.size(170.dp)) {
         FaceButton(
-            label = "A", color = Color(0xFF5BAE4A), pressed = state.a,
+            label = "A", color = colors.a, pressed = state.a,
             modifier = Modifier.align(Alignment.BottomCenter),
             onDown = { state.a = true; onHaptic("A") }, onUp = { state.a = false },
         )
         FaceButton(
-            label = "B", color = Color(0xFFD43E3E), pressed = state.b,
+            label = "B", color = colors.b, pressed = state.b,
             modifier = Modifier.align(Alignment.CenterEnd),
             onDown = { state.b = true; onHaptic("B") }, onUp = { state.b = false },
         )
         FaceButton(
-            label = "X", color = Color(0xFF3B78D8), pressed = state.x,
+            label = "X", color = colors.x, pressed = state.x,
             modifier = Modifier.align(Alignment.CenterStart),
             onDown = { state.x = true; onHaptic("X") }, onUp = { state.x = false },
         )
         FaceButton(
-            label = "Y", color = Color(0xFFE8C02A), pressed = state.y,
+            label = "Y", color = colors.y, pressed = state.y,
             modifier = Modifier.align(Alignment.TopCenter),
             onDown = { state.y = true; onHaptic("Y") }, onUp = { state.y = false },
         )
