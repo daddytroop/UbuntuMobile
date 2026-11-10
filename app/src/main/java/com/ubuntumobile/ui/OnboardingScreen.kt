@@ -215,7 +215,7 @@ data class SetupChoices(
     }
 }
 
-private enum class Page { WELCOME, PROFILE, LOOK, APPS, DEV, STORES, READY }
+private enum class Page { WELCOME, PROFILE, LOOK, APPS, DEV, STORES, PHONE, READY }
 
 /**
  * The first thing a new user sees: a few questions, Ubuntu-installer
@@ -288,6 +288,7 @@ fun OnboardingScreen(
                         Page.APPS -> AppsPage(choices) { choices = it }
                         Page.DEV -> DevPage(choices) { choices = it }
                         Page.STORES -> StoresPage(choices) { choices = it }
+                        Page.PHONE -> OneDevicePage()
                         Page.READY -> ReadyPage(choices, unpackFraction)
                     }
                 }
@@ -375,7 +376,7 @@ private fun Feature(icon: ImageVector, title: String, detail: String) {
 }
 
 @Composable
-private fun PageTitle(title: String, subtitle: String) {
+internal fun PageTitle(title: String, subtitle: String) {
     Text(title, color = Color.White, fontSize = 26.sp, fontWeight = FontWeight.Bold)
     Spacer(Modifier.height(6.dp))
     Text(subtitle, color = Color.White.copy(alpha = 0.75f), fontSize = 14.sp)

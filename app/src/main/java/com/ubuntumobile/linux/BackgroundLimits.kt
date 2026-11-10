@@ -23,12 +23,25 @@ object BackgroundLimits {
     /** Whether Android may kill Linux's processes (the child process restrictions are on). */
     fun childProcessesLimited(context: Context): Boolean {
         if (Build.VERSION.SDK_INT < Build.VERSION_CODES.S) return false
-        val value = try {
-            Settings.Global.getString(context.contentResolver, "settings_enable_monitor_phantom_procs")
+        // The developer option is a feature flag: Settings keeps it as a
+        // system property, not as a global setting (checked on Android 14).
+        if (systemProperty("persist.sys.fflag.override.$PHANTOM_FLAG") == "false") return false
+        val global = try {
+            Settings.Global.getString(context.contentResolver, PHANTOM_FLAG)
         } catch (_: Exception) {
             null
         }
-        return value != "false"
+        return global != "false"
+    }
+
+    private const val PHANTOM_FLAG = "settings_enable_monitor_phantom_procs"
+
+    /** A system property, through getprop (android.os.SystemProperties is hidden). */
+    private fun systemProperty(name: String): String = try {
+        val proc = ProcessBuilder("/system/bin/getprop", name).redirectErrorStream(true).start()
+        proc.inputStream.bufferedReader().use { it.readText() }.trim().also { proc.waitFor() }
+    } catch (_: Exception) {
+        ""
     }
 
     /** Whether the developer option exists (Android 14 and newer). */

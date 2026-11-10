@@ -125,7 +125,7 @@ fun SettingsScreen(
                         ok = !childProcessesLimited,
                         okText = "Off: Android leaves Linux's programs alone.",
                         fixText = if (canTurnOffChildLimits) {
-                            "On: Android may close Linux programs at random. In Developer options, turn on \"Disable child process restrictions\". " +
+                            "On: Android may close Linux programs at random. In Developer options, search for \"child\" and turn on \"Disable child process restrictions\". " +
                                 "No Developer options? Settings → About phone → Software information → tap Build number 7 times."
                         } else {
                             "This Android version limits how many programs an app may run; it has no switch for it."

@@ -292,8 +292,10 @@ the first time the desktop is up:
 - **Child process restrictions.** Since Android 12, Android kills an app's
   extra processes when there are more than 32 or when they use the processor
   in the background. Every Linux process is one of those. Android 14 and newer
-  have **Disable child process restrictions** in Developer options, which sets
-  `settings_enable_monitor_phantom_procs` to false.
+  have **Disable child process restrictions** in Developer options. It is a
+  feature flag, kept as the system property
+  `persist.sys.fflag.override.settings_enable_monitor_phantom_procs`, not as
+  a global setting, so the app reads it with `getprop`.
 - **Battery optimisation**, which the app asks to be left out of.
 
 ### Updates
