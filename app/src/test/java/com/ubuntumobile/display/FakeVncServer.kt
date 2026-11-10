@@ -43,6 +43,12 @@ class FakeVncServer(
      * overlapping place below and to the right, as dragging a window does.
      */
     private val copyRectAfterFirstFrame: Boolean = false,
+    /**
+     * Speak the extended clipboard the way Xvnc does: announce it when the
+     * client asks for it, say the clipboard changed before every frame, and
+     * send [EXTENDED_TEXT] (UTF-8) when the client asks for it.
+     */
+    private val extendedClipboard: Boolean = false,
 ) {
 
     /** The block the CopyRect moves: source x, y, then w, h, then destination x, y. */
@@ -51,6 +57,7 @@ class FakeVncServer(
 
     companion object {
         const val RESIZED_COLOUR = 0xFF336699.toInt()
+        const val EXTENDED_TEXT = "Grüße, 你好, привет 👋\nline two"
     }
 
     /** The sizes the client asked for with SetDesktopSize. */
@@ -161,7 +168,12 @@ class FakeVncServer(
                 2 -> { /* SetEncodings */
                     input.readUnsignedByte()
                     val count = input.readUnsignedShort()
-                    input.readFully(ByteArray(count * 4))
+                    val encodings = DataInputStream(ByteArray(count * 4).also { input.readFully(it) }.inputStream())
+                    val asked = (0 until count).map { encodings.readInt() }
+                    if (extendedClipboard && VncClient.ENCODING_EXTENDED_CLIPBOARD in asked) {
+                        // Caps: text, up to 10 MB.
+                        sendExtended(out, VncClient.CLIP_CAPS or VncClient.CLIP_TEXT, 10_000_000.toBigEndian())
+                    }
                 }
                 3 -> { // FramebufferUpdateRequest
                     input.readUnsignedByte()
@@ -191,9 +203,31 @@ class FakeVncServer(
                 }
                 6 -> { // ClientCutText
                     input.readFully(ByteArray(3))
-                    val text = ByteArray(input.readInt())
-                    input.readFully(text)
-                    clipboardTexts.add(String(text, Charsets.ISO_8859_1))
+                    val length = input.readInt()
+                    if (length < 0) {
+                        val payload = ByteArray(-length).also { input.readFully(it) }
+                        val flags = java.nio.ByteBuffer.wrap(payload, 0, 4).int
+                        when {
+                            flags and VncClient.CLIP_CAPS != 0 -> clientCaps = true
+                            flags and VncClient.CLIP_NOTIFY != 0 ->
+                                sendExtended(out, VncClient.CLIP_REQUEST or VncClient.CLIP_TEXT, ByteArray(0))
+                            flags and VncClient.CLIP_REQUEST != 0 -> sendExtended(
+                                out, VncClient.CLIP_PROVIDE or VncClient.CLIP_TEXT,
+                                deflateText(EXTENDED_TEXT.replace("\n", "\r\n")),
+                            )
+                            flags and VncClient.CLIP_PROVIDE != 0 -> {
+                                val data = DataInputStream(
+                                    java.util.zip.InflaterInputStream(payload.copyOfRange(4, payload.size).inputStream()),
+                                )
+                                val bytes = ByteArray(data.readInt()).also { data.readFully(it) }
+                                clipboardTexts.add(String(bytes, Charsets.UTF_8).trimEnd('\u0000'))
+                            }
+                        }
+                    } else {
+                        val text = ByteArray(length)
+                        input.readFully(text)
+                        clipboardTexts.add(String(text, Charsets.ISO_8859_1))
+                    }
                 }
                 251 -> { // SetDesktopSize
                     input.readUnsignedByte()
@@ -214,6 +248,30 @@ class FakeVncServer(
         }
     }
 
+    /** The client sent its extended clipboard capabilities. */
+    @Volatile var clientCaps = false
+
+    private fun sendExtended(out: OutputStream, flags: Int, data: ByteArray) {
+        synchronized(out) {
+            out.write(3)                     // ServerCutText
+            out.write(byteArrayOf(0, 0, 0))  // padding
+            out.write((-(4 + data.size)).toBigEndian())
+            out.write(flags.toBigEndian())
+            out.write(data)
+            out.flush()
+        }
+    }
+
+    private fun deflateText(text: String): ByteArray {
+        val utf8 = (text + "\u0000").toByteArray(Charsets.UTF_8)
+        val raw = java.io.ByteArrayOutputStream()
+        java.util.zip.DeflaterOutputStream(raw).use { z ->
+            z.write(utf8.size.toBigEndian())
+            z.write(utf8)
+        }
+        return raw.toByteArray()
+    }
+
     private fun sendUpdate(out: OutputStream) {
         if (resizable && sendResizableUpdate(out)) return
         if (copyRectAfterFirstFrame && framesSent++ == 1) {
@@ -226,6 +284,9 @@ class FakeVncServer(
             out.write(sx.toShortBigEndian()); out.write(sy.toShortBigEndian())
             out.flush()
             return
+        }
+        if (extendedClipboard && clientCaps && framesSent++ == 0) {
+            sendExtended(out, VncClient.CLIP_NOTIFY or VncClient.CLIP_TEXT, ByteArray(0))
         }
         if (sendCutText) {
             val text = "clipboard".toByteArray()

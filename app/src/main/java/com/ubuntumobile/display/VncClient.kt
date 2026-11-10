@@ -45,6 +45,22 @@ class VncClient(
         /** Pseudo-encoding: as DesktopSize, plus the client may ask for a size. */
         const val ENCODING_EXTENDED_DESKTOP_SIZE = -308
 
+        /**
+         * Pseudo-encoding: the extended clipboard (0xC0A1E5CE), which carries
+         * UTF-8 text, so every language and emoji survive copy and paste.
+         * TigerVNC's Xvnc has it; the basic clipboard is Latin-1 only.
+         */
+        const val ENCODING_EXTENDED_CLIPBOARD = 0xC0A1E5CE.toInt()
+
+        // The extended clipboard's flags: formats in the low bits, actions
+        // in the top byte.
+        const val CLIP_TEXT = 1
+        const val CLIP_CAPS = 1 shl 24
+        const val CLIP_REQUEST = 1 shl 25
+        const val CLIP_PEEK = 1 shl 26
+        const val CLIP_NOTIFY = 1 shl 27
+        const val CLIP_PROVIDE = 1 shl 28
+
         private const val MSG_FRAMEBUFFER_UPDATE = 0
         private const val MSG_SET_COLOUR_MAP_ENTRIES = 1
         private const val MSG_BELL = 2
@@ -163,6 +179,11 @@ class VncClient(
     /** Called (on the reader thread) when the desktop's clipboard changes. */
     var onClipboard: ((String) -> Unit)? = null
 
+    /** The server announced the extended clipboard (UTF-8). */
+    @Volatile var extendedClipboard = false
+        private set
+
+
     /** Called after every framebuffer update with the updated regions. */
     var onUpdate: ((List<Rect>) -> Unit)? = null
 
@@ -241,7 +262,7 @@ class VncClient(
         setEncodings(
             listOf(
                 ENCODING_COPY_RECT, ENCODING_RAW, ENCODING_HEXTILE,
-                ENCODING_EXTENDED_DESKTOP_SIZE, ENCODING_DESKTOP_SIZE,
+                ENCODING_EXTENDED_DESKTOP_SIZE, ENCODING_DESKTOP_SIZE, ENCODING_EXTENDED_CLIPBOARD,
             ),
         )
 
@@ -298,7 +319,12 @@ class VncClient(
                     // the padding puts the client three bytes out of step.
                     skipFully(3)
                     val length = stream.readInt()
-                    if (length in 0..MAX_CLIPBOARD) {
+                    if (length < 0 && length >= -MAX_CLIPBOARD) {
+                        // A negative length is an extended clipboard message.
+                        val payload = ByteArray(-length)
+                        stream.readFully(payload)
+                        handleExtendedClipboard(payload)
+                    } else if (length in 0..MAX_CLIPBOARD) {
                         val text = ByteArray(length)
                         stream.readFully(text)
                         // The basic RFB clipboard is Latin-1.
@@ -674,8 +700,64 @@ class VncClient(
 
 
     /**
-     * Put text on the desktop's clipboard (ClientCutText). The basic RFB
-     * clipboard is Latin-1: other characters arrive as "?".
+     * One extended clipboard message from the server: its capabilities,
+     * a note that its clipboard changed (ask for the text), a request for
+     * ours, or the text itself (zlib-compressed UTF-8).
+     */
+    private fun handleExtendedClipboard(payload: ByteArray) {
+        if (payload.size < 4) return
+        val flags = java.nio.ByteBuffer.wrap(payload, 0, 4).int
+        when {
+            flags and CLIP_CAPS != 0 -> {
+                extendedClipboard = true
+                // Ours: text, up to MAX_CLIPBOARD bytes; it only ever comes this way.
+                sendExtendedClipboard(
+                    CLIP_CAPS or CLIP_TEXT or CLIP_PEEK or CLIP_NOTIFY or CLIP_PROVIDE,
+                    java.nio.ByteBuffer.allocate(4).putInt(MAX_CLIPBOARD).array(),
+                )
+            }
+            flags and CLIP_NOTIFY != 0 -> {
+                if (flags and CLIP_TEXT != 0) sendExtendedClipboard(CLIP_REQUEST or CLIP_TEXT, ByteArray(0))
+            }
+            flags and CLIP_PEEK != 0 -> {
+                // Nothing to offer this way (see sendClipboard).
+                sendExtendedClipboard(CLIP_NOTIFY, ByteArray(0))
+            }
+            flags and CLIP_PROVIDE != 0 && flags and CLIP_TEXT != 0 -> {
+                decodeProvidedText(payload.copyOfRange(4, payload.size))?.let { onClipboard?.invoke(it) }
+            }
+        }
+    }
+
+    /** The text in a provide message: a 4-byte length, then UTF-8 ending in a NUL. */
+    private fun decodeProvidedText(compressed: ByteArray): String? = try {
+        val data = DataInputStream(java.util.zip.InflaterInputStream(compressed.inputStream())).use { input ->
+            val size = input.readInt()
+            if (size !in 0..MAX_CLIPBOARD) return null
+            ByteArray(size).also { input.readFully(it) }
+        }
+        String(data, Charsets.UTF_8).trimEnd('\u0000').replace("\r\n", "\n")
+    } catch (e: Exception) {
+        null
+    }
+
+    @Synchronized
+    private fun sendExtendedClipboard(flags: Int, data: ByteArray) {
+        val out = output ?: return
+        out.write(MSG_CLIENT_CUT_TEXT)
+        out.write(byteArrayOf(0, 0, 0)) // padding
+        writeInt(-(4 + data.size))
+        writeInt(flags)
+        out.write(data)
+        out.flush()
+    }
+
+    /**
+     * Put text on the desktop's clipboard (basic ClientCutText, Latin-1:
+     * other characters arrive as "?"). Offering it through the extended
+     * clipboard instead gets Xvnc killed by Android's system call filter
+     * (it works outside Android), so text beyond Latin-1 goes through
+     * linx-clip.py instead (MainActivity).
      */
     @Synchronized
     fun sendClipboard(text: String) {

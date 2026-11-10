@@ -879,7 +879,20 @@ fun UbuntuApp(
             val text = cm.primaryClip?.getItemAt(0)?.coerceToText(context)?.toString() ?: return
             if (text != lastText && session.connected) {
                 lastText = text
-                session.sendClipboard(text)
+                if (Charsets.ISO_8859_1.newEncoder().canEncode(text)) {
+                    session.sendClipboard(text)
+                } else {
+                    // Beyond Latin-1 (other alphabets, emoji): straight onto
+                    // the X clipboard, as UTF-8.
+                    scope.launch(Dispatchers.IO) {
+                        try {
+                            vm.runtime.startPiped(listOf("/usr/bin/python3", "/usr/local/lib/linx/linx-clip.py"))
+                                ?.outputStream?.use { it.write(text.toByteArray()) }
+                        } catch (e: Exception) {
+                            vm.paths.appendLog("clipboard: $e")
+                        }
+                    }
+                }
             }
         }
         val listener = android.content.ClipboardManager.OnPrimaryClipChangedListener { pushToLinux() }

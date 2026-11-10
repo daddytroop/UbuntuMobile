@@ -168,6 +168,35 @@ class VncDecoderTest {
     }
 
     @Test
+    fun theExtendedClipboardBringsEveryLanguageToThePhone() {
+        val server = FakeVncServer(extendedClipboard = true)
+        server.start()
+        try {
+            val client = VncClient("127.0.0.1", server.port)
+            client.connect()
+            val received = CountDownLatch(1)
+            var text: String? = null
+            client.onClipboard = { text = it; received.countDown() }
+            Thread { try { client.runLoop() } catch (_: Exception) {} }.apply { isDaemon = true; start() }
+            val deadline0 = System.currentTimeMillis() + 5000
+            while (!server.clientCaps && System.currentTimeMillis() < deadline0) Thread.sleep(20)
+            assertTrue("the client did not take up the extended clipboard", client.extendedClipboard)
+            client.requestFullUpdate()
+            assertTrue("no clipboard text arrived", received.await(10, TimeUnit.SECONDS))
+            assertEquals(FakeVncServer.EXTENDED_TEXT, text)
+
+            // The other way stays basic ClientCutText (see sendClipboard).
+            client.sendClipboard("ça va")
+            val deadline = System.currentTimeMillis() + 5000
+            while (server.clipboardTexts.isEmpty() && System.currentTimeMillis() < deadline) Thread.sleep(20)
+            assertEquals(listOf("ça va"), server.clipboardTexts.toList())
+            client.close()
+        } finally {
+            server.stop()
+        }
+    }
+
+    @Test
     fun keyEventsHaveTheRightLengthSoLaterMessagesStillParse() {
         // A key event is 8 bytes. One byte short and the server reads the
         // next message from the wrong place (x11vnc drops the client).
