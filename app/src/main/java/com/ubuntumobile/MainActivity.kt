@@ -690,33 +690,128 @@ fun UbuntuApp(
         total
     }
 
+    /**
+     * Save a snapshot into [uri]; a failed one is deleted. [background]:
+     * the weekly one, which runs while the desktop is in use, so tar and
+     * zstd get the processor only when nothing else wants it.
+     */
+    suspend fun saveSnapshot(uri: android.net.Uri, verb: String, background: Boolean = false): Boolean {
+        snapshotBusy = true
+        snapshotNote = "$verb…"
+        val ok = try {
+            val script = listOf("/bin/bash", "/usr/local/lib/linx/linx-snapshot.sh", "--backup")
+            val proc = vm.runtime.startPiped(if (background) listOf("nice", "-n", "19") + script else script)
+                ?: error("Linux is not running")
+            val size = context.contentResolver.openOutputStream(uri)!!.use { out ->
+                proc.inputStream.use { pump(it, out, verb) }
+            }
+            val code = withContext(Dispatchers.IO) { proc.waitFor() }
+            snapshotNote = if (code == 0) "Saved a snapshot of ${size shr 20} MB" else "The snapshot could not be made"
+            code == 0
+        } catch (e: Exception) {
+            snapshotNote = "The snapshot could not be saved: ${e.message}"
+            false
+        }
+        if (!ok) {
+            try {
+                android.provider.DocumentsContract.deleteDocument(context.contentResolver, uri)
+            } catch (_: Exception) {
+            }
+        }
+        snapshotBusy = false
+        return ok
+    }
+
     val backupPicker = androidx.activity.compose.rememberLauncherForActivityResult(
         androidx.activity.result.contract.ActivityResultContracts.CreateDocument("application/zstd"),
     ) { uri ->
         if (uri == null || snapshotBusy) return@rememberLauncherForActivityResult
-        snapshotBusy = true
-        snapshotNote = "Saving…"
-        scope.launch {
-            val ok = try {
-                val proc = vm.runtime.startPiped(listOf("/bin/bash", "/usr/local/lib/linx/linx-snapshot.sh", "--backup"))
-                    ?: error("Linux is not running")
-                val size = context.contentResolver.openOutputStream(uri)!!.use { out ->
-                    proc.inputStream.use { pump(it, out, "Saving") }
-                }
-                val code = withContext(Dispatchers.IO) { proc.waitFor() }
-                snapshotNote = if (code == 0) "Saved a snapshot of ${size shr 20} MB" else "The snapshot could not be made"
-                code == 0
+        scope.launch { saveSnapshot(uri, "Saving") }
+    }
+
+    // Weekly snapshots, into a folder chosen once (kept with a persistable
+    // permission); the last two are kept.
+    var autoFolder by remember { mutableStateOf(prefs.getString("auto_snapshot_folder", null)?.let { android.net.Uri.parse(it) }) }
+    val folderPicker = androidx.activity.compose.rememberLauncherForActivityResult(
+        androidx.activity.result.contract.ActivityResultContracts.OpenDocumentTree(),
+    ) { uri ->
+        if (uri == null) return@rememberLauncherForActivityResult
+        try {
+            context.contentResolver.takePersistableUriPermission(
+                uri,
+                android.content.Intent.FLAG_GRANT_READ_URI_PERMISSION or android.content.Intent.FLAG_GRANT_WRITE_URI_PERMISSION,
+            )
+        } catch (_: Exception) {
+        }
+        prefs.edit().putString("auto_snapshot_folder", uri.toString()).putLong("auto_snapshot_last", 0).apply()
+        autoFolder = uri
+    }
+    fun stopAutoSnapshots() {
+        autoFolder?.let {
+            try {
+                context.contentResolver.releasePersistableUriPermission(
+                    it,
+                    android.content.Intent.FLAG_GRANT_READ_URI_PERMISSION or android.content.Intent.FLAG_GRANT_WRITE_URI_PERMISSION,
+                )
+            } catch (_: Exception) {
+            }
+        }
+        prefs.edit().remove("auto_snapshot_folder").apply()
+        autoFolder = null
+    }
+    LaunchedEffect(autoFolder, session.connected) {
+        val tree = autoFolder ?: return@LaunchedEffect
+        if (!session.connected) return@LaunchedEffect
+        if (System.currentTimeMillis() - prefs.getLong("auto_snapshot_last", 0) < 7L * 24 * 3600_000) return@LaunchedEffect
+        // Let the desktop settle first.
+        delay(60_000)
+        if (snapshotBusy) return@LaunchedEffect
+        val resolver = context.contentResolver
+        val folder = android.provider.DocumentsContract.buildDocumentUriUsingTree(
+            tree, android.provider.DocumentsContract.getTreeDocumentId(tree),
+        )
+        val day = java.text.SimpleDateFormat("yyyy-MM-dd", java.util.Locale.US).format(java.util.Date())
+        val doc = withContext(Dispatchers.IO) {
+            try {
+                android.provider.DocumentsContract.createDocument(resolver, folder, "application/zstd", "mobuntu-weekly-$day.tar.zst")
             } catch (e: Exception) {
-                snapshotNote = "The snapshot could not be saved: ${e.message}"
-                false
+                vm.paths.appendLog("weekly snapshot: $e")
+                null
             }
-            if (!ok) {
-                try {
-                    android.provider.DocumentsContract.deleteDocument(context.contentResolver, uri)
-                } catch (_: Exception) {
+        } ?: run {
+            snapshotNote = "The weekly snapshot's folder cannot be reached; choose it again."
+            return@LaunchedEffect
+        }
+        if (!saveSnapshot(doc, "Weekly snapshot", background = true)) return@LaunchedEffect
+        prefs.edit().putLong("auto_snapshot_last", System.currentTimeMillis()).apply()
+        // Keep the newest two.
+        withContext(Dispatchers.IO) {
+            try {
+                val children = android.provider.DocumentsContract.buildChildDocumentsUriUsingTree(
+                    tree, android.provider.DocumentsContract.getDocumentId(folder),
+                )
+                val old = mutableListOf<Pair<String, String>>()
+                resolver.query(
+                    children,
+                    arrayOf(
+                        android.provider.DocumentsContract.Document.COLUMN_DOCUMENT_ID,
+                        android.provider.DocumentsContract.Document.COLUMN_DISPLAY_NAME,
+                    ),
+                    null, null, null,
+                )?.use { c ->
+                    while (c.moveToNext()) {
+                        val name = c.getString(1) ?: continue
+                        if (name.startsWith("mobuntu-weekly-")) old += c.getString(0) to name
+                    }
                 }
+                old.sortedByDescending { it.second }.drop(2).forEach { (id, _) ->
+                    android.provider.DocumentsContract.deleteDocument(
+                        resolver, android.provider.DocumentsContract.buildDocumentUriUsingTree(tree, id),
+                    )
+                }
+            } catch (e: Exception) {
+                vm.paths.appendLog("weekly snapshot clean-up: $e")
             }
-            snapshotBusy = false
         }
     }
     val restorePicker = androidx.activity.compose.rememberLauncherForActivityResult(
@@ -1367,6 +1462,10 @@ fun UbuntuApp(
                     backupPicker.launch("mobuntu-$day.tar.zst")
                 },
                 onRestore = { restorePicker.launch(arrayOf("*/*")) },
+                weeklyFolder = autoFolder?.let { uri ->
+                    android.provider.DocumentsContract.getTreeDocumentId(uri).substringAfter(':').ifBlank { "the folder you chose" }
+                },
+                onWeekly = { on -> if (on) folderPicker.launch(null) else stopAutoSnapshots() },
                 storageAllowed = storageAllowed,
                 onAllowStorage = { askForStorage() },
                 versionName = BuildConfig.VERSION_NAME,

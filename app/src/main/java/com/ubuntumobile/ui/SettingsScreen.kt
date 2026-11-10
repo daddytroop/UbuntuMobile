@@ -76,6 +76,9 @@ fun SettingsScreen(
     snapshotBusy: Boolean = false,
     onBackup: () -> Unit = {},
     onRestore: () -> Unit = {},
+    /** Where weekly snapshots go, or null when they are off. */
+    weeklyFolder: String? = null,
+    onWeekly: (Boolean) -> Unit = {},
     versionName: String,
     ubuntuVersion: String,
     onClose: () -> Unit,
@@ -212,6 +215,24 @@ fun SettingsScreen(
                         fontSize = 13.sp,
                         color = UbuntuPalette.LightOnSurfaceVariant,
                         modifier = Modifier.weight(1f),
+                    )
+                }
+                Spacer(Modifier.height(12.dp))
+                Row(verticalAlignment = Alignment.CenterVertically) {
+                    Column(Modifier.weight(1f)) {
+                        Text("Every week", fontSize = 15.sp, fontWeight = FontWeight.Medium, color = UbuntuPalette.LightOnSurface)
+                        Text(
+                            weeklyFolder?.let { "Into $it; the last two are kept." }
+                                ?: "Save one by itself each week, into a folder you choose.",
+                            fontSize = 12.sp,
+                            color = UbuntuPalette.LightOnSurfaceVariant,
+                        )
+                    }
+                    Spacer(Modifier.width(12.dp))
+                    androidx.compose.material3.Switch(
+                        checked = weeklyFolder != null,
+                        onCheckedChange = onWeekly,
+                        colors = androidx.compose.material3.SwitchDefaults.colors(checkedTrackColor = UbuntuPalette.UbuntuOrange),
                     )
                 }
                 Spacer(Modifier.height(12.dp))
