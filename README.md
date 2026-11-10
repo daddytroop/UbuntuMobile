@@ -232,6 +232,23 @@ zone has always been the phone's. The language is the phone's from the next
 start: `linx-locale.sh` compiles the locale and installs Ubuntu's
 translations, and `LinuxRuntime` sets `LANG` from `/etc/linx/locale`.
 
+### Battery, network and volume in the panel
+Next to the clock, as on a laptop:
+- **Network:** Wi-Fi or mobile data with signal bars, Ethernet, VPN,
+  airplane mode or offline. The tooltip also says when the network is
+  metered or has no internet yet.
+- **Volume:** XFCE's PulseAudio plugin.
+- **Battery:** the level and charging state. The tooltip adds the charger
+  type, time until full, temperature and battery condition.
+
+Clicking the network or battery item opens that page of the phone's
+settings (`linx-phone settings internet|battery|wifi|bluetooth|sound|display`).
+Linux under proot cannot see the phone's battery or network, so while Linux
+runs, `PhoneStatus.kt` writes them to `/tmp/linx-phone-status`. Two generic
+monitor panel items run `linx-status battery|network` on that file every
+3 seconds. Setup installs `xfce4-genmon-plugin`; a Linux set up earlier gets it
+in the background the next time the desktop starts.
+
 ### Microphone
 Linux apps can record from the phone's microphone ("Phone microphone", the
 default input). PulseAudio takes 48 kHz mono PCM on 127.0.0.1:4714 into a

@@ -54,6 +54,7 @@ free_mb() { df -Pm / 2>/dev/null | awk 'NR == 2 {print $4}'; }
 step "Sound and the Ubuntu look"
 /usr/local/lib/linx/apt-install.sh pulseaudio yaru-theme-gtk yaru-theme-icon fonts-ubuntu \
   xfce4-whiskermenu-plugin xfce4-docklike-plugin xfce4-notifyd libnotify-bin \
+  xfce4-genmon-plugin xfce4-pulseaudio-plugin \
   >/tmp/linx-setup-base.log 2>&1 || fail base /tmp/linx-setup-base.log
 
 if [ "$LINX_BROWSER" = 1 ]; then

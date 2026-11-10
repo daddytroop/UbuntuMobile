@@ -1,0 +1,119 @@
+#!/bin/bash
+# The phone's battery and network in the panel. Runs inside the container,
+# from two "generic monitor" (xfce4-genmon-plugin) panel items that
+# linx-panel.sh adds:
+#
+#   linx-status battery   the battery: level, charging, and in the tooltip
+#                         the charger, time to full, temperature, health
+#   linx-status network   the internet: Wi-Fi (with its signal), Ethernet,
+#                         mobile data, VPN, airplane mode or offline
+#
+# Linux in proot cannot see the phone's battery or network itself; the app
+# writes them to /tmp/linx-phone-status (PhoneStatus.kt) as key=value lines
+# whenever they change. Clicking an item opens that page of the phone's
+# settings (linx-phone settings ...).
+set -u
+STATUS=/tmp/linx-phone-status
+
+# Nothing to show until the app has written the status, or once it has
+# stopped writing it (a minute without the regular refresh).
+if [ ! -s "$STATUS" ] || [ -n "$(find "$STATUS" -mmin +1 2>/dev/null)" ]; then
+  echo "<txt></txt>"
+  exit 0
+fi
+
+declare -A S=()
+while IFS='=' read -r k v; do
+  [ -n "$k" ] && S[$k]="$v"
+done <"$STATUS"
+s() { echo "${S[$1]:-}"; }
+
+minutes() {
+  local m=$(($1 / 60))
+  if [ "$m" -ge 60 ]; then
+    printf '%d h %d min' $((m / 60)) $((m % 60))
+  else
+    printf '%d min' "$((m < 1 ? 1 : m))"
+  fi
+}
+
+battery() {
+  local level state icon tip
+  level="$(s battery)"
+  [ -n "$level" ] || { echo "<txt></txt>"; return; }
+  state="$(s battery_state)"
+  local tens=$(((level + 5) / 10 * 10))
+  [ "$tens" -gt 100 ] && tens=100
+  case "$state" in
+    full) icon=battery-level-100-charged-symbolic; tip="$level%, fully charged" ;;
+    charging) icon="battery-level-$tens-charging-symbolic"; tip="$level%, charging" ;;
+    not_charging) icon="battery-level-$tens-symbolic"
+      if [ -n "$(s plugged)" ]; then tip="$level%, plugged in, not charging"; else tip="$level%, on battery"; fi ;;
+    *) icon="battery-level-$tens-symbolic"; tip="$level%, on battery" ;;
+  esac
+  case "$(s plugged)" in
+    ac) tip="$tip (charger)" ;;
+    usb) tip="$tip (USB)" ;;
+    wireless) tip="$tip (wireless charger)" ;;
+    dock) tip="$tip (dock)" ;;
+  esac
+  local full_in
+  full_in="$(s full_in)"
+  if [ "$state" = charging ] && [ "${full_in:--1}" -gt 0 ] 2>/dev/null; then
+    tip="$tip\nFull in about $(minutes "$full_in")"
+  fi
+  [ "$(s power_saver)" = 1 ] && tip="$tip\nBattery saver is on"
+  [ -n "$(s temp)" ] && tip="$tip\nTemperature $(s temp) °C"
+  [ -n "$(s health)" ] && tip="$tip\nBattery condition: $(s health)"
+  tip="$tip\n\nClick for the phone's battery settings"
+  printf '<icon>%s</icon><txt> %s%%</txt><tool>%b</tool>' "$icon" "$level" "$tip"
+  printf '<click>linx-phone settings battery</click><txtclick>linx-phone settings battery</txtclick>'
+  printf '<iconclick>linx-phone settings battery</iconclick>\n'
+}
+
+network() {
+  local net signal icon tip strength
+  net="$(s net)"
+  signal="$(s signal)"
+  case "${signal:-}" in
+    4) strength=excellent ;;
+    3) strength=good ;;
+    2) strength=ok ;;
+    1) strength=weak ;;
+    *) strength=none ;;
+  esac
+  local name
+  name="$(s wifi_name)"
+  case "$net" in
+    wifi)
+      icon="network-wireless-signal-$strength-symbolic"
+      tip="Wi-Fi${name:+: $name}, signal $strength" ;;
+    ethernet) icon=network-wired-symbolic; tip="Ethernet" ;;
+    vpn) icon=network-vpn-symbolic; tip="Connected" ;;
+    other) icon=network-wired-symbolic; tip="Connected" ;;
+    cellular)
+      icon="network-cellular-signal-$strength-symbolic"
+      tip="Mobile data, signal $strength" ;;
+    *)
+      if [ "$(s airplane)" = 1 ]; then
+        icon=airplane-mode-symbolic; tip="Airplane mode: no internet"
+      else
+        icon=network-offline-symbolic; tip="No internet"
+      fi ;;
+  esac
+  if [ "$(s vpn)" = 1 ]; then
+    tip="$tip\nThrough a VPN"
+    case "$net" in none|vpn) ;; *) icon=network-vpn-symbolic ;; esac
+  fi
+  [ "$(s metered)" = 1 ] && [ "$net" != none ] && tip="$tip\nMetered: big downloads may cost data"
+  [ "$(s validated)" = 0 ] && [ "$net" != none ] && tip="$tip\nConnected, but no internet yet (a sign-in page?)"
+  tip="$tip\n\nClick for the phone's internet settings"
+  printf '<icon>%s</icon><tool>%b</tool>' "$icon" "$tip"
+  printf '<iconclick>linx-phone settings internet</iconclick>\n'
+}
+
+case "${1:-}" in
+  battery) battery ;;
+  network) network ;;
+  *) echo "usage: linx-status battery|network" >&2; exit 2 ;;
+esac

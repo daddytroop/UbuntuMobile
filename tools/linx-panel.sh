@@ -84,6 +84,52 @@ if plugin_installed docklike && [ "$(get /plugins/plugin-$DOCK)" != docklike ]; 
   CHANGED=1
 fi
 
+# ------------------------------------------------- network, volume, battery
+# Next to the clock, as on any laptop: the phone's network (12) and battery
+# (14), which linx-status reads from what the app writes, and the volume
+# (13). Each is added once, when its plugin is installed.
+add_before_clock() {
+  local ids new="" id
+  ids="$(get /panels/panel-1/plugin-ids | grep -E '^[0-9]+$')"
+  echo "$ids" | grep -qx "$1" && return
+  for id in $ids; do
+    [ "$id" = 8 ] && new="$new -t int -s $1"
+    new="$new -t int -s $id"
+  done
+  echo "$ids" | grep -qx 8 || new="$new -t int -s $1"
+  # shellcheck disable=SC2086
+  xfconf-query -c xfce4-panel -p /panels/panel-1/plugin-ids -n --force-array $new
+  CHANGED=1
+}
+status_item() {
+  local id=$1 what=$2
+  if [ "$(get /plugins/plugin-$id)" != genmon ]; then
+    P=/plugins/plugin-$id
+    xfconf-query -c xfce4-panel -p "$P" -n -t string -s genmon
+    xfconf-query -c xfce4-panel -p "$P/command" -n -t string -s "/usr/local/bin/linx-status $what"
+    xfconf-query -c xfce4-panel -p "$P/use-label" -n -t bool -s false
+    xfconf-query -c xfce4-panel -p "$P/text" -n -t string -s ""
+    xfconf-query -c xfce4-panel -p "$P/update-period" -n -t int -s 3000
+    xfconf-query -c xfce4-panel -p "$P/enable-single-row" -n -t bool -s true
+    CHANGED=1
+  fi
+  add_before_clock "$id"
+}
+if plugin_installed genmon; then
+  status_item 12 network
+fi
+if plugin_installed pulseaudio-plugin; then
+  if [ "$(get /plugins/plugin-13)" != pulseaudio ]; then
+    xfconf-query -c xfce4-panel -p /plugins/plugin-13 -n -t string -s pulseaudio
+    xfconf-query -c xfce4-panel -p /plugins/plugin-13/enable-keyboard-shortcuts -n -t bool -s true
+    CHANGED=1
+  fi
+  add_before_clock 13
+fi
+if plugin_installed genmon; then
+  status_item 14 battery
+fi
+
 if [ "$CHANGED" = 1 ] && [ "${1:-}" = --restart ] && pgrep -x xfce4-panel >/dev/null; then
   xfce4-panel -r
 fi

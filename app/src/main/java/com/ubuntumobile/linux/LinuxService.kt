@@ -49,6 +49,9 @@ class LinuxService : Service() {
 
     private var wakeLock: PowerManager.WakeLock? = null
 
+    /** The battery and network for the Linux panel, while Linux runs. */
+    private val phoneStatus by lazy { PhoneStatus(applicationContext) }
+
     override fun onBind(intent: Intent?): IBinder? = null
 
     override fun onStartCommand(intent: Intent?, flags: Int, startId: Int): Int {
@@ -65,10 +68,12 @@ class LinuxService : Service() {
             ACTION_AWAKE -> setAwake(!keepAwake)
         }
         startForeground(NOTIFICATION_ID, notification())
+        phoneStatus.start()
         return START_STICKY
     }
 
     override fun onDestroy() {
+        phoneStatus.stop()
         setAwake(false)
         super.onDestroy()
     }

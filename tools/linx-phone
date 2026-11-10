@@ -5,6 +5,9 @@
                             an email, geo: shows a map, a web link opens in
                             the phone's browser
     linx-phone app PACKAGE  start an Android app
+    linx-phone settings PAGE
+                            open a page of the phone's settings: battery,
+                            internet, wifi, bluetooth, sound or display
 
 The request goes as a JSON line to the app's abstract unix socket (its
 name is in /etc/linx/notify-socket, shared with linx-notify.py).
@@ -38,5 +41,7 @@ if __name__ == "__main__":
         send({"open": sys.argv[2]})
     elif len(sys.argv) == 3 and sys.argv[1] == "app":
         send({"app": sys.argv[2]})
+    elif len(sys.argv) == 3 and sys.argv[1] == "settings":
+        send({"settings": sys.argv[2]})
     else:
         sys.exit(__doc__)

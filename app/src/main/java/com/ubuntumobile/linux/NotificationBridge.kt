@@ -25,7 +25,8 @@ import java.io.File
  *
  * The same socket takes what Linux hands to the phone (linx-phone):
  * {"open": uri} opens a phone number, an email address, a place or a link
- * with the phone's own apps, and {"app": package} starts an Android app.
+ * with the phone's own apps, {"app": package} starts an Android app, and
+ * {"settings": page} opens a page of the phone's settings.
  */
 object NotificationBridge {
     private const val TAG = "NotificationBridge"
@@ -76,6 +77,7 @@ object NotificationBridge {
                         when {
                             message.has("open") -> openOnPhone(app, message.getString("open"))
                             message.has("app") -> startAndroidApp(app, message.getString("app"))
+                            message.has("settings") -> openSettings(app, message.getString("settings"))
                             else -> post(app, message)
                         }
                     }
@@ -114,6 +116,24 @@ object NotificationBridge {
         }
         val action = if (parsed.scheme.equals("mailto", ignoreCase = true)) Intent.ACTION_SENDTO else Intent.ACTION_VIEW
         start(context, Intent(action, parsed))
+    }
+
+    /** A page of the phone's settings, from the panel's battery and network items. */
+    private fun openSettings(context: Context, page: String) {
+        val action = when (page) {
+            "battery" -> Intent.ACTION_POWER_USAGE_SUMMARY
+            "internet" -> if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
+                android.provider.Settings.Panel.ACTION_INTERNET_CONNECTIVITY
+            } else {
+                android.provider.Settings.ACTION_WIRELESS_SETTINGS
+            }
+            "wifi" -> android.provider.Settings.ACTION_WIFI_SETTINGS
+            "bluetooth" -> android.provider.Settings.ACTION_BLUETOOTH_SETTINGS
+            "sound" -> android.provider.Settings.ACTION_SOUND_SETTINGS
+            "display" -> android.provider.Settings.ACTION_DISPLAY_SETTINGS
+            else -> return
+        }
+        start(context, Intent(action))
     }
 
     private fun startAndroidApp(context: Context, pkg: String) {
