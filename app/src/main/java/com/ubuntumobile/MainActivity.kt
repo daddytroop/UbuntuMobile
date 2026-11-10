@@ -58,6 +58,7 @@ import androidx.compose.ui.focus.FocusRequester
 import androidx.compose.ui.focus.focusProperties
 import androidx.compose.ui.focus.focusRequester
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.asImageBitmap
 import androidx.compose.ui.platform.LocalConfiguration
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.LocalView
@@ -188,6 +189,11 @@ class MainActivity : ComponentActivity() {
 
     /** A home-screen shortcut's app (see [pinShortcut]), to open on the desktop. */
     private fun takeLaunch(intent: android.content.Intent?) {
+        com.ubuntumobile.ui.SharedIn.from(intent)?.let {
+            pendingShare = it
+            intent?.action = null
+            return
+        }
         if (intent?.action != ACTION_LAUNCH_APP) return
         val id = intent.getStringExtra(EXTRA_APP_ID) ?: return
         pendingLaunch = id to (intent.getStringExtra(EXTRA_APP_NAME) ?: id)
@@ -217,6 +223,9 @@ private const val EXTRA_APP_NAME = "app_name"
 
 /** A Linux app a home-screen shortcut asked for: (id, name), until it is started. */
 private var pendingLaunch by mutableStateOf<Pair<String, String>?>(null)
+
+/** Files or a link shared to the app, to open in a Linux app. */
+private var pendingShare by mutableStateOf<com.ubuntumobile.ui.SharedIn?>(null)
 
 /**
  * Ask the launcher to pin a shortcut that opens a Linux app (by its
@@ -958,20 +967,111 @@ fun UbuntuApp(
     LaunchedEffect(pendingLaunch, session.connected) {
         val (id, name) = pendingLaunch ?: return@LaunchedEffect
         if (!session.connected) return@LaunchedEffect
+        // Clearing it restarts this effect, so the work goes on in the
+        // screen's scope.
         pendingLaunch = null
         screen = Screen.DISPLAY
         opening = name
-        // Not before the desktop has finished starting: the app would race
-        // the window manager for the processor (and win), and would miss
-        // the session bus. desktop-start.sh starts linx-windows.py last.
+        scope.launch {
+            // Not before the desktop has finished starting: the app would race
+            // the window manager for the processor (and win), and would miss
+            // the session bus. desktop-start.sh starts linx-windows.py last.
+            val ready = java.io.File(vm.paths.sharedTmpDir, "linx-windows.log")
+            val since = System.currentTimeMillis()
+            while (!withContext(Dispatchers.IO) { ready.exists() } && System.currentTimeMillis() - since < 120_000) {
+                delay(500)
+            }
+            delay(1500)
+            launchOnDisplay(listOf("/usr/bin/python3", "/usr/local/lib/linx/linx-apps.py", "--run", id))
+            opening = name
+        }
+    }
+
+    // Shared from another app: copied into ~/From phone, then opened in the
+    // Linux app the user picks (the ones whose menu entries say they open
+    // that kind of file, the default first).
+    var shareChoice by remember { mutableStateOf<Pair<List<String>, List<AppEntry>>?>(null) }
+    suspend fun waitForDesktop() {
         val ready = java.io.File(vm.paths.sharedTmpDir, "linx-windows.log")
         val since = System.currentTimeMillis()
         while (!withContext(Dispatchers.IO) { ready.exists() } && System.currentTimeMillis() - since < 120_000) {
             delay(500)
         }
-        delay(1500)
-        launchOnDisplay(listOf("/usr/bin/python3", "/usr/local/lib/linx/linx-apps.py", "--run", id))
+    }
+    LaunchedEffect(pendingShare, state.isInstalled) {
+        val share = pendingShare ?: return@LaunchedEffect
+        if (!state.isInstalled) return@LaunchedEffect
+        // Clearing it restarts this effect, so the work goes on in the
+        // screen's scope.
+        pendingShare = null
+        scope.launch {
+            val targets = withContext(Dispatchers.IO) { share.copyInto(context, vm.paths.root) }
+            if (targets.isEmpty()) {
+                android.widget.Toast.makeText(context, "That could not be opened in Linux", android.widget.Toast.LENGTH_SHORT).show()
+                return@launch
+            }
+            val handlers = AppCatalog.parseInstalled(
+                vm.guestCommand("/usr/bin/python3 /usr/local/lib/linx/linx-apps.py --handlers ${quote(targets.first())}", 60),
+            )
+            shareChoice = targets to handlers
+        }
+    }
+    fun openShared(targets: List<String>, command: List<String>, name: String) {
+        shareChoice = null
+        screen = Screen.DISPLAY
         opening = name
+        scope.launch {
+            waitForDesktop()
+            launchOnDisplay(command + targets)
+            opening = name
+        }
+    }
+    shareChoice?.let { (targets, handlers) ->
+        val what = targets.first().substringAfterLast('/')
+        androidx.compose.material3.AlertDialog(
+            onDismissRequest = { shareChoice = null },
+            title = { Text("Open $what with") },
+            text = {
+                Column(Modifier.verticalScroll(rememberScrollState())) {
+                    if (handlers.isEmpty()) {
+                        Text("No Linux app opens this kind of file yet. It is in the ${com.ubuntumobile.ui.SHARED_FOLDER} folder in your home folder.")
+                    }
+                    handlers.forEach { app ->
+                        Row(
+                            Modifier
+                                .fillMaxWidth()
+                                .clip(RoundedCornerShape(10.dp))
+                                .clickable {
+                                    openShared(targets, listOf("/usr/bin/python3", "/usr/local/lib/linx/linx-apps.py", "--run", app.id), app.name)
+                                }
+                                .padding(vertical = 10.dp, horizontal = 6.dp),
+                            verticalAlignment = Alignment.CenterVertically,
+                        ) {
+                            val icon = remember(app.iconPath) {
+                                app.iconPath?.let { com.ubuntumobile.ui.decodeAppIcon(vm.paths.root, it, 96) }
+                            }
+                            if (icon != null) {
+                                androidx.compose.foundation.Image(icon.asImageBitmap(), contentDescription = null, modifier = Modifier.size(36.dp))
+                            } else {
+                                Box(Modifier.size(36.dp))
+                            }
+                            Spacer(Modifier.width(14.dp))
+                            Text(app.name, fontSize = 16.sp)
+                        }
+                    }
+                }
+            },
+            confirmButton = {
+                if (!targets.first().contains("://")) {
+                    androidx.compose.material3.TextButton(onClick = {
+                        openShared(emptyList(), listOf("/usr/bin/thunar", "/root/${com.ubuntumobile.ui.SHARED_FOLDER}"), "Files")
+                    }) { Text("Show in Files") }
+                }
+            },
+            dismissButton = {
+                androidx.compose.material3.TextButton(onClick = { shareChoice = null }) { Text("Cancel") }
+            },
+        )
     }
 
     /** Show the Android soft keyboard so key events reach the VNC session. */

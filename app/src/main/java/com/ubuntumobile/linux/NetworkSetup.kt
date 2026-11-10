@@ -133,6 +133,7 @@ object ContainerSetup {
         "linx-notify.py" to "usr/local/lib/linx/linx-notify.py",
         "linx-snapshot.sh" to "usr/local/lib/linx/linx-snapshot.sh",
         "linx-locale.sh" to "usr/local/lib/linx/linx-locale.sh",
+        "linx-phone" to "usr/local/bin/linx-phone",
         "make-xfwm4-theme.py" to "usr/local/lib/linx/make-xfwm4-theme.py",
         "gamepad-helper.py" to "usr/local/lib/linx/gamepad-helper.py",
         "tint2rc" to "usr/local/share/linx/tint2rc",

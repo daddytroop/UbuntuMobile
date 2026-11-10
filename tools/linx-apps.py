@@ -2,7 +2,10 @@
 """The desktop's applications, for the app's launcher. Runs inside the container.
 
     linx-apps.py                  one line per app: id|name|comment|kind|icon
-    linx-apps.py --run ID         start the app the way its menu entry says
+    linx-apps.py --run ID [FILE|URL...]  start the app the way its menu entry
+                                  says, opening the files or links if given
+    linx-apps.py --handlers FILE|URL     the apps that open it, the default
+                                  first, as the listing's lines
     linx-apps.py --tidy           clean up the desktop's menu (see tidy())
 
 The list is what the desktop's own menu shows - every installed .desktop
@@ -13,7 +16,9 @@ the path of the best picture found in the icon themes (a PNG where there
 is one, else an SVG), or empty.
 """
 
+import mimetypes
 import os
+import re
 import shlex
 import subprocess
 import sys
@@ -293,6 +298,39 @@ def refresh_icon_caches():
                             stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
 
 
+# Links the phone handles better than Linux: calling, texting, maps, and
+# email unless a Linux mail app has been made the default.
+PHONE_SCHEMES = ("tel", "sms", "geo", "mailto")
+
+
+def write_phone_handler():
+    """linx-phone as the opener of tel:, sms:, geo: and mailto: links."""
+    os.makedirs("/usr/local/share/applications", exist_ok=True)
+    with open("/usr/local/share/applications/linx-phone.desktop", "w") as f:
+        f.write("[Desktop Entry]\nType=Application\nName=Phone\n"
+                "Comment=Open on the phone\nExec=/usr/local/bin/linx-phone open %u\n"
+                "NoDisplay=true\nMimeType=" +
+                "".join("x-scheme-handler/%s;" % s for s in PHONE_SCHEMES) + "\n")
+    path = os.path.expanduser("~/.config/mimeapps.list")
+    try:
+        lines = open(path).read().splitlines()
+    except OSError:
+        lines = []
+    if "[Default Applications]" not in lines:
+        lines.append("[Default Applications]")
+    at = lines.index("[Default Applications]") + 1
+    for scheme in PHONE_SCHEMES:
+        key = "x-scheme-handler/%s=" % scheme
+        current = [l for l in lines if l.startswith(key)]
+        if current and (scheme == "mailto" or current[0] == key + "linx-phone.desktop"):
+            continue
+        lines = [l for l in lines if not l.startswith(key)]
+        lines.insert(at, key + "linx-phone.desktop")
+    os.makedirs(os.path.dirname(path), exist_ok=True)
+    with open(path, "w") as f:
+        f.write("\n".join(lines) + "\n")
+
+
 def tidy():
     """Clean up the desktop's menu (and so the dock and the launcher).
 
@@ -305,6 +343,7 @@ def tidy():
     """
     refresh_icon_caches()
     write_settings_wrapper()
+    write_phone_handler()
     os.makedirs(OVERRIDES, exist_ok=True)
     for name in os.listdir(OVERRIDES):
         path = os.path.join(OVERRIDES, name)
@@ -335,13 +374,74 @@ def tidy():
             write_override(os.path.join(src_dir, name), dest, changes)
 
 
-def run(app_id):
+def mime_of(target):
+    """The MIME type of a file, or x-scheme-handler/<scheme> of a link."""
+    m = re.match(r"^([a-zA-Z][a-zA-Z0-9+.-]*):", target)
+    if m and not target.startswith("/"):
+        return "x-scheme-handler/" + m.group(1).lower()
+    try:
+        out = subprocess.run(["xdg-mime", "query", "filetype", target],
+                             capture_output=True, text=True, timeout=10).stdout.strip()
+        if "/" in out:
+            return out.split(";")[0]
+    except (OSError, subprocess.SubprocessError):
+        pass
+    return mimetypes.guess_type(target)[0] or "application/octet-stream"
+
+
+def default_app(mime):
+    try:
+        out = subprocess.run(["xdg-mime", "query", "default", mime],
+                             capture_output=True, text=True, timeout=10).stdout.strip()
+        return out[: -len(".desktop")] if out.endswith(".desktop") else out
+    except (OSError, subprocess.SubprocessError):
+        return ""
+
+
+def handlers(target):
+    """The apps whose menu entries say they open the target, default first."""
+    mime = mime_of(target)
+    family = mime.split("/")[0] + "/*"
+    index = icon_index()
+    default = default_app(mime)
+    rows = []
+    for app_id, (path, e) in entries().items():
+        if not shown(app_id, e):
+            continue
+        types = [t for t in e.get("MimeType", "").split(";") if t]
+        if mime not in types and family not in types:
+            continue
+        name = NAMES.get(app_id, e["Name"])
+        rank = 0 if app_id == default else 1
+        rows.append((rank, name.lower(), "|".join([
+            app_id, clean(name), clean(e.get("Comment", e.get("GenericName", ""))),
+            "flatpak" if path.startswith("/var/lib/flatpak/") else "app",
+            real(find_icon(e.get("Icon", ""), index)),
+        ])))
+    for row in sorted(rows):
+        print(row[2])
+
+
+def run(app_id, targets=()):
     found = entries().get(app_id)
     if not found:
         sys.exit("no such application: " + app_id)
     e = found[1]
-    # The field codes (%f, %U, ...) stand for files to open; there are none.
-    argv = [a for a in shlex.split(e["Exec"]) if not (len(a) == 2 and a[0] == "%")]
+    # The field codes stand for the files to open: %f and %u one, %F and
+    # %U all of them. Others (%i, %c, %k) are dropped.
+    argv = []
+    used = False
+    for a in shlex.split(e["Exec"]):
+        if a in ("%f", "%u"):
+            argv += list(targets[:1])
+            used = True
+        elif a in ("%F", "%U"):
+            argv += list(targets)
+            used = True
+        elif not (len(a) == 2 and a[0] == "%"):
+            argv.append(a)
+    if targets and not used:
+        argv += list(targets)
     argv = [a.replace("%%", "%") for a in argv]
     if e.get("Terminal", "").lower() == "true":
         argv = ["xfce4-terminal", "-x"] + argv
@@ -352,8 +452,10 @@ def run(app_id):
 
 
 if __name__ == "__main__":
-    if len(sys.argv) == 3 and sys.argv[1] == "--run":
-        run(sys.argv[2])
+    if len(sys.argv) >= 3 and sys.argv[1] == "--run":
+        run(sys.argv[2], tuple(sys.argv[3:]))
+    elif len(sys.argv) == 3 and sys.argv[1] == "--handlers":
+        handlers(sys.argv[2])
     elif len(sys.argv) == 2 and sys.argv[1] == "--tidy":
         tidy()
     else:

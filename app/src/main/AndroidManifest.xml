@@ -43,11 +43,19 @@
                 <category android:name="android.intent.category.LAUNCHER" />
             </intent-filter>
 
-            <!-- Terminal files, so users can "Open with" UbuntuMobile -->
-            <intent-filter>
+            <!-- "Open in Mobuntu": files, text and links from other apps
+                 open in a Linux app (SharedIn.kt). -->
+            <intent-filter android:label="Open in Mobuntu">
+                <action android:name="android.intent.action.SEND" />
+                <action android:name="android.intent.action.SEND_MULTIPLE" />
+                <category android:name="android.intent.category.DEFAULT" />
+                <data android:mimeType="*/*" />
+            </intent-filter>
+            <intent-filter android:label="Open in Mobuntu">
                 <action android:name="android.intent.action.VIEW" />
                 <category android:name="android.intent.category.DEFAULT" />
-                <data android:mimeType="text/plain" />
+                <data android:scheme="content" />
+                <data android:mimeType="*/*" />
             </intent-filter>
         </activity>
     </application>

@@ -22,6 +22,10 @@ import java.io.File
  * the app is in the background it is posted as an Android notification, and
  * tapping it brings the desktop back. In the foreground the desktop shows
  * it already (xfce4-notifyd).
+ *
+ * The same socket takes what Linux hands to the phone (linx-phone):
+ * {"open": uri} opens a phone number, an email address, a place or a link
+ * with the phone's own apps, and {"app": package} starts an Android app.
  */
 object NotificationBridge {
     private const val TAG = "NotificationBridge"
@@ -32,6 +36,12 @@ object NotificationBridge {
 
     /** Whether the app is on screen; set by MainActivity. */
     @Volatile var foreground = false
+
+    /** The monitor the desktop is on when docked, for Android apps started from Linux. */
+    @Volatile var launchDisplayId: Int? = null
+
+    /** The links Linux may hand over: the phone's kinds of thing, and the web. */
+    private val PHONE_SCHEMES = setOf("tel", "sms", "smsto", "geo", "mailto", "http", "https", "market")
 
     /** An app's icon by its name, for the notification; set by the launcher's app list. */
     @Volatile var iconFor: (String) -> Bitmap? = { null }
@@ -62,7 +72,12 @@ object NotificationBridge {
                 try {
                     server.accept().use { client ->
                         val line = client.inputStream.bufferedReader().readLine() ?: return@use
-                        post(app, JSONObject(line))
+                        val message = JSONObject(line)
+                        when {
+                            message.has("open") -> openOnPhone(app, message.getString("open"))
+                            message.has("app") -> startAndroidApp(app, message.getString("app"))
+                            else -> post(app, message)
+                        }
                     }
                 } catch (e: Exception) {
                     Log.w(TAG, "notification failed", e)
@@ -88,6 +103,38 @@ object NotificationBridge {
                     description = "Notifications from the apps on your Linux desktop"
                 },
             )
+        }
+    }
+
+    private fun openOnPhone(context: Context, uri: String) {
+        val parsed = android.net.Uri.parse(uri)
+        if (parsed.scheme?.lowercase() !in PHONE_SCHEMES) {
+            Log.w(TAG, "not opening ${parsed.scheme}: links on the phone only")
+            return
+        }
+        val action = if (parsed.scheme.equals("mailto", ignoreCase = true)) Intent.ACTION_SENDTO else Intent.ACTION_VIEW
+        start(context, Intent(action, parsed))
+    }
+
+    private fun startAndroidApp(context: Context, pkg: String) {
+        val launch = context.packageManager.getLaunchIntentForPackage(pkg) ?: return
+        start(context, launch)
+    }
+
+    private fun start(context: Context, intent: Intent) {
+        intent.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
+        val display = launchDisplayId
+        try {
+            if (display != null) {
+                // Docked: next to the desktop on the monitor, not on the phone.
+                intent.addFlags(Intent.FLAG_ACTIVITY_MULTIPLE_TASK)
+                val options = android.app.ActivityOptions.makeBasic().setLaunchDisplayId(display)
+                context.startActivity(intent, options.toBundle())
+            } else {
+                context.startActivity(intent)
+            }
+        } catch (e: Exception) {
+            Log.w(TAG, "cannot open $intent", e)
         }
     }
 
