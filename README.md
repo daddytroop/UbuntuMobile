@@ -179,16 +179,68 @@ come out of the phone's speaker, headphones or Bluetooth. Silence is not
 passed on, and the Android track pauses when nothing plays.
 
 ### Clipboard
-Copy on the phone, paste in Linux, and the other way round: the RFB
-clipboard messages carry it, and the app syncs with Android's clipboard when
-it changes and when the app comes back to the front. The basic RFB clipboard
-is Latin-1, so other characters arrive as "?".
+Copy on the phone, paste in Linux, and the other way round, in any
+language and with emoji. The app syncs with Android's clipboard when it
+changes and when the app comes back to the front.
+
+- **Linux to the phone** uses TigerVNC's extended clipboard (the
+  `0xC0A1E5CE` pseudo-encoding), which carries zlib-compressed UTF-8.
+  Servers without it fall back to the basic RFB clipboard, which is Latin-1.
+- **The phone to Linux** goes as basic ClientCutText when the text is
+  Latin-1. Other text goes to `linx-clip.py`, which owns the X CLIPBOARD
+  selection itself (through ctypes, like `linx-windows.py`) and serves it as
+  UTF-8 until something else is copied. Offering it through the extended
+  clipboard instead gets Xvnc killed with SIGSYS by Android's system call
+  filter. The same Xvnc build under strace outside Android makes only
+  ordinary calls, so the cause is still unknown.
 
 ### Phone folders
 With storage permission (asked the first time; Settings can ask again),
 Downloads, Documents, Pictures, Music and Videos in the Linux home folder
 are the phone's own (`linx-folders.sh`), so a file saved in Firefox shows
 up in the phone's Downloads, and a photo is one click away in GIMP.
+
+### Sharing between the phone and Linux
+- **Open in Mobuntu.** It is in Android's share menu and Open with list
+  (`SharedIn.kt`). Shared files are copied into `~/From phone`, and the app
+  asks which Linux app opens them: `linx-apps.py --handlers` lists the apps
+  whose menu entries take that MIME type, the default first. Shared text
+  becomes a note, and a shared link opens as it is.
+- **Phone links from Linux.** `tel:`, `sms:`, `geo:` and `mailto:` links open
+  with the phone's own apps. `linx-apps.py --tidy` makes `linx-phone` their
+  handler (mailto only while no Linux mail app is the default), and
+  `linx-phone open` sends the link over the notification socket. The app
+  opens only those schemes and web links.
+
+### The phone's apps in Linux
+Every launcher app on the phone is in the Linux menu under **Phone apps**
+(`AndroidApps.kt`). It gets a menu entry with its icon that runs
+`linx-phone app <package>`; a name that clashes with a Linux app's gets
+"(phone)". The entries are rewritten only when the phone's apps change.
+When docked, they open next to the desktop on the monitor.
+
+### One search
+The search in All apps also finds the phone's apps, files in the Linux
+home (including the phone's folders), and Flathub apps not yet installed,
+which open in Software.
+
+### Following the phone
+With **Match my phone** on (Settings → Look, on by default), Linux's light or
+dark mode and accent follow Android's. The accent is the Yaru colour nearest
+the wallpaper colour Android 12 and newer pick (`PhoneLook.kt`). The time
+zone has always been the phone's. The language is the phone's from the next
+start: `linx-locale.sh` compiles the locale and installs Ubuntu's
+translations, and `LinuxRuntime` sets `LANG` from `/etc/linx/locale`.
+
+### Microphone
+Linux apps can record from the phone's microphone ("Phone microphone", the
+default input). PulseAudio takes 48 kHz mono PCM on 127.0.0.1:4714 into a
+null sink, and its monitor is remapped as a source (`linx-audio.sh`).
+`linx-mic.sh` watches for recordings with `pactl subscribe` and writes
+`/tmp/linx-mic-wanted`. `MicBridge.kt` only records, and Android only shows
+its microphone indicator, while that says 1. Android asks for the
+permission the first time a Linux app records. Recording stops when the app
+is in the background, because a foreground service would be needed for that.
 
 ### Look
 Ubuntu's Yaru theme and icons, light or dark in the chosen accent colour,
@@ -220,6 +272,18 @@ choose, through Android's file picker, and restores one the same way
 the file, so there is no copy in between. On the emulator it wrote about
 12 MB/s. A save that fails deletes its partial file. Restoring replaces the
 files the snapshot has and keeps files you added since.
+
+**Every week** saves one by itself into a folder chosen once, kept with a
+persistable permission. It runs a minute after the desktop is up, at the
+lowest priority (`nice -n 19`), and keeps the newest two.
+
+### Updates
+Software's **Updates** tab lists Ubuntu package and Flathub app updates
+(`linx-updates.sh --check`), and **Update all** installs them, with apt's and
+Flatpak's progress on a bar. The app checks once a day when the desktop
+comes up and posts a notification when updates are waiting; tapping it opens
+the tab. Flatpak prints its progress only to a terminal, so installs and
+updates run under `script`.
 
 ### The app in your colours
 The accent colour chosen at setup colours the app as well as Linux: the
@@ -785,7 +849,8 @@ asked for it.
 - **Hardware acceleration.** The X server runs with Mesa's software
   rasteriser, so 3D games are CPU-bound. Compositing a desktop application
   is fine; a 3D title is not.
-- **Microphone.** Sound goes from Linux to the phone, not back.
+- **Recording in the background.** The microphone reaches Linux only while
+  the app is on screen.
 - **A physical phone.** Everything has run on the x86_64 emulator; the arm64
   APK has not been tried on real hardware yet.
 - **Flatpak's sandbox.** Flatpak apps run (see Flatpak under proot), but
@@ -794,8 +859,8 @@ asked for it.
   not tried at all; mpv was.
 - **Snaps.** Ubuntu ships some apps (Chromium, Thunderbird) only as snaps,
   which need snapd and mounts; they are not available.
-- **Clipboard beyond Latin-1.** The basic RFB clipboard cannot carry
-  other characters; TigerVNC's extended clipboard could.
+- **Why Xvnc dies on the extended clipboard's provide.** See Clipboard;
+  `linx-clip.py` works around it.
 - **Docking on real hardware.** Docking has run against the emulator's
   simulated monitor only. Whether a given phone offers its USB-C video
   output as a presentation display (rather than only mirroring) varies.
