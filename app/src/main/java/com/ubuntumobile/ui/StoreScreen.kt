@@ -237,6 +237,8 @@ fun StoreScreen(
     showUpdates: Boolean = false,
     /** How many updates are left, after a check or an update. */
     onUpdateCount: (Int) -> Unit = {},
+    /** Start with this search (from the launcher's search). */
+    initialQuery: String = "",
 ) {
     var source by remember { mutableStateOf(if (showUpdates) StoreSource.UPDATES else StoreSource.FLATHUB) }
     // Flathub's front page: popular apps, or one category's.
@@ -246,7 +248,7 @@ fun StoreScreen(
     var flathubOffline by remember { mutableStateOf(false) }
     var details by remember { mutableStateOf<StoreApp?>(null) }
     var progress by remember { mutableStateOf<Int?>(null) }
-    var query by remember { mutableStateOf("") }
+    var query by remember { mutableStateOf(initialQuery) }
     var results by remember { mutableStateOf<List<StoreApp>>(emptyList()) }
     var searching by remember { mutableStateOf(false) }
     // Package name (or Flathub app id) -> installed, for everything on screen.

@@ -1034,8 +1034,12 @@ fun UbuntuApp(
         storeOnUpdates = true
         screen = Screen.STORE
     }
+    var storeQuery by remember { mutableStateOf("") }
     LaunchedEffect(screen) {
-        if (screen != Screen.STORE) storeOnUpdates = false
+        if (screen != Screen.STORE) {
+            storeOnUpdates = false
+            storeQuery = ""
+        }
     }
 
     // Shared from another app: copied into ~/From phone, then opened in the
@@ -1067,6 +1071,27 @@ fun UbuntuApp(
             shareChoice = targets to handlers
         }
     }
+    /** Files in the Linux home (and the phone's folders in it) whose names match. */
+    suspend fun searchHome(q: String): List<String> {
+        val pattern = q.replace(Regex("[*?\\[\\]\\\\]"), "")
+        if (pattern.isBlank()) return emptyList()
+        val out = vm.guestCommand(
+            "find -L /root -maxdepth 4 -name '.*' -prune -o -iname ${quote("*$pattern*")} -print 2>/dev/null | head -n 12",
+            30,
+        )
+        return out.lines().map { it.trim() }.filter { it.startsWith("/root/") }
+    }
+
+    /** A file found by the search: ask which Linux app opens it. */
+    fun openFileInLinux(path: String) {
+        scope.launch {
+            val handlers = AppCatalog.parseInstalled(
+                vm.guestCommand("/usr/bin/python3 /usr/local/lib/linx/linx-apps.py --handlers ${quote(path)}", 60),
+            )
+            shareChoice = listOf(path) to handlers
+        }
+    }
+
     fun openShared(targets: List<String>, command: List<String>, name: String) {
         shareChoice = null
         screen = Screen.DISPLAY
@@ -1222,6 +1247,12 @@ fun UbuntuApp(
                     }
                 },
                 onOpenStore = { screen = Screen.STORE },
+                onSearchStore = { q ->
+                    storeQuery = q
+                    screen = Screen.STORE
+                },
+                searchFiles = { q -> searchHome(q) },
+                onOpenFile = { path -> openFileInLinux(path) },
                 onRefresh = { vm.refreshSystemInfo() },
                 onBack = { screen = Screen.DISPLAY },
                 // The launcher's gradient continues behind the system bars.
@@ -1246,6 +1277,7 @@ fun UbuntuApp(
 
         Screen.STORE -> {
             StoreScreen(
+                initialQuery = storeQuery,
                 showUpdates = storeOnUpdates,
                 onUpdateCount = { com.ubuntumobile.linux.Updates.notify(context, it) },
                 runGuest = { cmd, timeout -> vm.guestCommand(cmd, timeout) },

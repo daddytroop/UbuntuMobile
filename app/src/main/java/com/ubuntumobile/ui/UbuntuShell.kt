@@ -34,6 +34,7 @@ import androidx.compose.material.icons.filled.Public
 import androidx.compose.material.icons.filled.Refresh
 import androidx.compose.material.icons.filled.Search
 import androidx.compose.material.icons.filled.Settings
+import androidx.compose.material.icons.filled.Description
 import androidx.compose.material.icons.filled.ShoppingBag
 import androidx.compose.material.icons.filled.Speed
 import androidx.compose.material.icons.filled.SportsEsports
@@ -88,9 +89,42 @@ fun UbuntuShell(
     onOpenStore: () -> Unit,
     onRefresh: () -> Unit = {},
     onBack: () -> Unit = {},
+    /** Files in the Linux home folder whose names match, as paths in Linux. */
+    searchFiles: suspend (String) -> List<String> = { emptyList() },
+    /** Open a file found by the search (MainActivity asks which app). */
+    onOpenFile: (String) -> Unit = {},
+    /** Open Software searching Flathub for this. */
+    onSearchStore: (String) -> Unit = { onOpenStore() },
     modifier: Modifier = Modifier,
 ) {
     var query by remember { mutableStateOf("") }
+    // One search for everything: past the Linux apps, the phone's own apps,
+    // files, and Flathub apps that are not installed yet.
+    val context = androidx.compose.ui.platform.LocalContext.current
+    val phoneApps = remember { PhoneApps.list(context) }
+    val phoneMatches = remember(query, phoneApps) {
+        if (query.isBlank()) emptyList() else phoneApps.filter { it.label.contains(query.trim(), ignoreCase = true) }.take(8)
+    }
+    var fileMatches by remember { mutableStateOf<List<String>>(emptyList()) }
+    var storeMatches by remember { mutableStateOf<List<FlathubHit>>(emptyList()) }
+    androidx.compose.runtime.LaunchedEffect(query) {
+        fileMatches = emptyList()
+        storeMatches = emptyList()
+        val q = query.trim()
+        if (q.length < 2) return@LaunchedEffect
+        kotlinx.coroutines.delay(400)
+        fileMatches = try {
+            searchFiles(q)
+        } catch (_: Exception) {
+            emptyList()
+        }
+        storeMatches = try {
+            val installed = apps.map { it.name.lowercase() }.toSet()
+            FlathubApi.search(q, onlyThisPhone = true).filter { it.name.lowercase() !in installed }.take(4)
+        } catch (_: Exception) {
+            emptyList()
+        }
+    }
     val filtered = remember(apps, query) {
         if (query.isBlank()) apps
         else apps.filter {
@@ -172,7 +206,35 @@ fun UbuntuShell(
                     AppTile(app = app, iconRoot = iconRoot, onClick = { onLaunchApp(app) }, onPin = onPin.takeIf { app.isLinuxApp })
                 }
             }
-            if (filtered.isEmpty()) {
+            if (phoneMatches.isNotEmpty()) {
+                item(span = { GridItemSpan(maxLineSpan) }) { SectionLabel("On the phone") }
+                items(phoneMatches, key = { "phone:" + it.pkg }) { app ->
+                    PhoneAppTile(app) { PhoneApps.open(context, app.pkg) }
+                }
+            }
+            if (fileMatches.isNotEmpty()) {
+                item(span = { GridItemSpan(maxLineSpan) }) { SectionLabel("Files") }
+                items(fileMatches, key = { "file:$it" }, span = { GridItemSpan(maxLineSpan) }) { path ->
+                    ResultRow(
+                        title = path.substringAfterLast('/'),
+                        subtitle = path.substringBeforeLast('/').replace("/root", "Home"),
+                        icon = Icons.Default.Description,
+                        onClick = { onOpenFile(path) },
+                    )
+                }
+            }
+            if (storeMatches.isNotEmpty()) {
+                item(span = { GridItemSpan(maxLineSpan) }) { SectionLabel("Install from Flathub") }
+                items(storeMatches, key = { "store:" + it.id }, span = { GridItemSpan(maxLineSpan) }) { hit ->
+                    ResultRow(
+                        title = hit.name,
+                        subtitle = hit.summary,
+                        icon = Icons.Default.ShoppingBag,
+                        onClick = { onSearchStore(hit.name) },
+                    )
+                }
+            }
+            if (filtered.isEmpty() && phoneMatches.isEmpty() && fileMatches.isEmpty() && storeMatches.isEmpty()) {
                 item(span = { GridItemSpan(maxLineSpan) }) {
                     Column(
                         Modifier
@@ -194,6 +256,83 @@ fun UbuntuShell(
                         modifier = Modifier.padding(top = 20.dp, start = 4.dp, end = 4.dp),
                     )
                 }
+            }
+        }
+    }
+}
+
+/** A launcher app on the phone, for the search. */
+data class PhoneApp(val pkg: String, val label: String, val icon: androidx.compose.ui.graphics.ImageBitmap?)
+
+object PhoneApps {
+    fun list(context: android.content.Context): List<PhoneApp> = try {
+        val pm = context.packageManager
+        pm.queryIntentActivities(
+            android.content.Intent(android.content.Intent.ACTION_MAIN).addCategory(android.content.Intent.CATEGORY_LAUNCHER), 0,
+        ).filter { it.activityInfo.packageName != context.packageName }
+            .distinctBy { it.activityInfo.packageName }
+            .map { info ->
+                val icon = try {
+                    val d = info.loadIcon(pm)
+                    val bmp = android.graphics.Bitmap.createBitmap(96, 96, android.graphics.Bitmap.Config.ARGB_8888)
+                    d.setBounds(0, 0, 96, 96)
+                    d.draw(android.graphics.Canvas(bmp))
+                    bmp.asImageBitmap()
+                } catch (_: Exception) {
+                    null
+                }
+                PhoneApp(info.activityInfo.packageName, info.loadLabel(pm).toString(), icon)
+            }
+            .sortedBy { it.label.lowercase() }
+    } catch (_: Exception) {
+        emptyList()
+    }
+
+    fun open(context: android.content.Context, pkg: String) {
+        context.packageManager.getLaunchIntentForPackage(pkg)?.let {
+            try {
+                context.startActivity(it.addFlags(android.content.Intent.FLAG_ACTIVITY_NEW_TASK))
+            } catch (_: Exception) {
+            }
+        }
+    }
+}
+
+@Composable
+private fun PhoneAppTile(app: PhoneApp, onClick: () -> Unit) {
+    Column(
+        Modifier
+            .clip(RoundedCornerShape(16.dp))
+            .clickable(onClick = onClick)
+            .padding(vertical = 10.dp, horizontal = 4.dp),
+        horizontalAlignment = Alignment.CenterHorizontally,
+    ) {
+        if (app.icon != null) {
+            androidx.compose.foundation.Image(app.icon, contentDescription = null, modifier = Modifier.size(56.dp))
+        } else {
+            Box(Modifier.size(56.dp))
+        }
+        Spacer(Modifier.height(8.dp))
+        Text(app.label, color = Color.White, fontSize = 13.sp, maxLines = 1, overflow = TextOverflow.Ellipsis)
+    }
+}
+
+@Composable
+private fun ResultRow(title: String, subtitle: String, icon: androidx.compose.ui.graphics.vector.ImageVector, onClick: () -> Unit) {
+    Row(
+        Modifier
+            .fillMaxWidth()
+            .clip(RoundedCornerShape(12.dp))
+            .clickable(onClick = onClick)
+            .padding(horizontal = 8.dp, vertical = 10.dp),
+        verticalAlignment = Alignment.CenterVertically,
+    ) {
+        Icon(icon, contentDescription = null, tint = Color.White.copy(alpha = 0.85f), modifier = Modifier.size(26.dp))
+        Spacer(Modifier.width(14.dp))
+        Column(Modifier.weight(1f)) {
+            Text(title, color = Color.White, fontSize = 15.sp, maxLines = 1, overflow = TextOverflow.Ellipsis)
+            if (subtitle.isNotBlank()) {
+                Text(subtitle, color = Color.White.copy(alpha = 0.65f), fontSize = 12.sp, maxLines = 1, overflow = TextOverflow.Ellipsis)
             }
         }
     }
@@ -229,7 +368,7 @@ private fun SearchField(
         Spacer(Modifier.width(12.dp))
         Box(Modifier.weight(1f)) {
             if (query.isEmpty()) {
-                Text("Search apps", color = Color.White.copy(alpha = 0.6f), fontSize = 16.sp)
+                Text("Search apps, files and Flathub", color = Color.White.copy(alpha = 0.6f), fontSize = 16.sp)
             }
             BasicTextField(
                 value = query,
