@@ -4,6 +4,9 @@
     <uses-permission android:name="android.permission.INTERNET" />
     <uses-permission android:name="android.permission.ACCESS_NETWORK_STATE" />
     <uses-permission android:name="android.permission.VIBRATE" />
+    <!-- The microphone, for Linux apps that record (MicBridge.kt); asked for
+         the first time one does. -->
+    <uses-permission android:name="android.permission.RECORD_AUDIO" />
     <!--
       The phone's folders (Downloads, Documents, ...) appear in the Linux home
       folder. The app targets API 28, so these still grant the legacy access

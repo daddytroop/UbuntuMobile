@@ -496,12 +496,39 @@ fun UbuntuApp(
     // by itself; the server is started from the container (linx-audio.sh)
     // in a process of its own that keeps it alive.
     val audio = remember { com.ubuntumobile.display.AudioBridge() }
+    // The microphone goes to Linux while a Linux app records; Android asks
+    // for it the first time one does.
+    val mic = remember {
+        com.ubuntumobile.display.MicBridge(context, java.io.File(vm.paths.sharedTmpDir, "linx-mic-wanted"))
+    }
+    val micPermission = androidx.activity.compose.rememberLauncherForActivityResult(
+        androidx.activity.result.contract.ActivityResultContracts.RequestPermission(),
+    ) { granted -> vm.paths.appendLog("microphone allowed: $granted") }
+    DisposableEffect(mic) {
+        val main = android.os.Handler(android.os.Looper.getMainLooper())
+        mic.onNeedPermission = {
+            main.post {
+                try {
+                    micPermission.launch(android.Manifest.permission.RECORD_AUDIO)
+                } catch (_: Exception) {
+                }
+            }
+        }
+        onDispose { mic.stop() }
+    }
     DisposableEffect(Unit) { onDispose { audio.stop() } }
     fun startAudio() {
         if (!java.io.File(vm.paths.root, "usr/bin/pulseaudio").exists()) return
         audio.start()
+        mic.start()
+        // The sound server, then the watcher that says when Linux wants the
+        // microphone; when both run already, nothing more is started.
         vm.runtime.startPersistent(
-            listOf("/bin/bash", "-c", "/usr/local/lib/linx/linx-audio.sh && exec sleep infinity"),
+            listOf(
+                "/bin/bash", "-c",
+                "/usr/local/lib/linx/linx-audio.sh; [ \$? -le 1 ] || exit; " +
+                    "pgrep -f '^/bin/bash /usr/local/lib/linx/linx-mic.sh' >/dev/null || exec /bin/bash /usr/local/lib/linx/linx-mic.sh",
+            ),
         )
     }
 
