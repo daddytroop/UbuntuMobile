@@ -158,7 +158,7 @@ private val WELL_KNOWN = listOf(
     "org.videolan.", "org.blender.", "com.obsproject.", "org.freedesktop.",
 )
 
-private enum class StoreSource(val label: String) { FLATHUB("Flathub"), UBUNTU("Ubuntu") }
+private enum class StoreSource(val label: String) { FLATHUB("Flathub"), UBUNTU("Ubuntu"), UPDATES("Updates") }
 
 /**
  * The store's front page: well-known desktop applications that run in the
@@ -233,8 +233,12 @@ fun StoreScreen(
     modifier: Modifier = Modifier,
     /** The container's /tmp, where an install says how far it is. */
     tmpDir: java.io.File? = null,
+    /** Open on the Updates tab (from the updates notification). */
+    showUpdates: Boolean = false,
+    /** How many updates are left, after a check or an update. */
+    onUpdateCount: (Int) -> Unit = {},
 ) {
-    var source by remember { mutableStateOf(StoreSource.FLATHUB) }
+    var source by remember { mutableStateOf(if (showUpdates) StoreSource.UPDATES else StoreSource.FLATHUB) }
     // Flathub's front page: popular apps, or one category's.
     var category by remember { mutableStateOf<String?>(null) }
     var flathubList by remember { mutableStateOf<List<StoreApp>>(emptyList()) }
@@ -422,13 +426,17 @@ fun StoreScreen(
                 Column(Modifier.weight(1f)) {
                     Text("Software", color = Color.White, fontSize = 20.sp, fontWeight = FontWeight.Medium)
                     Text(
-                        if (source == StoreSource.FLATHUB) "Linux apps from Flathub" else "Desktop apps from Ubuntu",
+                        when (source) {
+                            StoreSource.FLATHUB -> "Linux apps from Flathub"
+                            StoreSource.UBUNTU -> "Desktop apps from Ubuntu"
+                            StoreSource.UPDATES -> "Ubuntu and Flathub, kept up to date"
+                        },
                         color = Color.White.copy(alpha = 0.7f),
                         fontSize = 12.sp,
                     )
                 }
             }
-            StoreSearchField(
+            if (source != StoreSource.UPDATES) StoreSearchField(
                 query = query,
                 onQueryChange = { query = it },
                 placeholder = if (source == StoreSource.FLATHUB) "Search Flathub" else "Search Ubuntu packages",
@@ -512,6 +520,18 @@ fun StoreScreen(
             }
         }
 
+        if (source == StoreSource.UPDATES) {
+            UpdatesPane(
+                runGuest = runGuest,
+                tmpDir = tmpDir,
+                onUpdateCount = onUpdateCount,
+                modifier = Modifier
+                    .widthIn(max = 720.dp)
+                    .align(Alignment.CenterHorizontally),
+            )
+            return@Column
+        }
+
         details?.let { app ->
             StoreDetails(
                 app = app,
@@ -575,6 +595,133 @@ fun StoreScreen(
                     onOpen = { openApp(app.command) },
                     onDetails = if (app.flatpak) ({ details = app }) else null,
                 )
+            }
+        }
+    }
+}
+
+/** Software's Updates tab: what is waiting, and one button for all of it. */
+@Composable
+private fun UpdatesPane(
+    runGuest: suspend (command: String, timeoutSeconds: Long) -> String,
+    tmpDir: java.io.File?,
+    onUpdateCount: (Int) -> Unit,
+    modifier: Modifier = Modifier,
+) {
+    var items by remember { mutableStateOf<List<com.ubuntumobile.linux.UpdateItem>?>(null) }
+    var working by remember { mutableStateOf(false) }
+    var progress by remember { mutableStateOf<Int?>(null) }
+    var note by remember { mutableStateOf<String?>(null) }
+    val scope = rememberCoroutineScope()
+
+    suspend fun check() {
+        items = null
+        val found = com.ubuntumobile.linux.Updates.parse(runGuest(com.ubuntumobile.linux.Updates.CHECK, 600))
+        items = found
+        onUpdateCount(found.size)
+    }
+    LaunchedEffect(Unit) { check() }
+
+    fun updateAll() {
+        scope.launch {
+            working = true
+            note = null
+            val file = tmpDir?.let { java.io.File(it, "linx-updates-progress") }
+            file?.delete()
+            val watch = if (file != null) scope.launch {
+                while (true) {
+                    delay(700)
+                    val last = try {
+                        file.readLines().lastOrNull { it.isNotBlank() }
+                    } catch (_: Exception) {
+                        null
+                    }
+                    com.ubuntumobile.linux.Updates.progress(last)?.let { progress = it }
+                }
+            } else null
+            val out = runGuest(
+                "LINX_APT_STATUS=/tmp/linx-updates-progress /usr/local/lib/linx/linx-updates.sh --apply 2>&1 | tail -n 3",
+                3600,
+            )
+            watch?.cancel()
+            progress = null
+            note = if ("UPDATES_DONE" in out) {
+                "Everything is updated. Apps that were open use the new version once they are restarted."
+            } else {
+                "Not everything updated: " + (out.lines().lastOrNull { it.isNotBlank() }?.removePrefix("UPDATES_FAILED ")?.take(200) ?: "no output")
+            }
+            check()
+            working = false
+        }
+    }
+
+    Column(modifier.fillMaxSize().padding(16.dp)) {
+        val list = items
+        val pct = progress
+        if (working) {
+            LinearProgressIndicator(
+                progress = { (pct ?: 0) / 100f },
+                modifier = Modifier.fillMaxWidth(),
+                color = UbuntuPalette.UbuntuOrange,
+                trackColor = UbuntuPalette.LightSurfaceVariant,
+            )
+            Spacer(Modifier.height(8.dp))
+        }
+        Row(verticalAlignment = Alignment.CenterVertically) {
+            Text(
+                when {
+                    working -> if (pct != null) "Updating… $pct%" else "Updating…"
+                    list == null -> "Looking for updates…"
+                    list.isEmpty() -> "Everything is up to date."
+                    list.size == 1 -> "1 update"
+                    else -> "${list.size} updates"
+                },
+                fontSize = 16.sp,
+                fontWeight = FontWeight.Medium,
+                color = UbuntuPalette.LightOnSurface,
+                modifier = Modifier.weight(1f),
+            )
+            if (list != null && list.isNotEmpty() && !working) {
+                Box(
+                    Modifier
+                        .clip(RoundedCornerShape(20.dp))
+                        .background(UbuntuPalette.UbuntuOrange)
+                        .clickable { updateAll() }
+                        .padding(horizontal = 18.dp, vertical = 9.dp),
+                ) {
+                    Text("Update all", color = Color.White, fontSize = 13.sp, fontWeight = FontWeight.Medium)
+                }
+            } else if (list == null || working) {
+                CircularProgressIndicator(Modifier.size(20.dp), strokeWidth = 2.dp, color = UbuntuPalette.UbuntuOrange)
+            }
+        }
+        note?.let {
+            Spacer(Modifier.height(10.dp))
+            Text(it, fontSize = 13.sp, color = UbuntuPalette.LightOnSurfaceVariant)
+        }
+        Spacer(Modifier.height(12.dp))
+        LazyColumn(verticalArrangement = Arrangement.spacedBy(6.dp)) {
+            items(list.orEmpty(), key = { (if (it.flatpak) "f:" else "d:") + it.id }) { item ->
+                Row(
+                    Modifier
+                        .fillMaxWidth()
+                        .clip(RoundedCornerShape(12.dp))
+                        .background(UbuntuPalette.LightSurface)
+                        .padding(horizontal = 14.dp, vertical = 10.dp),
+                    verticalAlignment = Alignment.CenterVertically,
+                ) {
+                    Column(Modifier.weight(1f)) {
+                        Text(item.id, fontSize = 14.sp, color = UbuntuPalette.LightOnSurface, maxLines = 1, overflow = TextOverflow.Ellipsis)
+                        if (item.version.isNotBlank()) {
+                            Text(item.version, fontSize = 12.sp, color = UbuntuPalette.LightOnSurfaceVariant, maxLines = 1)
+                        }
+                    }
+                    Text(
+                        if (item.flatpak) "Flathub" else "Ubuntu",
+                        fontSize = 12.sp,
+                        color = UbuntuPalette.LightOnSurfaceVariant,
+                    )
+                }
             }
         }
     }

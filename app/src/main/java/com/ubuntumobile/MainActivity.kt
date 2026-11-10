@@ -189,6 +189,11 @@ class MainActivity : ComponentActivity() {
 
     /** A home-screen shortcut's app (see [pinShortcut]), to open on the desktop. */
     private fun takeLaunch(intent: android.content.Intent?) {
+        if (intent?.action == com.ubuntumobile.linux.Updates.ACTION_SHOW) {
+            pendingUpdates = true
+            intent.action = null
+            return
+        }
         com.ubuntumobile.ui.SharedIn.from(intent)?.let {
             pendingShare = it
             intent?.action = null
@@ -223,6 +228,9 @@ private const val EXTRA_APP_NAME = "app_name"
 
 /** A Linux app a home-screen shortcut asked for: (id, name), until it is started. */
 private var pendingLaunch by mutableStateOf<Pair<String, String>?>(null)
+
+/** The updates notification was tapped: open Software on its Updates tab. */
+private var pendingUpdates by mutableStateOf(false)
 
 /** Files or a link shared to the app, to open in a Linux app. */
 private var pendingShare by mutableStateOf<com.ubuntumobile.ui.SharedIn?>(null)
@@ -587,6 +595,13 @@ fun UbuntuApp(
                 val out = vm.runtime.shell("/usr/local/lib/linx/linx-locale.sh $wanted", 900).output
                 vm.paths.appendLog("language $wanted: ${out.lines().lastOrNull { it.isNotBlank() }}")
             }
+        }
+        // Updates, looked for once a day; the phone says when some are waiting.
+        if (setupDone() && System.currentTimeMillis() - prefs.getLong("updates_checked", 0) > 24L * 3600_000) {
+            val found = com.ubuntumobile.linux.Updates.parse(vm.guestCommand(com.ubuntumobile.linux.Updates.CHECK, 600))
+            prefs.edit().putLong("updates_checked", System.currentTimeMillis()).apply()
+            vm.paths.appendLog("updates: ${found.size}")
+            com.ubuntumobile.linux.Updates.notify(context, found.size)
         }
     }
 
@@ -987,6 +1002,18 @@ fun UbuntuApp(
         }
     }
 
+    // The updates notification opens Software on its Updates tab.
+    var storeOnUpdates by remember { mutableStateOf(false) }
+    LaunchedEffect(pendingUpdates) {
+        if (!pendingUpdates) return@LaunchedEffect
+        pendingUpdates = false
+        storeOnUpdates = true
+        screen = Screen.STORE
+    }
+    LaunchedEffect(screen) {
+        if (screen != Screen.STORE) storeOnUpdates = false
+    }
+
     // Shared from another app: copied into ~/From phone, then opened in the
     // Linux app the user picks (the ones whose menu entries say they open
     // that kind of file, the default first).
@@ -1195,6 +1222,8 @@ fun UbuntuApp(
 
         Screen.STORE -> {
             StoreScreen(
+                showUpdates = storeOnUpdates,
+                onUpdateCount = { com.ubuntumobile.linux.Updates.notify(context, it) },
                 runGuest = { cmd, timeout -> vm.guestCommand(cmd, timeout) },
                 openApp = { command ->
                     launchOnDisplay(command)
