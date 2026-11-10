@@ -30,6 +30,9 @@ import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Apps
+import androidx.compose.material.icons.filled.Lock
+import androidx.compose.material.icons.filled.Screenshot
+import androidx.compose.material.icons.filled.Tune
 import androidx.compose.material.icons.filled.Cast
 import androidx.compose.material.icons.filled.Folder
 import androidx.compose.material.icons.filled.Gamepad
@@ -176,6 +179,11 @@ fun DesktopMenu(
                 MenuItem(Icons.Default.Terminal, "Terminal", go(actions.onOpenTerminal))
                 MenuItem(Icons.Default.Folder, "Files", go(actions.onOpenFiles))
                 MenuItem(Icons.Default.ShoppingBag, "Software", go(actions.onOpenStore))
+
+                MenuSection("Phone")
+                MenuItem(Icons.Default.Tune, "Quick settings", go(actions.onQuickSettings))
+                MenuItem(Icons.Default.Screenshot, "Screenshot", go(actions.onScreenshot))
+                MenuItem(Icons.Default.Lock, "Lock", go(actions.onLock))
 
                 MenuSection("Controls")
                 MenuItem(Icons.Default.Keyboard, "Keyboard", go(actions.onShowKeyboard))

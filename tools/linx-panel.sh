@@ -129,6 +129,45 @@ fi
 if plugin_installed genmon; then
   status_item 14 battery
 fi
+# The notification bell: what came in while you were away, phone apps'
+# included, with Do not disturb (xfce4-notifyd's plugin).
+if plugin_installed notification-plugin; then
+  if [ "$(get /plugins/plugin-15)" != notification-plugin ]; then
+    xfconf-query -c xfce4-panel -p /plugins/plugin-15 -n -t string -s notification-plugin
+    CHANGED=1
+  fi
+  add_before_clock 15
+fi
+# Notifications are kept, so the bell has something to show.
+xfconf-query -c xfce4-notifyd -p /notification-log -n -t bool -s true 2>/dev/null
+xfconf-query -c xfce4-notifyd -p /log-level -n -t uint -s 1 2>/dev/null
+
+# ------------------------------------------------- keys, lock, screenshots
+# Print Screen saves a screenshot to the phone's Pictures/Screenshots, and
+# Super+L (or Lock in the menu) locks the desktop until the phone's own
+# PIN or fingerprint: the app does both (linx-phone).
+KEYS=xfce4-keyboard-shortcuts
+xfconf-query -c $KEYS -p "/commands/custom/Print" -n -t string -s "linx-phone screenshot" 2>/dev/null
+xfconf-query -c $KEYS -p "/commands/custom/<Super>l" -n -t string -s "linx-phone lock" 2>/dev/null
+xfconf-query -c $KEYS -p "/commands/custom/<Primary><Alt>l" -n -t string -s "linx-phone lock" 2>/dev/null
+xfconf-query -c xfce4-session -p /general/LockCommand -n -t string -s "linx-phone lock" 2>/dev/null
+if [ "$(get /plugins/plugin-1)" = whiskermenu ]; then
+  xfconf-query -c xfce4-panel -p /plugins/plugin-1/show-command-lockscreen -n -t bool -s true
+  xfconf-query -c xfce4-panel -p /plugins/plugin-1/command-lockscreen -n -t string -s "linx-phone lock"
+fi
+APPS=/usr/local/share/applications
+mkdir -p "$APPS"
+entry() {
+  [ -f "$APPS/$1.desktop" ] && return
+  printf '[Desktop Entry]\nType=Application\nName=%s\nComment=%s\nExec=%s\nIcon=%s\nCategories=%s\n' \
+    "$2" "$3" "$4" "$5" "$6" >"$APPS/$1.desktop"
+}
+entry linx-screenshot "Screenshot" "Save the desktop to the phone's Pictures/Screenshots" \
+  "linx-phone screenshot" applets-screenshooter Utility
+entry linx-lock "Lock screen" "Lock the desktop until the phone's PIN or fingerprint" \
+  "linx-phone lock" system-lock-screen System
+entry linx-quick "Quick settings" "Wi-Fi, Bluetooth, torch, brightness and night light" \
+  "linx-phone quick" preferences-system Settings
 
 if [ "$CHANGED" = 1 ] && [ "${1:-}" = --restart ] && pgrep -x xfce4-panel >/dev/null; then
   xfce4-panel -r

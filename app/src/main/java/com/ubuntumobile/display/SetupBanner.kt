@@ -103,6 +103,8 @@ fun SetupBanner(
     modifier: Modifier = Modifier,
     /** Hand the setup logs to another app (mail, chat); null hides the button. */
     onShareLog: (() -> Unit)? = null,
+    /** Put the failure away until setup runs again; null hides the button. */
+    onDismiss: (() -> Unit)? = null,
 ) {
     AnimatedVisibility(
         visible = status != null,
@@ -154,6 +156,8 @@ fun SetupBanner(
             if (s.failed) {
                 Spacer(Modifier.height(8.dp))
                 Row(Modifier.fillMaxWidth(), horizontalArrangement = androidx.compose.foundation.layout.Arrangement.End) {
+                    if (onDismiss != null) BannerButton("Dismiss", onDismiss)
+                    Spacer(Modifier.width(8.dp))
                     if (onShareLog != null) BannerButton("Share log", onShareLog)
                     Spacer(Modifier.width(8.dp))
                     BannerButton("Try again", onRetry)

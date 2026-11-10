@@ -138,6 +138,7 @@ object ContainerSetup {
         "linx-mic.sh" to "usr/local/lib/linx/linx-mic.sh",
         "linx-clip.py" to "usr/local/lib/linx/linx-clip.py",
         "linx-status" to "usr/local/bin/linx-status",
+        "linx-print.sh" to "usr/local/lib/linx/linx-print.sh",
         "make-xfwm4-theme.py" to "usr/local/lib/linx/make-xfwm4-theme.py",
         "gamepad-helper.py" to "usr/local/lib/linx/gamepad-helper.py",
         "tint2rc" to "usr/local/share/linx/tint2rc",

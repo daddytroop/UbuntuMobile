@@ -54,7 +54,7 @@ free_mb() { df -Pm / 2>/dev/null | awk 'NR == 2 {print $4}'; }
 step "Sound and the Ubuntu look"
 /usr/local/lib/linx/apt-install.sh pulseaudio yaru-theme-gtk yaru-theme-icon fonts-ubuntu \
   xfce4-whiskermenu-plugin xfce4-docklike-plugin xfce4-notifyd libnotify-bin \
-  xfce4-genmon-plugin xfce4-pulseaudio-plugin \
+  xfce4-genmon-plugin xfce4-pulseaudio-plugin cups printer-driver-cups-pdf \
   >/tmp/linx-setup-base.log 2>&1 || fail base /tmp/linx-setup-base.log
 
 if [ "$LINX_BROWSER" = 1 ]; then
@@ -91,7 +91,15 @@ if [ "$LINX_FLATHUB" = 1 ]; then
       # One at a time, so an app that is not built for this phone's
       # processor does not keep the others out. Flatpak prints how far
       # it is only to a terminal, so it gets one (script).
+      : >/tmp/linx-setup-skipped
       for app in $LINX_FLATPAKS; do
+        # Not built for this phone's processor (Thunderbird and OBS are
+        # PC-only on Flathub): skipped and said so, not a failed setup.
+        if flatpak remote-info flathub "$app" 2>&1 >/dev/null | grep -qi "nothing matches"; then
+          echo "$app" >>/tmp/linx-setup-skipped
+          echo "skipped $app: not on Flathub for $(uname -m)" >>/tmp/linx-setup-flatpaks.log
+          continue
+        fi
         COLUMNS=100 script -qfec "flatpak install -y --or-update flathub $app" /dev/null 2>&1 \
           | tee -a /tmp/linx-setup-flatpaks.log | tr '\r' '\n' \
           | grep --line-buffered -o '[0-9]\+%' | sed -u 's/^/flatpak:/' >>"$LINX_APT_STATUS"

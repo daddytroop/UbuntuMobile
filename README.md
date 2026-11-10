@@ -100,6 +100,13 @@ A native store with two sources, switched at the top:
   on (`linx-flatpak.sh`) and brings the app's runtime, a few hundred MB.
   Flatpak prints its progress only to a terminal, so installs run under
   `script`, and the store and setup show the real percentage.
+- **Front page**: like GNOME Software, a spotlight app (a different one
+  each day, from your interests), then a row for each collection (Work and
+  school, Gaming, Music and video, Creating, Chat and social, Coding, Other
+  browsers, Handy tools) with "See all". The gaming collection is
+  emulators for every classic console, Moonlight for streaming from a PC,
+  and open-source games, with a note on what runs well without the graphics
+  chip.
 - **Ubuntu**: a featured page (Firefox, LibreOffice, GIMP, Inkscape, VLC,
   Geany, ...) and a search of the Ubuntu archive. Backed by
   `apt-install.sh`, which fetches apt's package lists the first time (the
@@ -145,16 +152,23 @@ Linux should be (`OnboardingScreen.kt`), while Ubuntu unpacks behind it:
 - **How much**: Light (the desktop, terminal and files), Standard (adds
   Firefox and a document viewer) or Full (adds LibreOffice, GIMP and VLC),
   with the download each means.
+- **What will you use it for?** Work and school, Gaming, Music and video,
+  Creating, Chat and social, Coding: pick any. Each ticks a few apps
+  suggested for it (`Collections.kt`), and the store shows those
+  collections first.
 - **Look**: light or dark, one of Yaru's eight accent colours, a
   wallpaper, and the desktop's size on the phone (a monitor always gets a
   full-size desktop).
-- **Apps**: the starting set, ticked by the choice above, to add to or
-  take from.
-- **For developers**: popular open-source tools from GitHub that Ubuntu
+- **Apps**: the apps for each interest, from Ubuntu or Flathub, and
+  Ubuntu's essentials, ticked by the choices above, to add to or take
+  from. Only apps built for the phone's processor are offered: on ARM,
+  Betterbird stands in for Thunderbird, which Flathub builds only for PCs.
+- **For developers** (when Coding is picked): popular open-source tools from GitHub that Ubuntu
   packages - Git, GitHub CLI, Neovim, lazygit, btop, fastfetch, ripgrep,
   fzf, bat, zoxide, tmux - each on its own or all at once.
-- **App stores**: Ubuntu's archive always; Flathub on or off, with a few of
-  its apps to start with.
+- **App stores**: Ubuntu's archive always; Flathub on or off. Setup skips
+  a Flathub app that is not built for the phone's processor rather than
+  failing, and a failed setup's banner can be dismissed.
 
 The choices go to `/etc/linx/setup.conf`, and once the desktop is up
 `linx-setup.sh` installs them in the background - sound and Ubuntu's look
@@ -238,16 +252,69 @@ Next to the clock, as on a laptop:
   airplane mode or offline. The tooltip also says when the network is
   metered or has no internet yet.
 - **Volume:** XFCE's PulseAudio plugin.
-- **Battery:** the level and charging state. The tooltip adds the charger
-  type, time until full, temperature and battery condition.
+- **Battery:** the level and charging state. The tooltip adds the
+  percentage, charger type, time until full, temperature and battery
+  condition.
+- **Notifications:** xfce4-notifyd's bell keeps what came in, with Do not
+  disturb.
 
-Clicking the network or battery item opens that page of the phone's
-settings (`linx-phone settings internet|battery|wifi|bluetooth|sound|display`).
 Linux under proot cannot see the phone's battery or network, so while Linux
 runs, `PhoneStatus.kt` writes them to `/tmp/linx-phone-status`. Two generic
 monitor panel items run `linx-status battery|network` on that file every
 3 seconds. Setup installs `xfce4-genmon-plugin`; a Linux set up earlier gets it
 in the background the next time the desktop starts.
+
+### Quick settings, lock, screenshots
+Clicking the network or battery item (or Quick settings in the app's menu)
+opens a panel drawn by the app (`PhoneExtras.kt`):
+- **Wi-Fi, Bluetooth and Torch** switch the phone's own. The app targets
+  Android 9, which still lets it switch them. Long-press a tile for its
+  settings page.
+- **Night light:** a warm tint over the desktop, with a warmth slider.
+- **Keep awake.**
+- **Screenshot.**
+- **Brightness** for the desktop alone. "Phone's brightness" goes back to
+  the phone's own setting.
+
+The panel also has links to the phone's internet and battery settings.
+
+Other controls:
+- **Lock** (Super+L, Ctrl+Alt+L, the menu's lock button, or `linx-phone
+  lock`) covers the phone and a connected monitor with a clock. Unlocking
+  takes the phone's PIN, pattern or fingerprint.
+- **Print Screen** (or the Screenshot menu entry) saves the desktop to the
+  phone's Pictures/Screenshots.
+- **Battery warnings:** at 15% and 5% on battery, a "Battery low"
+  notification appears on the desktop.
+
+### Phone notifications on the desktop
+With access allowed (Settings → Phone notifications), new phone
+notifications (not ongoing ones such as music or downloads) also pop up on
+the Linux desktop and wait in the bell. This only happens while the desktop
+is on screen, on the phone or a monitor. `PhoneNotifications.kt` leaves them
+as JSON in `/tmp/linx-phone-notes`, and `linx-notify.py` shows them with
+`notify-send`. Their app name ends in "(phone)", so they are not sent back
+to the phone.
+
+### Printing
+Linux apps print to the "Phone" printer. CUPS-PDF writes the job as a PDF
+in `/tmp/linx-print`, and Android's print dialog opens with it, offering the
+phone's printers (Wi-Fi printers, Mopria and others) or Save as PDF.
+`linx-print.sh` sets CUPS up so it listens only on its local socket, because
+Android keeps apps off port 631. CUPS starts with the desktop.
+
+### LibreOffice and /proc
+Android 8 and newer deny apps `/proc/version`, `/proc/stat`, `/proc/uptime`,
+`/proc/loadavg` and `/proc/vmstat`. Without them, LibreOffice's launcher
+stops with "/proc not mounted", and `ps` cannot find the boot time.
+`LinuxRuntime` binds plausible stand-ins over each one the app cannot read,
+as proot-distro does.
+
+### Not possible yet: the camera
+Linux apps see a camera through a kernel video device (`/dev/video*`, or
+v4l2loopback to make one). Android gives apps neither, and proot cannot add
+a kernel module, so video calls in Linux apps have no camera. Calls work in
+the phone's own apps.
 
 ### Microphone
 Linux apps can record from the phone's microphone ("Phone microphone", the

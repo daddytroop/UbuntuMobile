@@ -139,17 +139,9 @@ private fun flathubApp(id: String, name: String, summary: String, icon: ImageVec
  * without the sandbox.
  */
 object FlathubCatalog {
-    val featured = listOf(
-        flathubApp("org.mozilla.Thunderbird", "Thunderbird", "Email and calendar", Icons.Default.Email, 0xFF0A84FF),
-        flathubApp("org.telegram.desktop", "Telegram", "Messaging", Icons.Default.Send, 0xFF2AABEE),
-        flathubApp("org.signal.Signal", "Signal", "Private messaging", Icons.Default.Forum, 0xFF3A76F0),
-        flathubApp("com.visualstudio.code", "Visual Studio Code", "Code editor", Icons.Default.Code, 0xFF007ACC),
-        flathubApp("org.kde.krita", "Krita", "Digital painting", Icons.Default.Brush, 0xFF3BABFF),
-        flathubApp("org.blender.Blender", "Blender", "3D modelling and animation", Icons.Default.ViewInAr, 0xFFEA7600),
-        flathubApp("com.obsproject.Studio", "OBS Studio", "Recording and streaming", Icons.Default.Videocam, 0xFF302E31),
-        flathubApp("io.mpv.Mpv", "mpv", "A light video player", Icons.Default.Movie, 0xFF691F69),
-        flathubApp("com.github.tchx84.Flatseal", "Flatseal", "Flatpak app permissions", Icons.Default.Key, 0xFF4A86CF),
-    )
+    /** The collections' suggested Flathub apps that run on this phone. */
+    val featured: List<StoreApp>
+        get() = Collections.all.filter { it.pick && it.ubuntu == null && it.runsHere }.map { it.toStoreApp() }
 }
 
 /** App id prefixes of the big desktop projects, shown first in a search. */
@@ -239,10 +231,15 @@ fun StoreScreen(
     onUpdateCount: (Int) -> Unit = {},
     /** Start with this search (from the launcher's search). */
     initialQuery: String = "",
+    /** What setup was told it is for: those collections come first. */
+    interests: Set<Interest> = emptySet(),
 ) {
     var source by remember { mutableStateOf(if (showUpdates) StoreSource.UPDATES else StoreSource.FLATHUB) }
     // Flathub's front page: popular apps, or one category's.
     var category by remember { mutableStateOf<String?>(null) }
+    // One of the front page's collections, opened with "See all".
+    var collection by remember { mutableStateOf<Interest?>(null) }
+    val curated = remember { Collections.all.map { it.toStoreApp() } }
     var flathubList by remember { mutableStateOf<List<StoreApp>>(emptyList()) }
     var flathubLoading by remember { mutableStateOf(false) }
     var flathubOffline by remember { mutableStateOf(false) }
@@ -295,7 +292,7 @@ fun StoreScreen(
             FlathubCatalog.featured
         }
         flathubLoading = false
-        refreshStatus(flathubList)
+        refreshStatus(flathubList + if (category == null) curated else emptyList())
     }
 
     // Searching runs apt or Flatpak inside the container, which takes a
@@ -422,7 +419,13 @@ fun StoreScreen(
                     .padding(horizontal = 4.dp),
                 verticalAlignment = Alignment.CenterVertically,
             ) {
-                IconButton(onClick = { if (details != null) details = null else onClose() }) {
+                IconButton(onClick = {
+                    when {
+                        details != null -> details = null
+                        collection != null -> collection = null
+                        else -> onClose()
+                    }
+                }) {
                     Icon(Icons.AutoMirrored.Filled.ArrowBack, contentDescription = "Back", tint = Color.White)
                 }
                 Column(Modifier.weight(1f)) {
@@ -550,8 +553,10 @@ fun StoreScreen(
             return@Column
         }
 
+        val open = collection
         val showing = when {
             query.isNotBlank() -> results
+            source == StoreSource.FLATHUB && open != null -> Collections.of(open).map { it.toStoreApp() }
             source == StoreSource.FLATHUB -> flathubList
             else -> StoreCatalog.featured
         }
@@ -565,7 +570,34 @@ fun StoreScreen(
         ) {
             if (source == StoreSource.FLATHUB && query.isBlank()) {
                 item {
-                    CategoryChips(selected = category, onSelect = { category = it })
+                    CategoryChips(selected = if (open != null) "" else category, onSelect = { category = it; collection = null })
+                }
+            }
+            if (source == StoreSource.FLATHUB && query.isBlank() && category == null && open == null) {
+                item {
+                    StoreHome(
+                        interests = interests,
+                        installed = installed,
+                        busy = installing,
+                        onInstall = { install(it) },
+                        onOpen = { openApp(it.command) },
+                        onDetails = { if (it.flatpak) details = it },
+                        onSeeAll = { collection = it },
+                    )
+                }
+            }
+            if (open?.note != null && query.isBlank()) {
+                item {
+                    Text(
+                        open.note!!,
+                        fontSize = 13.sp,
+                        color = UbuntuPalette.LightOnSurfaceVariant,
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .clip(RoundedCornerShape(12.dp))
+                            .background(UbuntuPalette.LightSurfaceVariant)
+                            .padding(12.dp),
+                    )
                 }
             }
             item {
@@ -573,8 +605,9 @@ fun StoreScreen(
                     when {
                         query.isBlank() && source == StoreSource.FLATHUB && flathubOffline ->
                             "Flathub's website cannot be reached, so these are the apps this version knows."
+                        query.isBlank() && source == StoreSource.FLATHUB && open != null -> open.label
                         query.isBlank() && source == StoreSource.FLATHUB ->
-                            FlathubApi.categories.firstOrNull { it.first == category }?.second ?: "Popular"
+                            FlathubApi.categories.firstOrNull { it.first == category }?.second ?: "Popular on Flathub"
                         query.isBlank() -> "Featured"
                         searching -> "Searching…"
                         results.isEmpty() -> "Nothing matches “$query”."
@@ -587,7 +620,7 @@ fun StoreScreen(
                     modifier = Modifier.padding(start = 4.dp, bottom = 4.dp),
                 )
             }
-            items(showing, key = { it.pkg }) { app ->
+            items(showing, key = { "list:" + it.pkg }) { app ->
                 StoreRow(
                     app = app,
                     installed = installed[app.pkg],
@@ -1049,3 +1082,148 @@ data class FlatpakApp(
     val name: String,
     val version: String = "",
 )
+
+/**
+ * The store's front page, as in GNOME Software: one app in the spotlight,
+ * then a row of apps for each collection (Gaming, Work and school, ...),
+ * those setup was told about first.
+ */
+@Composable
+private fun StoreHome(
+    interests: Set<Interest>,
+    installed: Map<String, Boolean>,
+    busy: String?,
+    onInstall: (StoreApp) -> Unit,
+    onOpen: (StoreApp) -> Unit,
+    onDetails: (StoreApp) -> Unit,
+    onSeeAll: (Interest) -> Unit,
+) {
+    val order = remember(interests) { interests.sortedBy { it.ordinal } + Interest.entries.filter { it !in interests } }
+    // The spotlight: a suggested app not installed yet, a different one each day.
+    val spotlight = remember(interests, installed.size) {
+        val pool = Collections.all.filter { it.pick && it.runsHere && it.ubuntu == null }
+            .filter { interests.isEmpty() || it.interest in interests }
+            .filter { installed[it.id] != true }
+            .ifEmpty { Collections.all.filter { it.pick && it.runsHere && it.ubuntu == null } }
+        val day = (System.currentTimeMillis() / 86_400_000L).toInt()
+        pool.getOrNull(day % pool.size.coerceAtLeast(1))
+    }
+    Column(verticalArrangement = Arrangement.spacedBy(18.dp), modifier = Modifier.padding(bottom = 12.dp)) {
+        spotlight?.let { pick ->
+            val app = remember(pick) { pick.toStoreApp() }
+            Spotlight(app, pick.interest, installed[app.pkg], busy == app.pkg, busy == null, { onInstall(app) }, { onOpen(app) }) {
+                onDetails(app)
+            }
+        }
+        order.forEach { interest ->
+            val apps = remember(interest) { Collections.of(interest).map { it.toStoreApp() } }
+            Column {
+                Row(
+                    Modifier.fillMaxWidth().padding(start = 4.dp, bottom = 8.dp),
+                    verticalAlignment = Alignment.CenterVertically,
+                ) {
+                    Icon(interest.icon, contentDescription = null, tint = Color(interest.color), modifier = Modifier.size(20.dp))
+                    Spacer(Modifier.width(8.dp))
+                    Column(Modifier.weight(1f)) {
+                        Text(
+                            interest.label + if (interest in interests) " · for you" else "",
+                            fontSize = 16.sp,
+                            fontWeight = FontWeight.SemiBold,
+                            color = UbuntuPalette.LightOnSurface,
+                        )
+                        Text(interest.detail, fontSize = 12.sp, color = UbuntuPalette.LightOnSurfaceVariant)
+                    }
+                    Text(
+                        "See all",
+                        fontSize = 13.sp,
+                        fontWeight = FontWeight.Medium,
+                        color = UbuntuPalette.UbuntuOrange,
+                        modifier = Modifier
+                            .clip(RoundedCornerShape(12.dp))
+                            .clickable { onSeeAll(interest) }
+                            .padding(horizontal = 10.dp, vertical = 6.dp),
+                    )
+                }
+                androidx.compose.foundation.lazy.LazyRow(horizontalArrangement = Arrangement.spacedBy(10.dp)) {
+                    items(apps, key = { interest.id + ":" + it.pkg }) { app ->
+                        AppCard(app, installed[app.pkg], busy == app.pkg, busy == null, { onInstall(app) }, { onOpen(app) }) {
+                            onDetails(app)
+                        }
+                    }
+                }
+            }
+        }
+    }
+}
+
+@Composable
+private fun Spotlight(
+    app: StoreApp,
+    interest: Interest,
+    installed: Boolean?,
+    busy: Boolean,
+    enabled: Boolean,
+    onInstall: () -> Unit,
+    onOpen: () -> Unit,
+    onClick: () -> Unit,
+) {
+    Row(
+        Modifier
+            .fillMaxWidth()
+            .clip(RoundedCornerShape(20.dp))
+            .background(
+                androidx.compose.ui.graphics.Brush.linearGradient(
+                    listOf(Color(interest.color), Color(interest.color).copy(alpha = 0.55f), UbuntuPalette.Aubergine),
+                ),
+            )
+            .clickable(onClick = onClick)
+            .padding(18.dp),
+        verticalAlignment = Alignment.CenterVertically,
+    ) {
+        Column(Modifier.weight(1f)) {
+            Text("SPOTLIGHT · ${interest.label.uppercase()}", color = Color.White.copy(alpha = 0.75f), fontSize = 11.sp, letterSpacing = 1.sp)
+            Spacer(Modifier.height(6.dp))
+            Text(app.name, color = Color.White, fontSize = 24.sp, fontWeight = FontWeight.Bold, maxLines = 1, overflow = TextOverflow.Ellipsis)
+            Text(app.summary, color = Color.White.copy(alpha = 0.85f), fontSize = 14.sp, maxLines = 2, overflow = TextOverflow.Ellipsis)
+            Spacer(Modifier.height(12.dp))
+            StoreButton(app, installed, busy, enabled, onInstall, onOpen)
+        }
+        Spacer(Modifier.width(12.dp))
+        AppIcon(app, 84.dp)
+    }
+}
+
+/** An app in a collection's row: icon, name, what it is, and its button. */
+@Composable
+private fun AppCard(
+    app: StoreApp,
+    installed: Boolean?,
+    busy: Boolean,
+    enabled: Boolean,
+    onInstall: () -> Unit,
+    onOpen: () -> Unit,
+    onClick: () -> Unit,
+) {
+    Column(
+        Modifier
+            .width(148.dp)
+            .clip(RoundedCornerShape(16.dp))
+            .background(UbuntuPalette.LightSurface)
+            .clickable(onClick = onClick)
+            .padding(12.dp),
+    ) {
+        AppIcon(app, 52.dp)
+        Spacer(Modifier.height(10.dp))
+        Text(app.name, fontSize = 14.sp, fontWeight = FontWeight.Medium, color = UbuntuPalette.LightOnSurface, maxLines = 1, overflow = TextOverflow.Ellipsis)
+        Text(
+            app.summary,
+            fontSize = 12.sp,
+            color = UbuntuPalette.LightOnSurfaceVariant,
+            maxLines = 2,
+            minLines = 2,
+            overflow = TextOverflow.Ellipsis,
+        )
+        Spacer(Modifier.height(10.dp))
+        StoreButton(app, installed, busy, enabled, onInstall, onOpen)
+    }
+}

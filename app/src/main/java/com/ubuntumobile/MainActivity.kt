@@ -1,5 +1,6 @@
 package com.ubuntumobile
 
+import com.ubuntumobile.display.QuickSettingsPanel
 import android.os.Bundle
 import android.view.WindowManager
 import android.view.inputmethod.InputMethodManager
@@ -388,6 +389,64 @@ fun UbuntuApp(
     }
     LaunchedEffect(state.isInstalled) {
         if (state.isInstalled) session.keepConnected()
+    }
+
+    // What Linux asks of the phone (linx-phone): quick settings, a
+    // screenshot, the lock screen, printing.
+    fun takeScreenshot() {
+        val shot = session.bitmap?.let { it.copy(android.graphics.Bitmap.Config.ARGB_8888, false) } ?: return
+        scope.launch {
+            val saved = withContext(Dispatchers.IO) { com.ubuntumobile.display.PhoneControls.saveScreenshot(context, shot) }
+            android.widget.Toast.makeText(
+                context,
+                if (saved) "Screenshot saved to Pictures/Screenshots" else "The screenshot could not be saved",
+                android.widget.Toast.LENGTH_SHORT,
+            ).show()
+        }
+    }
+    LaunchedEffect(Unit) {
+        com.ubuntumobile.display.PhoneExtras.load(context)
+        com.ubuntumobile.display.PhoneRequests.events.collect { event ->
+            when {
+                event == "quick" -> com.ubuntumobile.display.PhoneExtras.quickShown = true
+                event == "screenshot" -> {
+                    // A moment for a menu or the panel to close first.
+                    delay(400)
+                    takeScreenshot()
+                }
+                event == "lock" -> com.ubuntumobile.display.PhoneExtras.locked = true
+                event.startsWith("print:") -> {
+                    // Only what the Linux printer wrote, in the shared /tmp.
+                    val path = event.removePrefix("print:")
+                    val file = java.io.File(vm.paths.sharedTmpDir, path.removePrefix("/tmp/"))
+                    val ok = path.startsWith("/tmp/linx-print/") && !path.contains("..") && file.isFile
+                    val activity = context as? android.app.Activity
+                    if (ok && activity != null) com.ubuntumobile.display.PhoneControls.print(activity, file)
+                }
+            }
+        }
+    }
+    // The desktop's brightness, set from quick settings, while it is on screen.
+    val extrasWindow = (context as? android.app.Activity)?.window
+    LaunchedEffect(screen, com.ubuntumobile.display.PhoneExtras.brightness) {
+        val window = extrasWindow ?: return@LaunchedEffect
+        val wanted = if (screen == Screen.DISPLAY) com.ubuntumobile.display.PhoneExtras.brightness else -1f
+        window.attributes = window.attributes.apply { screenBrightness = if (wanted < 0) -1f else wanted }
+    }
+    // Phone notifications go to the desktop only while it is in sight.
+    val extrasLifecycle = androidx.lifecycle.compose.LocalLifecycleOwner.current.lifecycle
+    var appInFront by remember { mutableStateOf(true) }
+    androidx.compose.runtime.DisposableEffect(extrasLifecycle) {
+        val observer = androidx.lifecycle.LifecycleEventObserver { _, e ->
+            if (e == androidx.lifecycle.Lifecycle.Event.ON_RESUME) appInFront = true
+            if (e == androidx.lifecycle.Lifecycle.Event.ON_PAUSE) appInFront = false
+        }
+        extrasLifecycle.addObserver(observer)
+        onDispose { extrasLifecycle.removeObserver(observer) }
+    }
+    LaunchedEffect(screen, appInFront, externalDisplay, preferMonitor) {
+        com.ubuntumobile.display.PhoneExtras.desktopVisible =
+            (appInFront && screen == Screen.DISPLAY) || (externalDisplay != null && preferMonitor)
     }
 
     DisposableEffect(Unit) {
@@ -1055,11 +1114,14 @@ fun UbuntuApp(
     // On a monitor, the desktop.
     if (state.isInstalled && docked && externalDisplay != null) {
         PresentationOn(externalDisplay) {
-            DesktopSurface(
-                session = session,
-                onCanvasSize = { monitorSize = it },
-                modifier = Modifier.fillMaxSize(),
-            )
+            Box(Modifier.fillMaxSize()) {
+                DesktopSurface(
+                    session = session,
+                    onCanvasSize = { monitorSize = it },
+                    modifier = Modifier.fillMaxSize(),
+                )
+                com.ubuntumobile.display.LockOverlay(onMonitor = true)
+            }
         }
     }
 
@@ -1490,6 +1552,7 @@ fun UbuntuApp(
                 onClose = { screen = Screen.DISPLAY },
                 modifier = Modifier.systemBarsPadding(),
                 tmpDir = vm.paths.sharedTmpDir,
+                interests = look?.interests.orEmpty(),
             )
         }
 
@@ -1615,6 +1678,10 @@ fun UbuntuApp(
                 setup = setupStatus,
                 onRetrySetup = { if (!browserBusy) scope.launch { runSetup() } },
                 onShareSetupLog = { shareSetupLog(context, vm.paths.sharedTmpDir) },
+                onDismissSetup = { setupStatus = null; browserNote = null },
+                onQuickSettings = { com.ubuntumobile.display.PhoneExtras.quickShown = true },
+                onScreenshot = { scope.launch { delay(400); takeScreenshot() } },
+                onLock = { com.ubuntumobile.display.PhoneExtras.locked = true },
                 opening = opening,
             )
             Box(Modifier.fillMaxSize().background(Color.Black)) {
@@ -1648,6 +1715,7 @@ fun UbuntuApp(
                         actions.onRetrySetup,
                         insets.align(Alignment.TopCenter),
                         actions.onShareSetupLog,
+                        actions.onDismissSetup,
                     )
                     // Docked, the game is on the monitor and the phone is
                     // the controller: the pad takes the whole screen.
@@ -1666,7 +1734,10 @@ fun UbuntuApp(
                             }
                         },
                     )
+                    com.ubuntumobile.display.NightLightOverlay()
                 }
+                QuickSettingsPanel(onScreenshot = actions.onScreenshot, modifier = insets)
+                com.ubuntumobile.display.LockOverlay(onMonitor = false)
             }
         }
     }

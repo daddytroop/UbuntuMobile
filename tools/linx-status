@@ -65,10 +65,12 @@ battery() {
   [ "$(s power_saver)" = 1 ] && tip="$tip\nBattery saver is on"
   [ -n "$(s temp)" ] && tip="$tip\nTemperature $(s temp) °C"
   [ -n "$(s health)" ] && tip="$tip\nBattery condition: $(s health)"
-  tip="$tip\n\nClick for the phone's battery settings"
-  printf '<icon>%s</icon><txt> %s%%</txt><tool>%b</tool>' "$icon" "$level" "$tip"
-  printf '<click>linx-phone settings battery</click><txtclick>linx-phone settings battery</txtclick>'
-  printf '<iconclick>linx-phone settings battery</iconclick>\n'
+  tip="$tip\n\nClick for quick settings"
+  # The level shows in the icon; the number is in the tooltip (the panel
+  # is short of room on a phone).
+  printf '<icon>%s</icon><tool>%b</tool>' "$icon" "$tip"
+  printf '<click>linx-phone quick</click>'
+  printf '<iconclick>linx-phone quick</iconclick>\n'
 }
 
 network() {
@@ -107,9 +109,9 @@ network() {
   fi
   [ "$(s metered)" = 1 ] && [ "$net" != none ] && tip="$tip\nMetered: big downloads may cost data"
   [ "$(s validated)" = 0 ] && [ "$net" != none ] && tip="$tip\nConnected, but no internet yet (a sign-in page?)"
-  tip="$tip\n\nClick for the phone's internet settings"
+  tip="$tip\n\nClick for quick settings: Wi-Fi, Bluetooth, brightness and more"
   printf '<icon>%s</icon><tool>%b</tool>' "$icon" "$tip"
-  printf '<iconclick>linx-phone settings internet</iconclick>\n'
+  printf '<iconclick>linx-phone quick</iconclick>\n'
 }
 
 case "${1:-}" in

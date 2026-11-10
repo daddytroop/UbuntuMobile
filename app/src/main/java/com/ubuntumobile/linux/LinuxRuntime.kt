@@ -34,7 +34,57 @@ class LinuxRuntime(private val paths: LinuxPaths) {
         baseArgsFor(
             paths.root.absolutePath, paths.sdcardDir.absolutePath,
             paths.sharedTmpDir.absolutePath, paths.shmDir.absolutePath,
+        ) + fakeProcBinds
+
+    /**
+     * Stand-ins for the /proc files Android keeps from apps.
+     *
+     * Android 8 and newer deny apps /proc/version, /proc/stat and a few
+     * more. Linux programs take that badly: LibreOffice's launcher stops
+     * with "/proc not mounted", ps and top cannot tell the boot time. Each
+     * one the app cannot read is bound to a plausible copy made here (as
+     * proot-distro does).
+     */
+    private val fakeProcBinds: List<String> by lazy {
+        val dir = java.io.File(paths.shmDir.parentFile, "fakeproc").apply { mkdirs() }
+        val cpus = Runtime.getRuntime().availableProcessors().coerceAtLeast(1)
+        val upSeconds = android.os.SystemClock.elapsedRealtime() / 1000
+        val bootTime = System.currentTimeMillis() / 1000 - upSeconds
+        val kernel = System.getProperty("os.version") ?: "6.1.0"
+        val files = mapOf(
+            "version" to "Linux version $kernel (mobuntu@android) (gcc version 12.0) #1 SMP PREEMPT\n",
+            "stat" to buildString {
+                append("cpu  ${upSeconds * 20} 0 ${upSeconds * 10} ${upSeconds * 70 * cpus} 0 0 0 0 0 0\n")
+                for (i in 0 until cpus) append("cpu$i ${upSeconds * 20} 0 ${upSeconds * 10} ${upSeconds * 70} 0 0 0 0 0 0\n")
+                append("intr 0\nctxt 0\nbtime $bootTime\nprocesses 1\nprocs_running 1\nprocs_blocked 0\n")
+                append("softirq 0 0 0 0 0 0 0 0 0 0 0\n")
+            },
+            "uptime" to "$upSeconds.00 ${upSeconds * cpus / 2}.00\n",
+            "loadavg" to "0.50 0.40 0.30 1/200 1000\n",
+            "vmstat" to "nr_free_pages 100000\npgpgin 0\npgpgout 0\npswpin 0\npswpout 0\n",
         )
+        files.flatMap { (name, text) ->
+            val real = java.io.File("/proc/$name")
+            // access() says yes and SELinux still refuses the open: try it.
+            val readable = try {
+                real.inputStream().use { it.read() }
+                true
+            } catch (_: Exception) {
+                false
+            }
+            if (readable) {
+                emptyList()
+            } else {
+                val fake = java.io.File(dir, name)
+                try {
+                    fake.writeText(text)
+                    listOf("-b", "${fake.absolutePath}:/proc/$name")
+                } catch (_: Exception) {
+                    emptyList()
+                }
+            }
+        }
+    }
 
 
     /** The locale linx-locale.sh made ready (/etc/linx/locale), or C.UTF-8. */

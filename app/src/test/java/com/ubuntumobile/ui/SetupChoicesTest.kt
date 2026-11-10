@@ -25,6 +25,20 @@ class SetupChoicesTest {
     }
 
     @Test
+    fun interestsTickTheirAppsAndAreReadBack() {
+        val picked = SetupChoices(apps = emptySet()).withInterest(Interest.WORK, true).withInterest(Interest.MEDIA, true)
+        // Ubuntu apps for work and media (Flathub ones depend on the processor).
+        assertTrue("libreoffice-writer" in picked.apps)
+        assertTrue("vlc" in picked.apps)
+        val back = SetupChoices.fromConf(picked.toConf(), DesktopSize.STANDARD)
+        assertEquals(setOf(Interest.WORK, Interest.MEDIA), back.interests)
+        // Dropping one unticks its apps and keeps the other's.
+        val less = picked.withInterest(Interest.MEDIA, false)
+        assertTrue("vlc" !in less.apps)
+        assertTrue("libreoffice-writer" in less.apps)
+    }
+
+    @Test
     fun flathubAppsAreLeftOutWhenFlathubIsOff() {
         val conf = SetupChoices(flathub = false, flatpaks = setOf("io.mpv.Mpv")).toConf()
         assertTrue(conf.contains("LINX_FLATHUB=0\n"))

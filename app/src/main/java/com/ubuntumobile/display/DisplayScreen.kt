@@ -94,6 +94,10 @@ class DisplayActions(
     val setup: SetupStatus? = null,
     val onRetrySetup: () -> Unit = {},
     val onShareSetupLog: (() -> Unit)? = null,
+    val onDismissSetup: (() -> Unit)? = null,
+    val onQuickSettings: () -> Unit = {},
+    val onScreenshot: () -> Unit = {},
+    val onLock: () -> Unit = {},
     /** An app started from the launcher whose window has not appeared yet. */
     val opening: String? = null,
 )
@@ -125,7 +129,7 @@ fun DisplayScreen(
             showHint = true,
         )
         overlay()
-        SetupBanner(actions.setup, actions.onRetrySetup, Modifier.align(Alignment.TopCenter), actions.onShareSetupLog)
+        SetupBanner(actions.setup, actions.onRetrySetup, Modifier.align(Alignment.TopCenter), actions.onShareSetupLog, actions.onDismissSetup)
         OpeningPill(actions.opening, Modifier.align(Alignment.BottomCenter).padding(bottom = 72.dp))
         MenuHandle(connected = session.connected, onClick = { menuOpen = true })
         DesktopMenu(

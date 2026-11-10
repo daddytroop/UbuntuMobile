@@ -34,6 +34,15 @@ class LinuxService : Service() {
         @Volatile var keepAwake = false
             private set
 
+        /** Keep the phone awake for long jobs, or let it sleep again. */
+        fun toggleAwake(context: Context) {
+            try {
+                context.startService(Intent(context, LinuxService::class.java).setAction(ACTION_AWAKE))
+            } catch (e: Exception) {
+                Log.w(TAG, "cannot toggle", e)
+            }
+        }
+
         fun start(context: Context) {
             val intent = Intent(context, LinuxService::class.java)
             try {

@@ -95,9 +95,6 @@ enum class Accent(val id: String, val label: String, val color: Long) {
 /** A developer tool that onboarding offers: an Ubuntu package of a GitHub project. */
 data class DevPick(val pkg: String, val name: String, val summary: String, val repo: String, val mb: Int)
 
-/** An app from Flathub that onboarding offers. */
-data class FlathubPick(val id: String, val name: String, val summary: String, val icon: ImageVector)
-
 /** Everything onboarding asks. */
 data class SetupChoices(
     val profile: SetupProfile = SetupProfile.STANDARD,
@@ -112,7 +109,32 @@ data class SetupChoices(
     val wallpaper: Wallpaper = Wallpaper.AUBERGINE,
     /** Packages of [devPicks]. */
     val devTools: Set<String> = emptySet(),
+    /** What it is for ("What will you use it for?"). */
+    val interests: Set<Interest> = emptySet(),
 ) {
+    /** Pick or drop an interest, ticking or unticking the apps suggested for it. */
+    fun withInterest(interest: Interest, on: Boolean): SetupChoices {
+        val now = if (on) interests + interest else interests - interest
+        val added = Collections.picks(setOf(interest))
+        // Apps another chosen interest also suggests stay.
+        val kept = Collections.picks(now).map { it.id }.toSet()
+        val (ubuntu, flathubApps) = added.partition { it.ubuntu != null }
+        return if (on) {
+            copy(
+                interests = now,
+                apps = apps + ubuntu.map { it.id },
+                flatpaks = flatpaks + flathubApps.map { it.id },
+                flathub = flathub || flathubApps.isNotEmpty(),
+            )
+        } else {
+            copy(
+                interests = now,
+                apps = apps - ubuntu.map { it.id }.filter { it !in kept }.toSet(),
+                flatpaks = flatpaks - flathubApps.map { it.id }.filter { it !in kept }.toSet(),
+            )
+        }
+    }
+
     /** The packages to install with apt. */
     val aptPackages: List<String>
         get() = (
@@ -144,6 +166,7 @@ data class SetupChoices(
         append("LINX_DARK=${if (dark) 1 else 0}\n")
         append("LINX_ACCENT=${accent.id}\n")
         append("LINX_WALLPAPER=${wallpaper.id}\n")
+        append("LINX_INTERESTS=\"${interests.joinToString(" ") { it.id }}\"\n")
     }
 
     companion object {
@@ -159,13 +182,6 @@ data class SetupChoices(
                 "libreoffice-writer", "libreoffice-calc", "libreoffice-impress", "gimp", "vlc", "evince",
             )
         }
-
-        val flathubPicks = listOf(
-            FlathubPick("org.mozilla.Thunderbird", "Thunderbird", "Email and calendar", Icons.Default.Email),
-            FlathubPick("org.telegram.desktop", "Telegram", "Messaging", Icons.Default.Send),
-            FlathubPick("com.visualstudio.code", "VS Code", "Microsoft's code editor", Icons.Default.Code),
-            FlathubPick("io.mpv.Mpv", "mpv", "A light video player", Icons.Default.Movie),
-        )
 
         /**
          * Popular open-source tools from GitHub. All of them are in
@@ -210,12 +226,13 @@ data class SetupChoices(
                 flatpaks = values["LINX_FLATPAKS"].orEmpty().split(' ').filter { it.isNotBlank() }.toSet(),
                 wallpaper = Wallpaper.byId(values["LINX_WALLPAPER"]),
                 devTools = devPicks.map { it.pkg }.filter { it in packages }.toSet(),
+                interests = Interest.parse(values["LINX_INTERESTS"]),
             )
         }
     }
 }
 
-private enum class Page { WELCOME, PROFILE, LOOK, APPS, DEV, STORES, PHONE, READY }
+private enum class Page { WELCOME, PROFILE, USES, LOOK, APPS, DEV, STORES, PHONE, READY }
 
 /**
  * The first thing a new user sees: a few questions, Ubuntu-installer
@@ -247,6 +264,10 @@ fun OnboardingScreen(
         forward = if (to.ordinal > page.ordinal) 1 else -1
         page = to
     }
+    // The developer tools page is for those who code.
+    fun shows(p: Page) = p != Page.DEV || Interest.CODING in choices.interests
+    fun next() = Page.entries.drop(page.ordinal + 1).first { shows(it) }
+    fun previous() = Page.entries.take(page.ordinal).last { shows(it) }
 
     Box(
         Modifier
@@ -284,6 +305,7 @@ fun OnboardingScreen(
                     when (shown) {
                         Page.WELCOME -> WelcomePage()
                         Page.PROFILE -> ProfilePage(choices) { choices = it }
+                        Page.USES -> UsesPage(choices) { choices = it }
                         Page.LOOK -> LookPage(choices) { choices = it }
                         Page.APPS -> AppsPage(choices) { choices = it }
                         Page.DEV -> DevPage(choices) { choices = it }
@@ -305,7 +327,7 @@ fun OnboardingScreen(
                 when {
                     page == Page.WELCOME -> Spacer(Modifier.weight(1f))
                     again && page == Page.PROFILE -> TextButton("Cancel", onCancel)
-                    else -> TextButton("Back") { go(Page.entries[page.ordinal - 1]) }
+                    else -> TextButton("Back") { go(previous()) }
                 }
                 Spacer(Modifier.weight(1f))
                 val last = page == Page.READY
@@ -321,7 +343,7 @@ fun OnboardingScreen(
                     when {
                         page == Page.WELCOME -> { onStarted(); go(Page.PROFILE) }
                         last -> onFinish(choices)
-                        else -> go(Page.entries[page.ordinal + 1])
+                        else -> go(next())
                     }
                 }
             }
@@ -543,8 +565,68 @@ private fun ModePreview(dark: Boolean, wallpaper: Wallpaper, accent: Color, sele
 }
 
 @Composable
+private fun UsesPage(choices: SetupChoices, onChange: (SetupChoices) -> Unit) {
+    PageTitle(
+        "What will you use it for?",
+        "Pick as many as you like. Mobuntu suggests apps for each, and the store shows them first.",
+    )
+    Interest.entries.filter { it.inSetup }.forEach { interest ->
+        val on = interest in choices.interests
+        SelectCard(selected = on, onClick = { onChange(choices.withInterest(interest, !on)) }) {
+            Row(verticalAlignment = Alignment.CenterVertically) {
+                Box(
+                    Modifier.size(44.dp).clip(RoundedCornerShape(12.dp)).background(Color(interest.color)),
+                    contentAlignment = Alignment.Center,
+                ) {
+                    Icon(interest.icon, contentDescription = null, tint = Color.White)
+                }
+                Spacer(Modifier.width(14.dp))
+                Column(Modifier.weight(1f)) {
+                    Text(interest.label, color = Color.White, fontSize = 16.sp, fontWeight = FontWeight.Medium)
+                    Text(interest.detail, color = Color.White.copy(alpha = 0.7f), fontSize = 13.sp)
+                }
+                if (on) Icon(Icons.Default.Check, contentDescription = "Picked", tint = Color.White)
+            }
+        }
+    }
+    Text(
+        "Nothing here for you? Skip it: the store has everything.",
+        color = Color.White.copy(alpha = 0.6f),
+        fontSize = 12.sp,
+    )
+}
+
+@Composable
 private fun AppsPage(choices: SetupChoices, onChange: (SetupChoices) -> Unit) {
-    PageTitle("Apps", "From Ubuntu's own archive. The Software store has thousands more.")
+    PageTitle("Apps", "Suggested for what you picked, and Ubuntu's essentials. The Software store has thousands more.")
+    val tick = Color(choices.accent.color)
+    choices.interests.sortedBy { it.ordinal }.forEach { interest ->
+        val apps = Collections.of(interest).filter { it.runsHere }
+        if (apps.isEmpty()) return@forEach
+        SectionLabel(interest.label)
+        interest.note?.let {
+            Text(it, color = Color.White.copy(alpha = 0.6f), fontSize = 12.sp, modifier = Modifier.padding(bottom = 6.dp))
+        }
+        apps.forEach { app ->
+            val ubuntu = app.ubuntu
+            val on = if (ubuntu != null) app.id in choices.apps else app.id in choices.flatpaks
+            val source = if (ubuntu != null) "Ubuntu" else "Flathub"
+            AppToggle(app.name, "${app.summary} · $source", interest.icon, Color(interest.color), on, tick) { checked ->
+                onChange(
+                    if (ubuntu != null) {
+                        choices.copy(apps = if (checked) choices.apps + app.id else choices.apps - app.id)
+                    } else {
+                        choices.copy(
+                            flatpaks = if (checked) choices.flatpaks + app.id else choices.flatpaks - app.id,
+                            flathub = choices.flathub || checked,
+                        )
+                    },
+                )
+            }
+        }
+        Spacer(Modifier.height(12.dp))
+    }
+    if (choices.interests.isNotEmpty()) SectionLabel("Essentials")
     val firefox = StoreCatalog.featured.first { it.installer != null }
     AppToggle(firefox.name, "The web browser", firefox.icon ?: Icons.Default.Public, Color(firefox.accent), choices.browser, Color(choices.accent.color)) {
         onChange(choices.copy(browser = it))
@@ -617,15 +699,15 @@ private fun StoresPage(choices: SetupChoices, onChange: (SetupChoices) -> Unit) 
             )
         }
     }
-    if (choices.flathub) {
-        Spacer(Modifier.height(8.dp))
-        SectionLabel("From Flathub")
-        SetupChoices.flathubPicks.forEach { pick ->
-            val on = pick.id in choices.flatpaks
-            AppToggle(pick.name, pick.summary, pick.icon, Color(0xFF4A86CF), on, Color(choices.accent.color)) { checked ->
-                onChange(choices.copy(flatpaks = if (checked) choices.flatpaks + pick.id else choices.flatpaks - pick.id))
-            }
-        }
+    val chosen = choices.flatpaks.size
+    if (chosen > 0) {
+        val plural = if (chosen == 1) "" else "s"
+        Text(
+            if (choices.flathub) "$chosen app$plural from Flathub will install with setup."
+            else "With Flathub off, the $chosen Flathub app$plural you picked will not install.",
+            color = Color.White.copy(alpha = 0.7f),
+            fontSize = 13.sp,
+        )
     }
 }
 
@@ -637,12 +719,17 @@ private fun ReadyPage(choices: SetupChoices, unpackFraction: Float?) {
         else "Ubuntu is still unpacking. It only takes a minute or two.",
     )
     SummaryRow("Setup", choices.profile.label)
+    if (choices.interests.isNotEmpty()) {
+        SummaryRow("For", choices.interests.sortedBy { it.ordinal }.joinToString(", ") { it.label.lowercase() })
+    }
     SummaryRow("Look", "${if (choices.dark) "Dark" else "Light"}, ${choices.accent.label.lowercase()}, ${choices.wallpaper.label}")
     SummaryRow("Size on the phone", choices.desktopSize.label)
     val apps = buildList {
         if (choices.browser) add("Firefox")
         StoreCatalog.featured.filter { it.pkg in choices.apps }.forEach { add(it.name) }
-        if (choices.flathub) SetupChoices.flathubPicks.filter { it.id in choices.flatpaks }.forEach { add(it.name) }
+        if (choices.flathub) {
+            choices.flatpaks.forEach { id -> add(Collections.all.firstOrNull { it.id == id }?.name ?: id.substringAfterLast('.')) }
+        }
     }
     SummaryRow("Apps", if (apps.isEmpty()) "None yet" else apps.joinToString(", "))
     val dev = SetupChoices.devPicks.filter { it.pkg in choices.devTools }.map { it.name }

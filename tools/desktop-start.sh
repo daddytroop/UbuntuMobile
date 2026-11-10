@@ -70,18 +70,24 @@ start_panel() {
   feh --no-fehbg --bg-fill "$wall" >/tmp/linx-feh.log 2>&1 &
 }
 
-# The panel's battery and network items need the generic monitor plugin,
-# which setup installs; a Linux set up before it existed gets it here, once,
-# in the background (the panel then restarts with them).
-add_status_plugin() {
-  ls /usr/lib/*/xfce4/panel/plugins/libgenmon.so >/dev/null 2>&1 && return
-  [ -f /var/lib/linx/no-genmon ] && return
-  sleep 20
-  if /usr/local/lib/linx/apt-install.sh xfce4-genmon-plugin >/tmp/linx-genmon.log 2>&1; then
-    /usr/local/lib/linx/linx-panel.sh --restart >/dev/null 2>&1
-  elif grep -q "Unable to locate" /tmp/linx-genmon.log; then
-    mkdir -p /var/lib/linx && touch /var/lib/linx/no-genmon
+# What setup installs for the panel (battery and network items) and for
+# printing; a Linux set up before they were added gets them here, once, in
+# the background. Then the panel restarts with them and printing starts.
+EXTRAS="xfce4-genmon-plugin cups printer-driver-cups-pdf"
+add_extras() {
+  local missing
+  missing="$(/usr/local/lib/linx/apt-install.sh --status $EXTRAS | awk '$2 == "missing" {print $1}' | tr '\n' ' ')"
+  if [ -n "${missing// /}" ] && [ ! -f /var/lib/linx/no-extras ]; then
+    sleep 20
+    # shellcheck disable=SC2086
+    if /usr/local/lib/linx/apt-install.sh $missing >/tmp/linx-extras.log 2>&1; then
+      /usr/local/lib/linx/linx-panel.sh --restart >/dev/null 2>&1
+    elif grep -q "Unable to locate" /tmp/linx-extras.log; then
+      mkdir -p /var/lib/linx && touch /var/lib/linx/no-extras
+    fi
   fi
+  # Printing: CUPS and the "Phone" printer (linx-print.sh).
+  bash /usr/local/lib/linx/linx-print.sh >/tmp/linx-print.log 2>&1
 }
 
 # The XFCE programs are started as well. They add the desktop icons and
@@ -170,7 +176,7 @@ case "$DESKTOP" in
     fi
     start_panel
     start_xfce_extras
-    add_status_plugin &
+    add_extras &
     ;;
 esac
 

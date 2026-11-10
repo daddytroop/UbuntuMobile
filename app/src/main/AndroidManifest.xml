@@ -5,6 +5,10 @@
     <uses-permission android:name="android.permission.ACCESS_NETWORK_STATE" />
     <!-- The Wi-Fi signal, for the Linux panel's network item. -->
     <uses-permission android:name="android.permission.ACCESS_WIFI_STATE" />
+    <!-- Quick settings on the desktop: switching Wi-Fi and Bluetooth. -->
+    <uses-permission android:name="android.permission.CHANGE_WIFI_STATE" />
+    <uses-permission android:name="android.permission.BLUETOOTH" />
+    <uses-permission android:name="android.permission.BLUETOOTH_ADMIN" />
     <uses-permission android:name="android.permission.VIBRATE" />
     <!-- The microphone, for Linux apps that record (MicBridge.kt); asked for
          the first time one does. -->
@@ -89,6 +93,17 @@
                 <category android:name="android.intent.category.DEFAULT" />
             </intent-filter>
         </activity>
+
+        <!-- The phone's notifications on the Linux desktop, once allowed. -->
+        <service
+            android:name=".linux.PhoneNotifications"
+            android:exported="true"
+            android:label="Phone notifications on the Linux desktop"
+            android:permission="android.permission.BIND_NOTIFICATION_LISTENER_SERVICE">
+            <intent-filter>
+                <action android:name="android.service.notification.NotificationListenerService" />
+            </intent-filter>
+        </service>
 
         <service
             android:name=".linux.LinuxService"

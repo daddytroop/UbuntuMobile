@@ -11,15 +11,23 @@ message reaches the phone's notification shade like any other.
 dbus-monitor prints a Notify call as its arguments, one per line indented
 three spaces: app name, replaces id, icon, summary, body, actions, hints,
 timeout. Strings are printed raw between quotes and may span lines.
+
+The other way, the app drops the phone's notifications (and battery
+warnings) as JSON files in /tmp/linx-phone-notes while the desktop is in
+sight; they are shown with notify-send, their app name ending in
+"(phone)", which is how the watch above knows not to send them back.
 """
 
 import json
 import os
 import socket
 import subprocess
+import threading
 import time
 
 SOCKET_FILE = "/etc/linx/notify-socket"
+PHONE_NOTES = "/tmp/linx-phone-notes"
+PHONE_SUFFIX = " (phone)"
 MATCH = "type='method_call',interface='org.freedesktop.Notifications',member='Notify'"
 ARG_TYPES = ("string ", "uint32 ", "int32 ", "array [", "boolean ", "byte ", "int64 ", "variant ")
 
@@ -92,13 +100,46 @@ def watch():
             # Notify has eight arguments; the last, the timeout, ends it.
             if line.startswith("   int32 ") and len(top_level_args(call)) >= 8:
                 note = parse(call)
-                if note and (note["title"] or note["body"]):
+                if note and (note["title"] or note["body"]) and not note["app"].endswith(PHONE_SUFFIX):
                     send(note)
                 call = None
     proc.wait()
 
 
+def show_phone_notes():
+    """Show what the app left in PHONE_NOTES, oldest first."""
+    while True:
+        try:
+            names = sorted(os.listdir(PHONE_NOTES))
+        except OSError:
+            names = []
+        for name in names:
+            path = os.path.join(PHONE_NOTES, name)
+            try:
+                with open(path) as f:
+                    note = json.load(f)
+            except (OSError, ValueError):
+                note = None
+            try:
+                os.remove(path)
+            except OSError:
+                pass
+            if not note:
+                continue
+            cmd = ["notify-send", "-a", (note.get("app") or "Phone") + PHONE_SUFFIX,
+                   "-i", note.get("icon") or "phone"]
+            if note.get("urgent"):
+                cmd += ["-u", "critical"]
+            cmd += [note.get("title") or "", note.get("body") or ""]
+            try:
+                subprocess.run(cmd, timeout=10, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+            except (OSError, subprocess.SubprocessError):
+                pass
+        time.sleep(1)
+
+
 if __name__ == "__main__":
+    threading.Thread(target=show_phone_notes, daemon=True).start()
     # dbus-monitor ends with the session; the desktop starts this again.
     while True:
         watch()

@@ -5,6 +5,11 @@
                             an email, geo: shows a map, a web link opens in
                             the phone's browser
     linx-phone app PACKAGE  start an Android app
+    linx-phone quick        the desktop's quick settings (Wi-Fi, Bluetooth,
+                            torch, brightness, night light)
+    linx-phone screenshot   save the desktop to the phone's Pictures/Screenshots
+    linx-phone lock         lock the desktop until the phone's PIN or fingerprint
+    linx-phone print FILE   print a PDF with the phone's printers
     linx-phone settings PAGE
                             open a page of the phone's settings: battery,
                             internet, wifi, bluetooth, sound or display
@@ -41,6 +46,10 @@ if __name__ == "__main__":
         send({"open": sys.argv[2]})
     elif len(sys.argv) == 3 and sys.argv[1] == "app":
         send({"app": sys.argv[2]})
+    elif len(sys.argv) == 2 and sys.argv[1] in ("quick", "screenshot", "lock"):
+        send({sys.argv[1]: True})
+    elif len(sys.argv) == 3 and sys.argv[1] == "print":
+        send({"print": sys.argv[2]})
     elif len(sys.argv) == 3 and sys.argv[1] == "settings":
         send({"settings": sys.argv[2]})
     else:

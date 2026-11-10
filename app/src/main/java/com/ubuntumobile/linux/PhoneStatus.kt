@@ -42,9 +42,45 @@ class PhoneStatus(private val context: Context) {
 
     private val batteryReceiver = object : BroadcastReceiver() {
         override fun onReceive(context: Context, intent: Intent) {
-            if (intent.action == Intent.ACTION_BATTERY_CHANGED) battery = intent
+            if (intent.action == Intent.ACTION_BATTERY_CHANGED) {
+                battery = intent
+                warnIfLow(intent)
+            }
             write()
         }
+    }
+
+    /** The lowest warning given since the charger was last in (100: none). */
+    private var warnedAt = 100
+
+    /**
+     * "Battery low" on the Linux desktop at 15% and 5%, so a long job or
+     * unsaved work is not lost when a docked phone runs flat out of sight.
+     */
+    private fun warnIfLow(intent: Intent) {
+        val level = intent.getIntExtra(BatteryManager.EXTRA_LEVEL, -1) * 100 /
+            intent.getIntExtra(BatteryManager.EXTRA_SCALE, 100).coerceAtLeast(1)
+        val plugged = intent.getIntExtra(BatteryManager.EXTRA_PLUGGED, 0) != 0
+        if (plugged || level < 0) {
+            warnedAt = 100
+            return
+        }
+        val step = when {
+            level <= 5 -> 5
+            level <= 15 -> 15
+            else -> return
+        }
+        if (step >= warnedAt) return
+        warnedAt = step
+        PhoneNotifications.toLinux(
+            context,
+            "Battery",
+            if (step == 5) "Battery very low: $level%" else "Battery low: $level%",
+            if (step == 5) "Plug the phone in now, or save your work: it will turn off soon."
+            else "Plug the phone in soon.",
+            urgent = step == 5,
+            icon = if (step == 5) "battery-level-0-symbolic" else "battery-level-10-symbolic",
+        )
     }
 
     private val networkCallback = object : ConnectivityManager.NetworkCallback() {

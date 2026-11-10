@@ -27,6 +27,8 @@ import androidx.compose.material3.Switch
 import androidx.compose.material3.SwitchDefaults
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.getValue
+import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
@@ -144,6 +146,42 @@ fun SettingsScreen(
                         fixText = "On: Android may stop Mobuntu, and Linux with it, to save battery.",
                         action = "Allow",
                         onAction = onAskBattery,
+                    )
+                }
+            }
+
+            Card("Phone notifications", "On the Linux desktop while it is on screen, phone or monitor.") {
+                val context = androidx.compose.ui.platform.LocalContext.current
+                var resumed by androidx.compose.runtime.remember { androidx.compose.runtime.mutableIntStateOf(0) }
+                val lifecycle = androidx.lifecycle.compose.LocalLifecycleOwner.current.lifecycle
+                androidx.compose.runtime.DisposableEffect(lifecycle) {
+                    val o = androidx.lifecycle.LifecycleEventObserver { _, e ->
+                        if (e == androidx.lifecycle.Lifecycle.Event.ON_RESUME) resumed++
+                    }
+                    lifecycle.addObserver(o)
+                    onDispose { lifecycle.removeObserver(o) }
+                }
+                val granted = androidx.compose.runtime.remember(resumed) { com.ubuntumobile.linux.PhoneNotifications.granted(context) }
+                var on by androidx.compose.runtime.remember { androidx.compose.runtime.mutableStateOf(com.ubuntumobile.linux.PhoneNotifications.enabled(context)) }
+                Row(verticalAlignment = Alignment.CenterVertically) {
+                    Column(Modifier.weight(1f)) {
+                        Text("Show them on the desktop", fontSize = 15.sp, fontWeight = FontWeight.Medium, color = UbuntuPalette.LightOnSurface)
+                        Text(
+                            if (granted) "Messages pop up on the desktop and wait in the panel's bell. The phone still gets them too."
+                            else "Android asks you to allow Mobuntu to read notifications first.",
+                            fontSize = 12.sp,
+                            color = UbuntuPalette.LightOnSurfaceVariant,
+                        )
+                    }
+                    Spacer(Modifier.width(12.dp))
+                    androidx.compose.material3.Switch(
+                        checked = on && granted,
+                        onCheckedChange = { want ->
+                            on = want
+                            com.ubuntumobile.linux.PhoneNotifications.setEnabled(context, want)
+                            if (want && !granted) com.ubuntumobile.linux.PhoneNotifications.askForAccess(context)
+                        },
+                        colors = androidx.compose.material3.SwitchDefaults.colors(checkedTrackColor = UbuntuPalette.UbuntuOrange),
                     )
                 }
             }

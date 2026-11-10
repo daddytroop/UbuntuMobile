@@ -78,6 +78,11 @@ object NotificationBridge {
                             message.has("open") -> openOnPhone(app, message.getString("open"))
                             message.has("app") -> startAndroidApp(app, message.getString("app"))
                             message.has("settings") -> openSettings(app, message.getString("settings"))
+                            // The desktop's own: the app shows them over the desktop.
+                            message.has("quick") -> com.ubuntumobile.display.PhoneRequests.post("quick")
+                            message.has("screenshot") -> com.ubuntumobile.display.PhoneRequests.post("screenshot")
+                            message.has("lock") -> com.ubuntumobile.display.PhoneRequests.post("lock")
+                            message.has("print") -> com.ubuntumobile.display.PhoneRequests.post("print:" + message.getString("print"))
                             else -> post(app, message)
                         }
                     }
