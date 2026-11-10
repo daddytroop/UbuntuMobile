@@ -596,6 +596,14 @@ fun UbuntuApp(
                 vm.paths.appendLog("language $wanted: ${out.lines().lastOrNull { it.isNotBlank() }}")
             }
         }
+        // The phone's apps in the Linux menu ("Phone apps").
+        withContext(Dispatchers.IO) {
+            try {
+                com.ubuntumobile.linux.AndroidApps.sync(context, vm.paths.root, state.installedApps.map { it.name }.toSet())
+            } catch (e: Exception) {
+                vm.paths.appendLog("phone apps: $e")
+            }
+        }
         // Updates, looked for once a day; the phone says when some are waiting.
         if (setupDone() && System.currentTimeMillis() - prefs.getLong("updates_checked", 0) > 24L * 3600_000) {
             val found = com.ubuntumobile.linux.Updates.parse(vm.guestCommand(com.ubuntumobile.linux.Updates.CHECK, 600))
@@ -999,6 +1007,22 @@ fun UbuntuApp(
             delay(1500)
             launchOnDisplay(listOf("/usr/bin/python3", "/usr/local/lib/linx/linx-apps.py", "--run", id))
             opening = name
+        }
+    }
+
+    // Android apps started from Linux open next to the desktop when docked.
+    LaunchedEffect(docked, externalDisplay) {
+        com.ubuntumobile.linux.NotificationBridge.launchDisplayId =
+            if (docked) externalDisplay?.displayId else null
+    }
+    // Apps installed or removed while away: the Linux menu follows.
+    LaunchedEffect(resumes, state.installedApps) {
+        if (!session.connected) return@LaunchedEffect
+        withContext(Dispatchers.IO) {
+            try {
+                com.ubuntumobile.linux.AndroidApps.sync(context, vm.paths.root, state.installedApps.map { it.name }.toSet())
+            } catch (_: Exception) {
+            }
         }
     }
 

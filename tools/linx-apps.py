@@ -184,7 +184,7 @@ def list_apps():
     index = icon_index()
     rows = []
     for app_id, (path, e) in entries().items():
-        if not shown(app_id, e):
+        if not shown(app_id, e) or e.get("X-Linx-Android") == "true":
             continue
         cats = e.get("Categories", "").split(";")
         if path.startswith("/var/lib/flatpak/"):
@@ -406,7 +406,7 @@ def handlers(target):
     default = default_app(mime)
     rows = []
     for app_id, (path, e) in entries().items():
-        if not shown(app_id, e):
+        if not shown(app_id, e) or e.get("X-Linx-Android") == "true":
             continue
         types = [t for t in e.get("MimeType", "").split(";") if t]
         if mime not in types and family not in types:
