@@ -7,6 +7,13 @@
     <!-- The microphone, for Linux apps that record (MicBridge.kt); asked for
          the first time one does. -->
     <uses-permission android:name="android.permission.RECORD_AUDIO" />
+    <!-- Linux keeps running while the app is not on screen (LinuxService.kt),
+         awake on request, and with the battery optimisation lifted when the
+         user allows it (Settings). -->
+    <uses-permission android:name="android.permission.FOREGROUND_SERVICE" />
+    <uses-permission android:name="android.permission.FOREGROUND_SERVICE_MICROPHONE" />
+    <uses-permission android:name="android.permission.WAKE_LOCK" />
+    <uses-permission android:name="android.permission.REQUEST_IGNORE_BATTERY_OPTIMIZATIONS" />
     <!--
       The phone's folders (Downloads, Documents, ...) appear in the Linux home
       folder. The app targets API 28, so these still grant the legacy access
@@ -61,5 +68,9 @@
                 <data android:mimeType="*/*" />
             </intent-filter>
         </activity>
+        <service
+            android:name=".linux.LinuxService"
+            android:exported="false"
+            android:foregroundServiceType="microphone" />
     </application>
 </manifest>

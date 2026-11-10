@@ -239,8 +239,8 @@ null sink, and its monitor is remapped as a source (`linx-audio.sh`).
 `linx-mic.sh` watches for recordings with `pactl subscribe` and writes
 `/tmp/linx-mic-wanted`. `MicBridge.kt` only records, and Android only shows
 its microphone indicator, while that says 1. Android asks for the
-permission the first time a Linux app records. Recording stops when the app
-is in the background, because a foreground service would be needed for that.
+permission the first time a Linux app records. The foreground service (see
+Keeping Linux running) keeps it working while other apps are in front.
 
 ### Look
 Ubuntu's Yaru theme and icons, light or dark in the chosen accent colour,
@@ -276,6 +276,25 @@ files the snapshot has and keeps files you added since.
 **Every week** saves one by itself into a folder chosen once, kept with a
 persistable permission. It runs a minute after the desktop is up, at the
 lowest priority (`nice -n 19`), and keeps the newest two.
+
+### Keeping Linux running
+Android freezes or kills an app soon after it leaves the screen, and Linux
+with it. While the desktop is up, the app runs a foreground service
+(`LinuxService.kt`) with a quiet "Linux is running" notification, so Linux
+keeps going while other apps are in front, and Linux apps keep the
+microphone. The notification's **Keep awake** holds a partial wake lock, so
+long jobs go on with the screen off. **Stop Linux** ends the app, and every
+Linux process with it.
+
+Two Android settings still apply (`BackgroundLimits.kt`); Settings → **Keep
+Linux running** shows both and links to them, and the app points there once,
+the first time the desktop is up:
+- **Child process restrictions.** Since Android 12, Android kills an app's
+  extra processes when there are more than 32 or when they use the processor
+  in the background. Every Linux process is one of those. Android 14 and newer
+  have **Disable child process restrictions** in Developer options, which sets
+  `settings_enable_monitor_phantom_procs` to false.
+- **Battery optimisation**, which the app asks to be left out of.
 
 ### Updates
 Software's **Updates** tab lists Ubuntu package and Flathub app updates
@@ -849,8 +868,6 @@ asked for it.
 - **Hardware acceleration.** The X server runs with Mesa's software
   rasteriser, so 3D games are CPU-bound. Compositing a desktop application
   is fine; a 3D title is not.
-- **Recording in the background.** The microphone reaches Linux only while
-  the app is on screen.
 - **A physical phone.** Everything has run on the x86_64 emulator; the arm64
   APK has not been tried on real hardware yet.
 - **Flatpak's sandbox.** Flatpak apps run (see Flatpak under proot), but

@@ -76,6 +76,12 @@ fun SettingsScreen(
     snapshotBusy: Boolean = false,
     onBackup: () -> Unit = {},
     onRestore: () -> Unit = {},
+    /** Android may kill Linux's processes (BackgroundLimits); null hides the card. */
+    childProcessesLimited: Boolean? = null,
+    canTurnOffChildLimits: Boolean = true,
+    batteryRestricted: Boolean = false,
+    onOpenDeveloperOptions: () -> Unit = {},
+    onAskBattery: () -> Unit = {},
     /** Where weekly snapshots go, or null when they are off. */
     weeklyFolder: String? = null,
     onWeekly: (Boolean) -> Unit = {},
@@ -112,6 +118,33 @@ fun SettingsScreen(
                 .align(Alignment.CenterHorizontally),
             verticalArrangement = Arrangement.spacedBy(16.dp),
         ) {
+            if (childProcessesLimited != null) {
+                Card("Keep Linux running", "Android stops apps' work in the background. Two settings let Linux keep going while you use other apps.") {
+                    LimitRow(
+                        title = "Child process restrictions",
+                        ok = !childProcessesLimited,
+                        okText = "Off: Android leaves Linux's programs alone.",
+                        fixText = if (canTurnOffChildLimits) {
+                            "On: Android may close Linux programs at random. In Developer options, turn on \"Disable child process restrictions\". " +
+                                "No Developer options? Settings → About phone → Software information → tap Build number 7 times."
+                        } else {
+                            "This Android version limits how many programs an app may run; it has no switch for it."
+                        },
+                        action = if (canTurnOffChildLimits) "Open" else null,
+                        onAction = onOpenDeveloperOptions,
+                    )
+                    Spacer(Modifier.height(14.dp))
+                    LimitRow(
+                        title = "Battery optimisation",
+                        ok = !batteryRestricted,
+                        okText = "Off for Mobuntu: it may run in the background.",
+                        fixText = "On: Android may stop Mobuntu, and Linux with it, to save battery.",
+                        action = "Allow",
+                        onAction = onAskBattery,
+                    )
+                }
+            }
+
             Card("Your Linux", null) {
                 Row(verticalAlignment = Alignment.CenterVertically) {
                     Column(Modifier.weight(1f)) {
@@ -353,6 +386,25 @@ fun SettingsScreen(
                 AboutLine("Linux", ubuntuVersion)
                 AboutLine("Desktop", "XFCE on Xvnc")
             }
+        }
+    }
+}
+
+@Composable
+private fun LimitRow(title: String, ok: Boolean, okText: String, fixText: String, action: String?, onAction: () -> Unit) {
+    Row(verticalAlignment = Alignment.CenterVertically) {
+        Column(Modifier.weight(1f)) {
+            Text(
+                (if (ok) "✓ " else "") + title,
+                fontSize = 15.sp,
+                fontWeight = FontWeight.Medium,
+                color = UbuntuPalette.LightOnSurface,
+            )
+            Text(if (ok) okText else fixText, fontSize = 12.sp, color = UbuntuPalette.LightOnSurfaceVariant)
+        }
+        if (!ok && action != null) {
+            Spacer(Modifier.width(12.dp))
+            ActionChip(action, onAction)
         }
     }
 }

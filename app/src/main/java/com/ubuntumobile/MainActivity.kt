@@ -599,6 +599,8 @@ fun UbuntuApp(
         browserInstalled = firefoxBinary.exists()
         // Asks, the first time, whether Linux apps may notify.
         com.ubuntumobile.linux.NotificationBridge.ensureChannel(context)
+        // Linux keeps running when the app leaves the screen.
+        com.ubuntumobile.linux.LinuxService.start(context)
         withContext(Dispatchers.IO) {
             startAudio()
             // The wallpapers are drawn by the app (once per design change).
@@ -940,6 +942,7 @@ fun UbuntuApp(
                 androidx.lifecycle.Lifecycle.Event.ON_RESUME -> {
                     com.ubuntumobile.linux.NotificationBridge.foreground = true
                     resumes++
+                    if (session.connected) com.ubuntumobile.linux.LinuxService.start(context)
                 }
                 androidx.lifecycle.Lifecycle.Event.ON_PAUSE -> com.ubuntumobile.linux.NotificationBridge.foreground = false
                 else -> {}
@@ -1159,6 +1162,44 @@ fun UbuntuApp(
             } catch (_: Exception) {
             }
         }
+    }
+
+    // Once, when the desktop is first up: Android's background limits would
+    // stop Linux behind the user's back, so say where to lift them.
+    var showLimitsHint by remember { mutableStateOf(false) }
+    LaunchedEffect(session.connected) {
+        if (!session.connected || prefs.getBoolean("limits_hint_shown", false)) return@LaunchedEffect
+        delay(3000)
+        if (com.ubuntumobile.linux.BackgroundLimits.childProcessesLimited(context) ||
+            com.ubuntumobile.linux.BackgroundLimits.batteryRestricted(context)
+        ) {
+            showLimitsHint = true
+        }
+    }
+    if (showLimitsHint) {
+        fun done() {
+            showLimitsHint = false
+            prefs.edit().putBoolean("limits_hint_shown", true).apply()
+        }
+        androidx.compose.material3.AlertDialog(
+            onDismissRequest = { done() },
+            title = { Text("Keep Linux running") },
+            text = {
+                Text(
+                    "Android stops apps' work in the background, so Linux programs could close while you use other apps. " +
+                        "Two settings prevent that; Settings shows how.",
+                )
+            },
+            confirmButton = {
+                androidx.compose.material3.TextButton(onClick = {
+                    done()
+                    screen = Screen.SETTINGS
+                }) { Text("Show me") }
+            },
+            dismissButton = {
+                androidx.compose.material3.TextButton(onClick = { done() }) { Text("Later") }
+            },
+        )
     }
 
     // The updates notification opens Software on its Updates tab.
@@ -1462,6 +1503,11 @@ fun UbuntuApp(
                     backupPicker.launch("mobuntu-$day.tar.zst")
                 },
                 onRestore = { restorePicker.launch(arrayOf("*/*")) },
+                childProcessesLimited = remember(resumes) { com.ubuntumobile.linux.BackgroundLimits.childProcessesLimited(context) },
+                canTurnOffChildLimits = com.ubuntumobile.linux.BackgroundLimits.canTurnOffInSettings,
+                batteryRestricted = remember(resumes) { com.ubuntumobile.linux.BackgroundLimits.batteryRestricted(context) },
+                onOpenDeveloperOptions = { com.ubuntumobile.linux.BackgroundLimits.openDeveloperOptions(context) },
+                onAskBattery = { com.ubuntumobile.linux.BackgroundLimits.askForBattery(context) },
                 weeklyFolder = autoFolder?.let { uri ->
                     android.provider.DocumentsContract.getTreeDocumentId(uri).substringAfter(':').ifBlank { "the folder you chose" }
                 },
