@@ -563,6 +563,22 @@ fun UbuntuApp(
             }
         }
         if (!setupDone()) runSetup()
+        // Linux in the phone's language: compiled (and translated) once,
+        // used from the next start (LinuxRuntime reads /etc/linx/locale).
+        val wanted = com.ubuntumobile.ui.PhoneLook.localeName()
+        val ready = withContext(Dispatchers.IO) {
+            try {
+                java.io.File(vm.paths.root, "etc/linx/locale").readText().trim()
+            } catch (_: Exception) {
+                ""
+            }
+        }
+        if (ready != "$wanted.UTF-8" && wanted.matches(Regex("[a-z]{2,3}_[A-Z]{2}"))) {
+            withContext(Dispatchers.IO) {
+                val out = vm.runtime.shell("/usr/local/lib/linx/linx-locale.sh $wanted", 900).output
+                vm.paths.appendLog("language $wanted: ${out.lines().lastOrNull { it.isNotBlank() }}")
+            }
+        }
     }
 
     // The look chosen at setup (setup.conf), which Settings can change at
@@ -717,6 +733,21 @@ fun UbuntuApp(
         }
     }
 
+    // "Match my phone": dark mode and the accent follow Android's, checked
+    // whenever the app comes back to the front.
+    var matchPhone by remember { mutableStateOf(prefs.getBoolean("match_phone", true)) }
+    var resumes by remember { androidx.compose.runtime.mutableIntStateOf(0) }
+    val uiMode = androidx.compose.ui.platform.LocalConfiguration.current.uiMode
+    LaunchedEffect(look != null, matchPhone, resumes, uiMode) {
+        val current = look ?: return@LaunchedEffect
+        if (!matchPhone) return@LaunchedEffect
+        val wanted = current.copy(
+            dark = com.ubuntumobile.ui.PhoneLook.dark(context),
+            accent = com.ubuntumobile.ui.PhoneLook.accent(context) ?: current.accent,
+        )
+        if (wanted != current) changeLook(wanted)
+    }
+
     /** Keep what onboarding chose, and set Linux up to match. */
     fun applyChoices(choices: com.ubuntumobile.ui.SetupChoices) {
         desktopSize = choices.desktopSize
@@ -752,7 +783,10 @@ fun UbuntuApp(
     DisposableEffect(lifecycleOwner) {
         val observer = androidx.lifecycle.LifecycleEventObserver { _, event ->
             when (event) {
-                androidx.lifecycle.Lifecycle.Event.ON_RESUME -> com.ubuntumobile.linux.NotificationBridge.foreground = true
+                androidx.lifecycle.Lifecycle.Event.ON_RESUME -> {
+                    com.ubuntumobile.linux.NotificationBridge.foreground = true
+                    resumes++
+                }
                 androidx.lifecycle.Lifecycle.Event.ON_PAUSE -> com.ubuntumobile.linux.NotificationBridge.foreground = false
                 else -> {}
             }
@@ -1090,7 +1124,17 @@ fun UbuntuApp(
                 onInstallBrowser = { scope.launch { runSetup() } },
                 onSetUpAgain = { screen = Screen.ONBOARDING },
                 look = look,
-                onLook = { changeLook(it) },
+                onLook = {
+                    // Picking a look by hand stops following the phone.
+                    matchPhone = false
+                    prefs.edit().putBoolean("match_phone", false).apply()
+                    changeLook(it)
+                },
+                matchPhone = matchPhone,
+                onMatchPhone = { on ->
+                    matchPhone = on
+                    prefs.edit().putBoolean("match_phone", on).apply()
+                },
                 snapshotNote = snapshotNote,
                 snapshotBusy = snapshotBusy,
                 onBackup = {

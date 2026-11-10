@@ -68,6 +68,9 @@ fun SettingsScreen(
     /** The look chosen at setup, changed here at once: dark, accent, wallpaper. */
     look: SetupChoices? = null,
     onLook: (SetupChoices) -> Unit = {},
+    /** Dark mode and the accent follow the phone's. */
+    matchPhone: Boolean = false,
+    onMatchPhone: (Boolean) -> Unit = {},
     /** A snapshot being saved or restored ("Saving: 820 MB"), or how the last one went. */
     snapshotNote: String? = null,
     snapshotBusy: Boolean = false,
@@ -123,6 +126,23 @@ fun SettingsScreen(
 
             if (look != null) {
                 Card("Look", "Light or dark, the accent colour and the wallpaper - for Linux and for this app.") {
+                    Row(verticalAlignment = Alignment.CenterVertically) {
+                        Column(Modifier.weight(1f)) {
+                            Text("Match my phone", fontSize = 15.sp, fontWeight = FontWeight.Medium, color = UbuntuPalette.LightOnSurface)
+                            Text(
+                                "Dark mode and the colour follow Android's. Picking one below turns this off.",
+                                fontSize = 12.sp,
+                                color = UbuntuPalette.LightOnSurfaceVariant,
+                            )
+                        }
+                        Spacer(Modifier.width(12.dp))
+                        androidx.compose.material3.Switch(
+                            checked = matchPhone,
+                            onCheckedChange = onMatchPhone,
+                            colors = androidx.compose.material3.SwitchDefaults.colors(checkedTrackColor = UbuntuPalette.UbuntuOrange),
+                        )
+                    }
+                    Spacer(Modifier.height(14.dp))
                     Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                         listOf(false to "Light", true to "Dark").forEach { (dark, label) ->
                             val selected = look.dark == dark

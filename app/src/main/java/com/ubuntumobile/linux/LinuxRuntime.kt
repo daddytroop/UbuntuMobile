@@ -37,6 +37,14 @@ class LinuxRuntime(private val paths: LinuxPaths) {
         )
 
 
+    /** The locale linx-locale.sh made ready (/etc/linx/locale), or C.UTF-8. */
+    private fun phoneLocale(): String = try {
+        java.io.File(paths.root, "etc/linx/locale").readText().trim()
+            .takeIf { it.matches(Regex("[a-z]{2,3}(_[A-Z]{2})?\\.UTF-8")) } ?: "C.UTF-8"
+    } catch (_: Exception) {
+        "C.UTF-8"
+    }
+
     /** Environment passed to guest processes. */
     fun guestEnv(extra: Map<String, String> = emptyMap()): Map<String, String> = buildMap {
         put("HOME", "/root")
@@ -48,8 +56,11 @@ class LinuxRuntime(private val paths: LinuxPaths) {
         // C.UTF-8 is built into glibc, so it works whether or not the
         // locale archive has been compiled. en_US.UTF-8 would print a
         // "setlocale: cannot change locale" warning on every shell.
-        put("LANG", "C.UTF-8")
-        put("LC_ALL", "C.UTF-8")
+        // The phone's language once linx-locale.sh has compiled it.
+        val locale = phoneLocale()
+        put("LANG", locale)
+        put("LC_ALL", locale)
+        if (locale != "C.UTF-8") put("LANGUAGE", locale.substringBefore('_') + ":en")
         // The desktop's X server (display-start.sh, started as :99 by the
         // app), so whatever runs in the guest - the scripts restarting the
         // panel, a program started from the console - finds it.
