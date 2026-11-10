@@ -780,8 +780,8 @@ asked for it.
 
 ## Not yet done
 
-- **Steam.** Steam ships no `arm64` Linux build, so it is not a realistic
-  target on a phone regardless of the container.
+- **Steam inside Mobuntu.** It needs Valve's ARM build, FEX and GPU
+  graphics; for now Steam goes to DroidDeck (see Steam goes to DroidDeck).
 - **Hardware acceleration.** The X server runs with Mesa's software
   rasteriser, so 3D games are CPU-bound. Compositing a desktop application
   is fine; a 3D title is not.
