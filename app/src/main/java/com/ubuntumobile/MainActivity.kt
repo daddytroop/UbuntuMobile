@@ -121,7 +121,6 @@ class MainActivity : ComponentActivity() {
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
         enableEdgeToEdge()
-        window.addFlags(WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON)
 
         takeLaunch(intent)
         setContent {
@@ -189,6 +188,10 @@ class MainActivity : ComponentActivity() {
 
     /** A home-screen shortcut's app (see [pinShortcut]), to open on the desktop. */
     private fun takeLaunch(intent: android.content.Intent?) {
+        if (com.ubuntumobile.ui.HomeScreen.isHomeIntent(intent)) {
+            pendingHome = true
+            return
+        }
         if (intent?.action == com.ubuntumobile.linux.Updates.ACTION_SHOW) {
             pendingUpdates = true
             intent.action = null
@@ -228,6 +231,9 @@ private const val EXTRA_APP_NAME = "app_name"
 
 /** A Linux app a home-screen shortcut asked for: (id, name), until it is started. */
 private var pendingLaunch by mutableStateOf<Pair<String, String>?>(null)
+
+/** Home was pressed with Mobuntu as the home app: show the app grid. */
+private var pendingHome by mutableStateOf(false)
 
 /** The updates notification was tapped: open Software on its Updates tab. */
 private var pendingUpdates by mutableStateOf(false)
@@ -281,6 +287,7 @@ fun UbuntuApp(
     // What the back button does. The Linux desktop is the main screen, so
     // the back button leaves it for the app launcher rather than closing
     // the app.
+    val homeContext = LocalContext.current
     LaunchedEffect(screen) {
         registerBack {
             when (screen) {
@@ -288,7 +295,8 @@ fun UbuntuApp(
                     screen = Screen.DESKTOP
                     true
                 }
-                Screen.DESKTOP -> false
+                // As the phone's home screen there is nothing to go back to.
+                Screen.DESKTOP -> com.ubuntumobile.ui.HomeScreen.isDefault(homeContext)
                 else -> {
                     screen = Screen.DISPLAY
                     true
@@ -298,6 +306,14 @@ fun UbuntuApp(
     }
 
     val context = LocalContext.current
+    // The screen stays on while the Linux desktop is in front (a desktop
+    // that dims while you read is no good) but not elsewhere: as the
+    // phone's home screen the app is on screen most of the day.
+    LaunchedEffect(screen) {
+        val window = (context as? android.app.Activity)?.window ?: return@LaunchedEffect
+        if (screen == Screen.DISPLAY) window.addFlags(WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON)
+        else window.clearFlags(WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON)
+    }
     val config = LocalConfiguration.current
     val landscape = config.orientation == android.content.res.Configuration.ORIENTATION_LANDSCAPE
     val wide = config.screenWidthDp >= 600
@@ -1202,6 +1218,15 @@ fun UbuntuApp(
         )
     }
 
+    // Home pressed with Mobuntu as the home app: the app grid, with phone
+    // apps and Linux apps; the Linux desktop is a tap away.
+    LaunchedEffect(pendingHome, onboarded) {
+        if (!pendingHome || !onboarded) return@LaunchedEffect
+        pendingHome = false
+        screen = Screen.DESKTOP
+    }
+    val isHomeApp = remember(resumes) { com.ubuntumobile.ui.HomeScreen.isDefault(context) }
+
     // The updates notification opens Software on its Updates tab.
     var storeOnUpdates by remember { mutableStateOf(false) }
     LaunchedEffect(pendingUpdates) {
@@ -1391,6 +1416,7 @@ fun UbuntuApp(
             UbuntuShell(
                 state = state,
                 apps = apps,
+                homeMode = isHomeApp,
                 iconRoot = vm.paths.root,
                 onPin = { app ->
                     scope.launch {
@@ -1507,6 +1533,12 @@ fun UbuntuApp(
                 canTurnOffChildLimits = com.ubuntumobile.linux.BackgroundLimits.canTurnOffInSettings,
                 batteryRestricted = remember(resumes) { com.ubuntumobile.linux.BackgroundLimits.batteryRestricted(context) },
                 onOpenDeveloperOptions = { com.ubuntumobile.linux.BackgroundLimits.openDeveloperOptions(context) },
+                isHomeApp = isHomeApp,
+                onHomeApp = { on ->
+                    val activity = context as? android.app.Activity
+                    if (on && activity != null) com.ubuntumobile.ui.HomeScreen.ask(activity)
+                    else com.ubuntumobile.ui.HomeScreen.stop(context)
+                },
                 onAskBattery = { com.ubuntumobile.linux.BackgroundLimits.askForBattery(context) },
                 weeklyFolder = autoFolder?.let { uri ->
                     android.provider.DocumentsContract.getTreeDocumentId(uri).substringAfter(':').ifBlank { "the folder you chose" }

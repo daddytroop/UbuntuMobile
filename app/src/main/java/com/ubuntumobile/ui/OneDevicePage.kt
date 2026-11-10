@@ -169,6 +169,22 @@ internal fun OneDevicePage() {
     )
     Spacer(Modifier.height(12.dp))
     steps.forEachIndexed { i, step -> StepRow(i + 1, step) }
+
+    // Optional, and not counted: some keep their usual home screen.
+    val activity = context as? android.app.Activity
+    val home = remember(checks) { HomeScreen.isDefault(context) }
+    Spacer(Modifier.height(10.dp))
+    StepsLabel("Optional")
+    StepRow(
+        steps.size + 1,
+        PhoneStep(
+            "Make it your home screen",
+            if (home) "Home opens your phone and Linux apps in one place. Settings → Home screen turns it off."
+            else "For when the phone is your only computer: Home opens your phone and Linux apps in one place, with the desktop a tap away.",
+            home,
+            "Use as home screen",
+        ) { activity?.let { HomeScreen.ask(it) } },
+    )
     Spacer(Modifier.height(8.dp))
     Text(
         "Skipping is fine: Settings → Keep Linux running has these too. The microphone is asked for the first time a Linux app needs it.",

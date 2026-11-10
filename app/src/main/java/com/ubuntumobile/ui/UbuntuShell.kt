@@ -35,6 +35,8 @@ import androidx.compose.material.icons.filled.Refresh
 import androidx.compose.material.icons.filled.Search
 import androidx.compose.material.icons.filled.Settings
 import androidx.compose.material.icons.filled.Description
+import androidx.compose.material.icons.filled.DesktopWindows
+import androidx.compose.foundation.combinedClickable
 import androidx.compose.material.icons.filled.ShoppingBag
 import androidx.compose.material.icons.filled.Speed
 import androidx.compose.material.icons.filled.SportsEsports
@@ -95,13 +97,29 @@ fun UbuntuShell(
     onOpenFile: (String) -> Unit = {},
     /** Open Software searching Flathub for this. */
     onSearchStore: (String) -> Unit = { onOpenStore() },
+    /**
+     * The app is the phone's home screen: every phone app is listed, and
+     * the corner button opens the Linux desktop rather than going back.
+     */
+    homeMode: Boolean = false,
     modifier: Modifier = Modifier,
 ) {
     var query by remember { mutableStateOf("") }
     // One search for everything: past the Linux apps, the phone's own apps,
     // files, and Flathub apps that are not installed yet.
     val context = androidx.compose.ui.platform.LocalContext.current
-    val phoneApps = remember { PhoneApps.list(context) }
+    // Read again whenever the screen comes back, so apps installed or
+    // removed meanwhile show (this is the home screen, for some).
+    var phoneAppsRead by remember { androidx.compose.runtime.mutableIntStateOf(0) }
+    val lifecycle = androidx.lifecycle.compose.LocalLifecycleOwner.current.lifecycle
+    androidx.compose.runtime.DisposableEffect(lifecycle) {
+        val observer = androidx.lifecycle.LifecycleEventObserver { _, event ->
+            if (event == androidx.lifecycle.Lifecycle.Event.ON_RESUME) phoneAppsRead++
+        }
+        lifecycle.addObserver(observer)
+        onDispose { lifecycle.removeObserver(observer) }
+    }
+    val phoneApps = remember(phoneAppsRead) { PhoneApps.list(context) }
     val phoneMatches = remember(query, phoneApps) {
         if (query.isBlank()) emptyList() else phoneApps.filter { it.label.contains(query.trim(), ignoreCase = true) }.take(8)
     }
@@ -154,7 +172,11 @@ fun UbuntuShell(
             verticalAlignment = Alignment.CenterVertically,
         ) {
             IconButton(onClick = onBack) {
-                Icon(Icons.AutoMirrored.Filled.ArrowBack, contentDescription = "Back to the desktop", tint = Color.White)
+                if (homeMode) {
+                    Icon(Icons.Default.DesktopWindows, contentDescription = "Open the Linux desktop", tint = Color.White)
+                } else {
+                    Icon(Icons.AutoMirrored.Filled.ArrowBack, contentDescription = "Back to the desktop", tint = Color.White)
+                }
             }
             Text(
                 "Applications",
@@ -191,6 +213,15 @@ fun UbuntuShell(
             contentPadding = PaddingValues(start = 12.dp, end = 12.dp, top = 16.dp, bottom = 24.dp),
             verticalArrangement = Arrangement.spacedBy(8.dp),
         ) {
+            if (homeMode && query.isBlank()) {
+                item(span = { GridItemSpan(maxLineSpan) }) { SectionLabel("Phone apps") }
+                items(phoneApps, key = { "home:" + it.pkg }) { app ->
+                    PhoneAppTile(app) { PhoneApps.open(context, app.pkg) }
+                }
+            }
+            if (homeMode && query.isBlank() && linuxApps.isNotEmpty()) {
+                item(span = { GridItemSpan(maxLineSpan) }) { SectionLabel("Linux apps") }
+            }
             items(linuxApps, key = { it.id }) { app ->
                 AppTile(app = app, iconRoot = iconRoot, onClick = { onLaunchApp(app) }, onPin = onPin.takeIf { app.isLinuxApp })
             }
@@ -288,6 +319,16 @@ object PhoneApps {
         emptyList()
     }
 
+    fun info(context: android.content.Context, pkg: String) {
+        try {
+            context.startActivity(
+                android.content.Intent(android.provider.Settings.ACTION_APPLICATION_DETAILS_SETTINGS, android.net.Uri.parse("package:$pkg"))
+                    .addFlags(android.content.Intent.FLAG_ACTIVITY_NEW_TASK),
+            )
+        } catch (_: Exception) {
+        }
+    }
+
     fun open(context: android.content.Context, pkg: String) {
         context.packageManager.getLaunchIntentForPackage(pkg)?.let {
             try {
@@ -298,12 +339,15 @@ object PhoneApps {
     }
 }
 
+@OptIn(androidx.compose.foundation.ExperimentalFoundationApi::class)
 @Composable
 private fun PhoneAppTile(app: PhoneApp, onClick: () -> Unit) {
+    val context = androidx.compose.ui.platform.LocalContext.current
     Column(
         Modifier
             .clip(RoundedCornerShape(16.dp))
-            .clickable(onClick = onClick)
+            // Long-press: the app's own page in Android's settings (to uninstall it, for one).
+            .combinedClickable(onClick = onClick, onLongClick = { PhoneApps.info(context, app.pkg) })
             .padding(vertical = 10.dp, horizontal = 4.dp),
         horizontalAlignment = Alignment.CenterHorizontally,
     ) {

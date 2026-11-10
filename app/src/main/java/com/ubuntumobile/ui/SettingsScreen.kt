@@ -82,6 +82,9 @@ fun SettingsScreen(
     batteryRestricted: Boolean = false,
     onOpenDeveloperOptions: () -> Unit = {},
     onAskBattery: () -> Unit = {},
+    /** Mobuntu is the phone's home screen. */
+    isHomeApp: Boolean = false,
+    onHomeApp: (Boolean) -> Unit = {},
     /** Where weekly snapshots go, or null when they are off. */
     weeklyFolder: String? = null,
     onWeekly: (Boolean) -> Unit = {},
@@ -141,6 +144,26 @@ fun SettingsScreen(
                         fixText = "On: Android may stop Mobuntu, and Linux with it, to save battery.",
                         action = "Allow",
                         onAction = onAskBattery,
+                    )
+                }
+            }
+
+            Card("Home screen", "For when the phone is your only computer.") {
+                Row(verticalAlignment = Alignment.CenterVertically) {
+                    Column(Modifier.weight(1f)) {
+                        Text("Use Mobuntu as the home screen", fontSize = 15.sp, fontWeight = FontWeight.Medium, color = UbuntuPalette.LightOnSurface)
+                        Text(
+                            "Home opens your phone apps and Linux apps in one place, with the Linux desktop a tap away. " +
+                                "Turn it off to go back to your usual home screen.",
+                            fontSize = 12.sp,
+                            color = UbuntuPalette.LightOnSurfaceVariant,
+                        )
+                    }
+                    Spacer(Modifier.width(12.dp))
+                    androidx.compose.material3.Switch(
+                        checked = isHomeApp,
+                        onCheckedChange = onHomeApp,
+                        colors = androidx.compose.material3.SwitchDefaults.colors(checkedTrackColor = UbuntuPalette.UbuntuOrange),
                     )
                 }
             }

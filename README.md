@@ -298,6 +298,23 @@ the first time the desktop is up:
   a global setting, so the app reads it with `getprop`.
 - **Battery optimisation**, which the app asks to be left out of.
 
+### Home screen
+For people whose phone is their only computer, **Settings → Home screen** (and
+the last step of setup) makes Mobuntu the phone's home app. Home then opens
+the app grid: every phone app first (long-press for the app's Android page,
+to uninstall it), then the Linux apps, with the Linux desktop behind the
+button in the corner. Back stays on the grid.
+
+Android keeps the home app in a task of its own, so the home activity is not
+MainActivity: Home there would start a second copy, with a second Linux
+display. `HomeActivity` is a see-through stand-in, disabled until the option
+is turned on, with its own task affinity. Sharing MainActivity's task, Home
+would close MainActivity. Each time Home brings the stand-in forward, it
+brings MainActivity forward on its grid (`HomeScreen.kt`). Android 10 and newer
+ask through the home role; turning it off disables the stand-in, so Android
+goes back to the phone's own launcher. The screen stays on only while the
+Linux desktop is in front, not on the grid, so the phone still sleeps.
+
 ### Updates
 Software's **Updates** tab lists Ubuntu package and Flathub app updates
 (`linx-updates.sh --check`), and **Update all** installs them, with apt's and
