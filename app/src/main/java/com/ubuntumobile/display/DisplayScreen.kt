@@ -1,6 +1,7 @@
 package com.ubuntumobile.display
 
 import android.view.KeyEvent
+import androidx.compose.animation.togetherWith
 import androidx.compose.animation.fadeIn
 import androidx.compose.animation.fadeOut
 import androidx.compose.foundation.Canvas
@@ -371,6 +372,17 @@ fun MenuEntry(label: String, icon: ImageVector, onClick: () -> Unit) {
     )
 }
 
+/** Things worth knowing, shown one at a time while the desktop starts. */
+private val STARTUP_TIPS = listOf(
+    "Tip: plug in a USB-C monitor for a full-size desktop",
+    "Tip: on a monitor, the phone becomes the trackpad",
+    "Tip: a Bluetooth mouse and keyboard work as on a PC",
+    "Tip: the Software store has thousands of apps",
+    "Tip: click the battery or Wi-Fi icon for quick settings",
+    "Tip: Super+L locks the desktop",
+    "Tip: Print Screen saves a screenshot to your Pictures",
+)
+
 /** Shown while the X server and the desktop are still starting. */
 @Composable
 private fun ConnectingPanel(
@@ -379,44 +391,13 @@ private fun ConnectingPanel(
     error: String?,
     onRetry: () -> Unit,
 ) {
-    Box(
-        Modifier
-            .fillMaxSize()
-            .background(
-                Brush.verticalGradient(
-                    listOf(UbuntuPalette.AubergineDark, UbuntuPalette.AubergineDeep, Color(0xFF0E0E0E)),
-                ),
-            ),
-        contentAlignment = Alignment.Center,
-    ) {
+    Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
+        com.ubuntumobile.ui.AuroraBackground(UbuntuPalette.UbuntuOrange)
         Column(
             horizontalAlignment = Alignment.CenterHorizontally,
             modifier = Modifier.padding(horizontal = 32.dp),
         ) {
-            Box(contentAlignment = Alignment.Center) {
-                if (connecting) {
-                    CircularProgressIndicator(
-                        color = UbuntuPalette.UbuntuOrange,
-                        trackColor = Color.White.copy(alpha = 0.12f),
-                        strokeWidth = 3.dp,
-                        modifier = Modifier.size(72.dp),
-                    )
-                }
-                Box(
-                    Modifier
-                        .size(52.dp)
-                        .clip(CircleShape)
-                        .background(UbuntuPalette.UbuntuOrange),
-                    contentAlignment = Alignment.Center,
-                ) {
-                    Box(
-                        Modifier
-                            .size(20.dp)
-                            .clip(CircleShape)
-                            .background(Color.White),
-                    )
-                }
-            }
+            com.ubuntumobile.ui.AnimatedLogo(64.dp, UbuntuPalette.UbuntuOrange, spinning = connecting)
             Spacer(Modifier.height(24.dp))
             Text(
                 if (connecting) "Starting the desktop" else "The desktop is not responding",
@@ -435,6 +416,25 @@ private fun ConnectingPanel(
                 fontSize = 13.sp,
                 textAlign = TextAlign.Center,
             )
+            if (connecting) {
+                Spacer(Modifier.height(36.dp))
+                androidx.compose.animation.AnimatedContent(
+                    targetState = (attempt / 4) % STARTUP_TIPS.size,
+                    transitionSpec = {
+                        (androidx.compose.animation.fadeIn(androidx.compose.animation.core.tween(500)) +
+                            androidx.compose.animation.slideInVertically { it / 2 }) togetherWith
+                            androidx.compose.animation.fadeOut(androidx.compose.animation.core.tween(300))
+                    },
+                    label = "tip",
+                ) { i ->
+                    Text(
+                        STARTUP_TIPS[i],
+                        color = Color.White.copy(alpha = 0.6f),
+                        fontSize = 13.sp,
+                        textAlign = TextAlign.Center,
+                    )
+                }
+            }
             if (!connecting) {
                 Spacer(Modifier.height(20.dp))
                 Text(

@@ -70,12 +70,15 @@ start_panel() {
   feh --no-fehbg --bg-fill "$wall" >/tmp/linx-feh.log 2>&1 &
 }
 
-# What setup installs for the panel (battery and network items) and for
-# printing; a Linux set up before they were added gets them here, once, in
-# the background. Then the panel restarts with them and printing starts.
-EXTRAS="xfce4-genmon-plugin cups printer-driver-cups-pdf"
+# What setup installs for the panel (battery and network items), for
+# printing and the everyday desktop apps (linx-setup.sh); a Linux set up
+# before they were added gets them here, once, in the background. Then the
+# panel restarts with them and printing starts. Not while setup itself is
+# still running: it installs them, and two installs at once wait in line.
+EXTRAS="xfce4-genmon-plugin cups printer-driver-cups-pdf ristretto xarchiver thunar-archive-plugin galculator tumbler xfce4-clipman-plugin"
 add_extras() {
   local missing
+  [ -f /etc/linx/setup.done ] || return 0
   missing="$(/usr/local/lib/linx/apt-install.sh --status $EXTRAS | awk '$2 == "missing" {print $1}' | tr '\n' ' ')"
   if [ -n "${missing// /}" ] && [ ! -f /var/lib/linx/no-extras ]; then
     sleep 20

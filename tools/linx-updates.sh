@@ -11,6 +11,10 @@
 # go to that file, for the app's progress bar (as in linx-setup.sh).
 set -u
 export DEBIAN_FRONTEND=noninteractive
+# Wait for any other install to finish (apt-install.sh takes the same lock).
+exec 9>/tmp/linx-apt.lock
+flock -w 3600 9 || { echo "UPDATES_FAILED another install is still running"; exit 1; }
+export LINX_APT_LOCKED=1
 STAMP=/var/lib/apt/lists/.linx-updated
 
 check() {

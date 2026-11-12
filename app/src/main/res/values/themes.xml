@@ -3,7 +3,7 @@
     <style name="Theme.UbuntuMobile" parent="android:Theme.Material.NoActionBar">
         <item name="android:statusBarColor">@android:color/transparent</item>
         <item name="android:navigationBarColor">@android:color/transparent</item>
-        <item name="android:windowBackground">#77216F</item>
+        <item name="android:windowBackground">#2C001E</item>
         <item name="android:windowLightStatusBar">false</item>
     </style>
 </resources>

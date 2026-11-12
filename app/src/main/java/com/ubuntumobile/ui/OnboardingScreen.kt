@@ -1,6 +1,14 @@
 package com.ubuntumobile.ui
 
 import androidx.compose.animation.AnimatedContent
+import androidx.compose.animation.AnimatedVisibility
+import androidx.compose.animation.animateColorAsState
+import androidx.compose.animation.core.Spring
+import androidx.compose.animation.core.animateDpAsState
+import androidx.compose.animation.core.animateFloatAsState
+import androidx.compose.animation.core.spring
+import androidx.compose.animation.scaleIn
+import androidx.compose.animation.scaleOut
 import androidx.compose.animation.core.tween
 import androidx.compose.animation.fadeIn
 import androidx.compose.animation.fadeOut
@@ -12,6 +20,8 @@ import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.horizontalScroll
 import androidx.compose.foundation.clickable
+import androidx.compose.foundation.interaction.MutableInteractionSource
+import androidx.compose.foundation.interaction.collectIsPressedAsState
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
@@ -50,6 +60,8 @@ import androidx.compose.material3.Switch
 import androidx.compose.material3.SwitchDefaults
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.CompositionLocalProvider
+import androidx.compose.runtime.key
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableIntStateOf
 import androidx.compose.runtime.mutableStateOf
@@ -59,6 +71,8 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
+import androidx.compose.ui.graphics.graphicsLayer
+import androidx.compose.ui.text.TextStyle
 import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.ImageBitmap
@@ -145,7 +159,7 @@ data class SetupChoices(
     /** About how much there is to download, in MB. */
     val downloadMb: Int
         get() {
-            var mb = 60 // sound, Yaru and the Ubuntu font
+            var mb = 70 // sound, Yaru, the Ubuntu font and the everyday apps
             if (browser) mb += 90
             if (apps.any { it.startsWith("libreoffice") }) mb += 190
             mb += apps.sumOf { APP_SIZES[it] ?: 20 }
@@ -269,12 +283,12 @@ fun OnboardingScreen(
     fun next() = Page.entries.drop(page.ordinal + 1).first { shows(it) }
     fun previous() = Page.entries.take(page.ordinal).last { shows(it) }
 
+    val accent by animateColorAsState(Color(choices.accent.color), tween(700), label = "accent")
+    Box(Modifier.fillMaxSize()) {
+        AuroraBackground(accent)
     Box(
         Modifier
             .fillMaxSize()
-            .background(
-                Brush.verticalGradient(listOf(UbuntuPalette.AubergineDeep, UbuntuPalette.AubergineDark, UbuntuPalette.AubergineDeep)),
-            )
             .systemBarsPadding(),
     ) {
         Column(
@@ -290,12 +304,16 @@ fun OnboardingScreen(
             AnimatedContent(
                 targetState = page,
                 transitionSpec = {
-                    (slideInHorizontally(tween(260)) { it / 3 * forward } + fadeIn(tween(260))) togetherWith
-                        (slideOutHorizontally(tween(200)) { -it / 3 * forward } + fadeOut(tween(200)))
+                    (
+                        slideInHorizontally(spring(dampingRatio = 0.85f, stiffness = Spring.StiffnessMediumLow)) { it / 2 * forward } +
+                            fadeIn(tween(320)) + scaleIn(tween(380), initialScale = 0.94f)
+                        ) togetherWith
+                        (slideOutHorizontally(tween(240)) { -it / 3 * forward } + fadeOut(tween(200)) + scaleOut(tween(240), targetScale = 0.96f))
                 },
                 modifier = Modifier.weight(1f).fillMaxWidth(),
                 label = "onboarding",
             ) { shown ->
+                CompositionLocalProvider(LocalStagger provides remember(shown) { Stagger() }) {
                 Column(
                     Modifier
                         .fillMaxSize()
@@ -313,6 +331,7 @@ fun OnboardingScreen(
                         Page.PHONE -> OneDevicePage()
                         Page.READY -> ReadyPage(choices, unpackFraction)
                     }
+                }
                 }
             }
 
@@ -349,6 +368,10 @@ fun OnboardingScreen(
             }
         }
     }
+        if (page == Page.READY) {
+            key(page) { Confetti(accent) }
+        }
+    }
 }
 
 @Composable
@@ -357,14 +380,22 @@ private fun WelcomePage() {
         Modifier.fillMaxWidth().padding(top = 32.dp),
         horizontalAlignment = Alignment.CenterHorizontally,
     ) {
-        UbuntuLogo(88.dp)
-        Spacer(Modifier.height(28.dp))
+        AnimatedLogo(88.dp, setupAccent)
+        Spacer(Modifier.height(8.dp))
+        val shine = shimmerOffset()
         Text(
             "Welcome to Mobuntu",
-            color = Color.White,
-            fontSize = 30.sp,
-            fontWeight = FontWeight.Bold,
-            textAlign = TextAlign.Center,
+            style = TextStyle(
+                brush = Brush.linearGradient(
+                    listOf(Color.White, Color.White, lerpWhite(setupAccent), Color.White, Color.White),
+                    start = androidx.compose.ui.geometry.Offset(shine * 900f - 300f, 0f),
+                    end = androidx.compose.ui.geometry.Offset(shine * 900f + 300f, 120f),
+                ),
+                fontSize = 32.sp,
+                fontWeight = FontWeight.Bold,
+                textAlign = TextAlign.Center,
+            ),
+            modifier = Modifier.riseIn(),
         )
         Spacer(Modifier.height(8.dp))
         Text(
@@ -372,6 +403,7 @@ private fun WelcomePage() {
             color = Color.White.copy(alpha = 0.8f),
             fontSize = 16.sp,
             textAlign = TextAlign.Center,
+            modifier = Modifier.riseIn(),
         )
         Spacer(Modifier.height(36.dp))
         Feature(Icons.Default.Smartphone, "In your hand", "A desktop sized for the phone's screen, with touch and a trackpad")
@@ -382,9 +414,12 @@ private fun WelcomePage() {
 
 @Composable
 private fun Feature(icon: ImageVector, title: String, detail: String) {
-    Row(Modifier.fillMaxWidth().padding(vertical = 8.dp), verticalAlignment = Alignment.CenterVertically) {
+    Row(Modifier.fillMaxWidth().riseIn().padding(vertical = 8.dp), verticalAlignment = Alignment.CenterVertically) {
         Box(
-            Modifier.size(44.dp).clip(CircleShape).background(Color.White.copy(alpha = 0.1f)),
+            Modifier
+                .size(44.dp)
+                .clip(CircleShape)
+                .background(Brush.linearGradient(listOf(setupAccent.copy(alpha = 0.45f), Color.White.copy(alpha = 0.08f)))),
             contentAlignment = Alignment.Center,
         ) {
             Icon(icon, contentDescription = null, tint = UbuntuPalette.UbuntuOrangeLight)
@@ -399,9 +434,9 @@ private fun Feature(icon: ImageVector, title: String, detail: String) {
 
 @Composable
 internal fun PageTitle(title: String, subtitle: String) {
-    Text(title, color = Color.White, fontSize = 26.sp, fontWeight = FontWeight.Bold)
+    Text(title, color = Color.White, fontSize = 28.sp, fontWeight = FontWeight.Bold, modifier = Modifier.riseIn())
     Spacer(Modifier.height(6.dp))
-    Text(subtitle, color = Color.White.copy(alpha = 0.75f), fontSize = 14.sp)
+    Text(subtitle, color = Color.White.copy(alpha = 0.75f), fontSize = 14.sp, modifier = Modifier.riseIn())
     Spacer(Modifier.height(22.dp))
 }
 
@@ -451,8 +486,11 @@ private fun LookPage(choices: SetupChoices, onChange: (SetupChoices) -> Unit) {
     Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
         Accent.entries.forEach { accent ->
             val selected = choices.accent == accent
+            val grow by animateFloatAsState(if (selected) 1.18f else 1f, spring(dampingRatio = 0.4f), label = "dot")
             Box(
                 Modifier
+                    .riseIn()
+                    .graphicsLayer { scaleX = grow; scaleY = grow }
                     .size(36.dp)
                     .clip(CircleShape)
                     .background(Color(accent.color))
@@ -585,7 +623,9 @@ private fun UsesPage(choices: SetupChoices, onChange: (SetupChoices) -> Unit) {
                     Text(interest.label, color = Color.White, fontSize = 16.sp, fontWeight = FontWeight.Medium)
                     Text(interest.detail, color = Color.White.copy(alpha = 0.7f), fontSize = 13.sp)
                 }
-                if (on) Icon(Icons.Default.Check, contentDescription = "Picked", tint = Color.White)
+                AnimatedVisibility(on, enter = scaleIn(spring(dampingRatio = 0.4f)) + fadeIn(), exit = scaleOut() + fadeOut()) {
+                    Icon(Icons.Default.Check, contentDescription = "Picked", tint = Color.White)
+                }
             }
         }
     }
@@ -713,8 +753,11 @@ private fun StoresPage(choices: SetupChoices, onChange: (SetupChoices) -> Unit) 
 
 @Composable
 private fun ReadyPage(choices: SetupChoices, unpackFraction: Float?) {
+    Box(Modifier.fillMaxWidth().padding(bottom = 4.dp), contentAlignment = Alignment.Center) {
+        AnimatedLogo(64.dp, setupAccent, spinning = unpackFraction != null)
+    }
     PageTitle(
-        "Ready",
+        if (unpackFraction == null) "You're all set" else "Almost there",
         if (unpackFraction == null) "Ubuntu starts now. Your apps install in the background."
         else "Ubuntu is still unpacking. It only takes a minute or two.",
     )
@@ -746,7 +789,7 @@ private fun ReadyPage(choices: SetupChoices, unpackFraction: Float?) {
 
 @Composable
 private fun SummaryRow(label: String, value: String) {
-    Row(Modifier.fillMaxWidth().padding(vertical = 8.dp)) {
+    Row(Modifier.fillMaxWidth().riseIn().padding(vertical = 8.dp)) {
         Text(label, color = Color.White.copy(alpha = 0.65f), fontSize = 14.sp, modifier = Modifier.width(140.dp))
         Text(value, color = Color.White, fontSize = 14.sp, modifier = Modifier.weight(1f))
     }
@@ -766,18 +809,22 @@ private fun SectionLabel(text: String) {
 
 @Composable
 private fun SelectCard(selected: Boolean, onClick: () -> Unit, content: @Composable () -> Unit) {
+    val press = remember { MutableInteractionSource() }
+    val pressed by press.collectIsPressedAsState()
+    val scale by animateFloatAsState(if (pressed) 0.96f else 1f, spring(dampingRatio = 0.5f), label = "press")
+    val fill by animateColorAsState(if (selected) setupAccent.copy(alpha = 0.22f) else Color.White.copy(alpha = 0.06f), tween(300), label = "fill")
+    val edge by animateColorAsState(if (selected) setupAccent else Color.White.copy(alpha = 0.12f), tween(300), label = "edge")
+    val width by animateDpAsState(if (selected) 2.dp else 1.dp, label = "width")
     Column(
         Modifier
             .fillMaxWidth()
+            .riseIn()
             .padding(bottom = 12.dp)
-            .clip(RoundedCornerShape(16.dp))
-            .background(if (selected) Color.White.copy(alpha = 0.14f) else Color.White.copy(alpha = 0.06f))
-            .border(
-                if (selected) 2.dp else 1.dp,
-                if (selected) UbuntuPalette.UbuntuOrange else Color.White.copy(alpha = 0.12f),
-                RoundedCornerShape(16.dp),
-            )
-            .clickable(onClick = onClick)
+            .graphicsLayer { scaleX = scale; scaleY = scale }
+            .clip(RoundedCornerShape(18.dp))
+            .background(Brush.linearGradient(listOf(fill, fill.copy(alpha = fill.alpha * 0.4f))))
+            .border(width, edge, RoundedCornerShape(18.dp))
+            .clickable(interactionSource = press, indication = null, onClick = onClick)
             .padding(16.dp),
     ) { content() }
 }
@@ -792,9 +839,13 @@ private fun AppToggle(
     tick: Color = UbuntuPalette.UbuntuOrange,
     onChange: (Boolean) -> Unit,
 ) {
+    val fill by animateColorAsState(if (checked) tick else Color.Transparent, tween(220), label = "tick")
+    val edge by animateColorAsState(if (checked) tick else Color.White.copy(alpha = 0.4f), tween(220), label = "tickEdge")
+    val pop by animateFloatAsState(if (checked) 1f else 0.85f, spring(dampingRatio = 0.35f, stiffness = Spring.StiffnessMedium), label = "pop")
     Row(
         Modifier
             .fillMaxWidth()
+            .riseIn()
             .clip(RoundedCornerShape(14.dp))
             .clickable { onChange(!checked) }
             .padding(vertical = 8.dp, horizontal = 4.dp),
@@ -810,12 +861,14 @@ private fun AppToggle(
         }
         Box(
             Modifier
+                .graphicsLayer { scaleX = pop; scaleY = pop }
                 .size(26.dp)
                 .clip(RoundedCornerShape(8.dp))
-                .background(if (checked) tick else Color.Transparent)
-                .border(2.dp, if (checked) tick else Color.White.copy(alpha = 0.4f), RoundedCornerShape(8.dp)),
+                .background(fill)
+                .border(2.dp, edge, RoundedCornerShape(8.dp)),
             contentAlignment = Alignment.Center,
         ) {
+            // The box itself pops (pop above), and the tick with it.
             if (checked) Icon(Icons.Default.Check, contentDescription = null, tint = Color.White, modifier = Modifier.size(18.dp))
         }
     }
@@ -845,12 +898,16 @@ private val thumbs = java.util.concurrent.ConcurrentHashMap<Wallpaper, ImageBitm
 private fun StepDots(index: Int, count: Int, modifier: Modifier = Modifier) {
     Row(modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(6.dp)) {
         repeat(count) { i ->
+            val color by animateColorAsState(
+                if (i <= index) setupAccent else Color.White.copy(alpha = 0.18f), tween(400), label = "step",
+            )
+            val weight by animateFloatAsState(if (i == index) 2.2f else 1f, spring(dampingRatio = 0.6f), label = "stepWidth")
             Box(
                 Modifier
-                    .weight(1f)
-                    .height(4.dp)
-                    .clip(RoundedCornerShape(2.dp))
-                    .background(if (i <= index) UbuntuPalette.UbuntuOrange else Color.White.copy(alpha = 0.18f)),
+                    .weight(weight)
+                    .height(if (i == index) 5.dp else 4.dp)
+                    .clip(RoundedCornerShape(3.dp))
+                    .background(color),
             )
         }
     }
@@ -887,11 +944,27 @@ private fun UnpackBar(fraction: Float, detail: String) {
 
 @Composable
 private fun PrimaryButton(label: String, enabled: Boolean = true, onClick: () -> Unit) {
+    val press = remember { MutableInteractionSource() }
+    val pressed by press.collectIsPressedAsState()
+    val scale by animateFloatAsState(if (pressed) 0.93f else 1f, spring(dampingRatio = 0.45f), label = "press")
+    val shine = shimmerOffset()
+    val base = setupAccent
     Box(
         Modifier
+            .graphicsLayer { scaleX = scale; scaleY = scale }
             .clip(RoundedCornerShape(24.dp))
-            .background(if (enabled) UbuntuPalette.UbuntuOrange else Color.White.copy(alpha = 0.15f))
-            .clickable(enabled = enabled, onClick = onClick)
+            .background(
+                if (enabled) {
+                    Brush.linearGradient(
+                        listOf(base, base, lerpWhite(base), base, base),
+                        start = androidx.compose.ui.geometry.Offset(shine * 500f - 150f, 0f),
+                        end = androidx.compose.ui.geometry.Offset(shine * 500f + 150f, 60f),
+                    )
+                } else {
+                    Brush.linearGradient(listOf(Color.White.copy(alpha = 0.15f), Color.White.copy(alpha = 0.15f)))
+                },
+            )
+            .clickable(enabled = enabled, interactionSource = press, indication = null, onClick = onClick)
             .padding(horizontal = 28.dp, vertical = 12.dp),
     ) {
         Text(label, color = if (enabled) Color.White else Color.White.copy(alpha = 0.5f), fontSize = 15.sp, fontWeight = FontWeight.SemiBold)
@@ -911,3 +984,6 @@ private fun TextButton(label: String, onClick: () -> Unit) {
 }
 
 private fun sizeLabel(mb: Int): String = if (mb >= 1000) "%.1f GB".format(mb / 1000f) else "$mb MB"
+
+/** A lighter, shinier version of a colour, for highlights. */
+private fun lerpWhite(c: Color): Color = androidx.compose.ui.graphics.lerp(c, Color.White, 0.6f)

@@ -9,8 +9,9 @@
 #   LINX_FLATPAKS="org.x.Y ..."   apps from Flathub
 #   LINX_DARK=0  LINX_ACCENT=orange   the look (linx-look.sh)
 #
-# Sound and Ubuntu's own look always come in: they are small and the desktop
-# is not complete without them. Prints "STEP n/total what" as it goes, and
+# Sound, Ubuntu's own look and the everyday apps (pictures, zip files, a
+# calculator, clipboard history) always come in: they are small and the
+# desktop is not complete without them. Prints "STEP n/total what" as it goes, and
 # SETUP_READY or SETUP_FAILED at the end. Running it again installs only
 # what is missing.
 set -u
@@ -51,10 +52,11 @@ fail() {
 # Megabytes free for the container.
 free_mb() { df -Pm / 2>/dev/null | awk 'NR == 2 {print $4}'; }
 
-step "Sound and the Ubuntu look"
+step "The desktop: sound, look and everyday apps"
 /usr/local/lib/linx/apt-install.sh pulseaudio yaru-theme-gtk yaru-theme-icon fonts-ubuntu \
   xfce4-whiskermenu-plugin xfce4-docklike-plugin xfce4-notifyd libnotify-bin \
   xfce4-genmon-plugin xfce4-pulseaudio-plugin cups printer-driver-cups-pdf \
+  ristretto xarchiver thunar-archive-plugin galculator tumbler xfce4-clipman-plugin \
   >/tmp/linx-setup-base.log 2>&1 || fail base /tmp/linx-setup-base.log
 
 if [ "$LINX_BROWSER" = 1 ]; then

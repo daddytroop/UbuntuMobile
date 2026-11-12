@@ -10,6 +10,18 @@
 # day at most.
 set -u
 export DEBIAN_FRONTEND=noninteractive
+
+# One at a time: setup, the store and the desktop's background extras all
+# come through here, and two apt-gets at once fail on apt's lock (which
+# looked like "could not download the package lists"). The others wait.
+if [ "${1:-}" != --status ] && [ -z "${LINX_APT_LOCKED:-}" ]; then
+  exec 9>/tmp/linx-apt.lock
+  if ! flock -w 3600 9; then
+    echo "APT_FAILED another install is still running"
+    exit 1
+  fi
+  export LINX_APT_LOCKED=1
+fi
 STAMP=/var/lib/apt/lists/.linx-updated
 
 # apt-get update, and when it fails, what can be done here about it:
