@@ -8,3 +8,5 @@ tools/nosandbox-bwrap text eol=lf
 tools/firefox text eol=lf
 tools/*.xml text eol=lf
 tools/linx-bwrap text eol=lf
+tools/linx-status text eol=lf
+tools/linx-phone text eol=lf
