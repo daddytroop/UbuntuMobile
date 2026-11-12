@@ -36,7 +36,7 @@ object NetworkSetup {
      * works, it just cannot resolve names).
      */
     fun configureDns(context: Context, paths: LinuxPaths): List<String> {
-        val servers = deviceDnsServers(context).ifEmpty { FALLBACK_DNS }
+        val servers = resolvers(deviceDnsServers(context))
         val target = File(paths.root, "etc/resolv.conf")
         val content = buildString {
             append("# Written by UbuntuMobile so the container can resolve names.\n")
@@ -44,6 +44,7 @@ object NetworkSetup {
             append("options timeout:2 attempts:2\n")
         }
         return try {
+            if (target.isFile && target.readText() == content) return servers
             target.parentFile?.mkdirs()
             // The image may ship /etc/resolv.conf as a symlink; writing
             // through it would touch the host's file, so replace it.
@@ -63,26 +64,29 @@ object NetworkSetup {
     }
 
     /**
-     * The DNS servers of the phone's active network.
+     * What goes in resolv.conf: Linux only ever asks the first three, so at
+     * most two of the phone's (those of the network in use) and always a
+     * public one after them, in case the phone's do not answer the container.
+     */
+    internal fun resolvers(phone: List<String>): List<String> =
+        (phone.distinct().take(2) + FALLBACK_DNS).distinct().take(3)
+
+    /**
+     * The IPv4 DNS servers of the network the phone is using now.
      *
-     * IPv6 resolvers are skipped: proot's network handling is IPv4 only in
-     * practice, and a resolvers line with an IPv6 address often fails
-     * outright in a container.
+     * Only that network's: a phone also keeps mobile data, and on many the
+     * carrier's calling network (IMS), up while on Wi-Fi, and their
+     * resolvers cannot be reached from it - listed first, they left Linux
+     * with no name lookups at all. IPv6 resolvers are skipped: proot's
+     * network handling is IPv4 only in practice.
      */
     private fun deviceDnsServers(context: Context): List<String> {
         val cm = context.getSystemService(Context.CONNECTIVITY_SERVICE) as? ConnectivityManager
             ?: return emptyList()
         return try {
-            val networks = cm.allNetworks ?: emptyArray()
-            val out = LinkedHashSet<String>()
-            for (network in networks) {
-                val props: LinkProperties? = cm.getLinkProperties(network)
-                val servers = props?.dnsServers ?: continue
-                for (address in servers) {
-                    if (address is Inet4Address) out.add(address.hostAddress ?: continue)
-                }
-            }
-            out.toList()
+            val network = cm.activeNetwork ?: return emptyList()
+            val props: LinkProperties = cm.getLinkProperties(network) ?: return emptyList()
+            props.dnsServers.filterIsInstance<Inet4Address>().mapNotNull { it.hostAddress }
         } catch (e: Exception) {
             Log.w(TAG, "could not read the device's DNS servers", e)
             emptyList()

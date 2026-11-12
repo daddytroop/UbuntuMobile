@@ -5,6 +5,7 @@ import android.content.Context
 import android.content.Intent
 import android.content.IntentFilter
 import android.net.ConnectivityManager
+import android.net.LinkProperties
 import android.net.Network
 import android.net.NetworkCapabilities
 import android.net.wifi.WifiManager
@@ -87,6 +88,18 @@ class PhoneStatus(private val context: Context) {
         override fun onAvailable(network: Network) = post()
         override fun onLost(network: Network) = post()
         override fun onCapabilitiesChanged(network: Network, caps: NetworkCapabilities) = post()
+
+        // A new network brings its own DNS servers (Wi-Fi to mobile data,
+        // a VPN coming up): Linux's resolv.conf follows.
+        override fun onLinkPropertiesChanged(network: Network, props: LinkProperties) {
+            handler.post {
+                try {
+                    NetworkSetup.configureDns(context, LinuxPaths(context))
+                } catch (e: Exception) {
+                    Log.w(TAG, "could not update the DNS servers", e)
+                }
+            }
+        }
     }
 
     private val tick = object : Runnable {

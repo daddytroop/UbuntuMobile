@@ -12,10 +12,53 @@ set -u
 export DEBIAN_FRONTEND=noninteractive
 STAMP=/var/lib/apt/lists/.linx-updated
 
+# apt-get update, and when it fails, what can be done here about it:
+#   - names do not resolve: the phone's DNS servers do not answer the
+#     container, so public ones are put first;
+#   - the download is refused or garbled: some Wi-Fi and mobile networks
+#     meddle with plain HTTP, so Ubuntu's archive is fetched over HTTPS;
+#   - and a second go for a dropped connection.
+# On failure the reason apt gave is the last line printed.
+update_lists() {
+  local log=/tmp/linx-apt-update.log
+  apt-get update -q 2>&1 | tee "$log"
+  # apt says "W: Failed to fetch" for some failures and still exits 0.
+  [ "${PIPESTATUS[0]}" = 0 ] && ! grep -qE '^(E|W): Failed to fetch https?://[a-z.]*ubuntu.com' "$log"
+}
+can_resolve() { getent hosts "$1" >/dev/null 2>&1; }
+archive_host() {
+  grep -rhE '^(deb|URIs:)' /etc/apt/sources.list /etc/apt/sources.list.d 2>/dev/null |
+    grep -oE 'https?://[a-z.]*ubuntu\.com' | head -n 1 | sed 's,.*://,,'
+}
 refresh_lists() {
-  if [ -z "$(find "$STAMP" -mmin -1440 2>/dev/null)" ]; then
-    apt-get update -q && touch "$STAMP"
+  [ -n "$(find "$STAMP" -mmin -1440 2>/dev/null)" ] && return 0
+  update_lists && { touch "$STAMP"; return 0; }
+  local host
+  host="$(archive_host)"
+  if [ -n "$host" ] && ! can_resolve "$host"; then
+    echo "linx: $host does not resolve; trying public DNS servers"
+    {
+      echo "# Written by apt-install.sh: the phone's DNS servers did not answer."
+      echo "nameserver 1.1.1.1"
+      echo "nameserver 8.8.8.8"
+      grep '^nameserver' /etc/resolv.conf 2>/dev/null | head -n 1
+      echo "options timeout:2 attempts:2"
+    } >/tmp/linx-resolv.conf && cat /tmp/linx-resolv.conf >/etc/resolv.conf
+    if ! can_resolve "$host"; then
+      echo "E: no internet: $host cannot be found (is the phone online?)"
+      return 1
+    fi
+    update_lists && { touch "$STAMP"; return 0; }
   fi
+  if grep -rqE 'http://[a-z.]*ubuntu\.com' /etc/apt/sources.list /etc/apt/sources.list.d 2>/dev/null; then
+    echo "linx: trying Ubuntu's archive over HTTPS"
+    find /etc/apt/sources.list /etc/apt/sources.list.d -type f \( -name '*.list' -o -name '*.sources' -o -name sources.list \) \
+      -exec sed -i -E 's,http://([a-z.]*ubuntu\.com),https://\1,g' {} + 2>/dev/null
+    update_lists && { touch "$STAMP"; return 0; }
+  fi
+  update_lists && { touch "$STAMP"; return 0; }
+  grep -E '^(E|W): ' /tmp/linx-apt-update.log | tail -n 1
+  return 1
 }
 
 case "${1:-}" in
@@ -42,7 +85,12 @@ case "${1:-}" in
     exit 2
     ;;
   *)
-    refresh_lists || { echo "APT_FAILED could not download the package lists"; exit 1; }
+    if ! refresh_lists; then
+      echo "APT_FAILED could not download the package lists"
+      # The reason, last, for the setup's message.
+      grep -E '^E: ' /tmp/linx-apt-update.log 2>/dev/null | tail -n 1 | sed 's/^/error: /'
+      exit 1
+    fi
     # LINX_APT_STATUS: a file for apt's machine-readable progress lines.
     STATUS_OPT=()
     if [ -n "${LINX_APT_STATUS:-}" ]; then

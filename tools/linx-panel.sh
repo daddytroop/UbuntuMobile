@@ -142,6 +142,34 @@ fi
 xfconf-query -c xfce4-notifyd -p /notification-log -n -t bool -s true 2>/dev/null
 xfconf-query -c xfce4-notifyd -p /log-level -n -t uint -s 1 2>/dev/null
 
+# The status icons as on Ubuntu's top bar: smaller than the dock's app
+# icons (the panel gives every plugin's icon its full height) and white
+# like the clock, with room between them. Only these plugins are matched;
+# the panel names each plugin's widget "<name>-<id>".
+CSS="$HOME/.config/gtk-3.0/gtk.css"
+BEGIN="/* linx-panel: status icons */"
+END="/* linx-panel: end */"
+STYLE="$BEGIN
+#genmon-12 image, #pulseaudio-13 image, #genmon-14 image, #notification-plugin-15 image {
+  -gtk-icon-transform: scale(0.62);
+  color: #ffffff;
+}
+#genmon-12, #pulseaudio-13, #genmon-14, #notification-plugin-15,
+#genmon-12 button, #pulseaudio-13 button, #genmon-14 button, #notification-plugin-15 button {
+  padding-left: 1px;
+  padding-right: 1px;
+  margin: 0;
+}
+$END"
+mkdir -p "$(dirname "$CSS")"
+OLD="$(cat "$CSS" 2>/dev/null)"
+NEW="$(printf '%s\n' "$OLD" | sed "\\|^/\\* linx-panel: status icons \\*/\$|,\\|^/\\* linx-panel: end \\*/\$|d")"
+NEW="$(printf '%s\n%s\n' "$NEW" "$STYLE" | sed '/./,$!d')"
+if [ "$NEW" != "$OLD" ]; then
+  printf '%s\n' "$NEW" >"$CSS"
+  CHANGED=1
+fi
+
 # ------------------------------------------------- keys, lock, screenshots
 # Print Screen saves a screenshot to the phone's Pictures/Screenshots, and
 # Super+L (or Lock in the menu) locks the desktop until the phone's own
