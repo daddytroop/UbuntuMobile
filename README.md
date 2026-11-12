@@ -272,6 +272,31 @@ then a public one, and follows network changes. If `apt-get update` still
 fails, `apt-install.sh` tries public DNS servers, then Ubuntu's archive
 over HTTPS, and reports apt's own error.
 
+### Install lines from the web
+Instructions for installing a Linux app usually start with `sudo`, and are
+as often written for Arch (`pacman`, `yay`), Fedora (`dnf`) or snap as for
+Ubuntu. Typed into the terminal they ended in "command not found".
+`linx-pkg` answers them instead (`ContainerSetup` installs a two-line shim
+per command in `/usr/local/bin`, never in front of a real one):
+
+- `sudo CMD` runs CMD: there is only root.
+- `pacman -S NAME`, `yay`, `paru`, `dnf install`, `yum`, `zypper`, `apk add`
+  and `snap install` do the same with apt, with the name put Ubuntu's way
+  (`python-pip` is `python3-pip`, `base-devel` is `build-essential`), and
+  from Flathub when Ubuntu does not have it. `-Ss`/`search`, `-R`/`remove`
+  and `-Syu`/`upgrade` are translated too.
+- `flatpak install NAME` takes a plain name (`mpv` finds `io.mpv.Mpv`) and
+  an id in the wrong case, sets Flathub up first if it is not, and says so
+  when an app is built only for other processors (Flathub's API lists them)
+  or does not exist, with what Ubuntu or Flathub has instead.
+- In a terminal (`/etc/profile.d/linx-shell.sh`, also sourced from
+  `/etc/bash.bashrc`), a failed `apt install` says what the name is in
+  Ubuntu, and an unknown command says whether Ubuntu has it.
+- `linx-pkg install NAME` and `linx-pkg search WORD` look in both.
+
+Scripts are not affected: the shell functions are for interactive shells
+only.
+
 ### Battery, network and volume in the panel
 Next to the clock, as on a laptop:
 - **Network:** Wi-Fi or mobile data with signal bars, Ethernet, VPN,
