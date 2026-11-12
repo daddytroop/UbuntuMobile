@@ -1247,6 +1247,55 @@ fun UbuntuApp(
         )
     }
 
+    // A Flathub app about to be opened while Android's child process
+    // restrictions are on (see where it is set).
+    var limitWarning by remember { mutableStateOf<com.ubuntumobile.ui.AppEntry?>(null) }
+    limitWarning?.let { entry ->
+        val canFix = com.ubuntumobile.linux.BackgroundLimits.canTurnOffInSettings
+        fun openAnyway() {
+            limitWarning = null
+            launchOnDisplay(entry.command)
+            opening = entry.name
+            screen = Screen.DISPLAY
+        }
+        androidx.compose.material3.AlertDialog(
+            onDismissRequest = { limitWarning = null },
+            title = { Text("Android will close ${entry.name}") },
+            text = {
+                Text(
+                    "Android closes an app's extra programs when there are more than 32, and every Linux program " +
+                        "counts. A Flathub app takes Linux past that, so Android closes it as it starts, and often " +
+                        "the desktop with it.\n\n" +
+                        if (canFix) {
+                            "To stop that: in Developer options, search for \"child\" and turn on " +
+                                "\"Disable child process restrictions\". Then open ${entry.name} again.\n\n" +
+                                "No Developer options? Settings → About phone → Software information → tap Build number 7 times."
+                        } else {
+                            "This Android version has no switch for it. Apps from Ubuntu's archive use fewer " +
+                                "programs than Flathub's and are more likely to stay open."
+                        },
+                )
+            },
+            confirmButton = {
+                if (canFix) {
+                    androidx.compose.material3.TextButton(onClick = {
+                        limitWarning = null
+                        com.ubuntumobile.linux.BackgroundLimits.openDeveloperOptions(context)
+                    }) { Text("Open Developer options") }
+                } else {
+                    androidx.compose.material3.TextButton(onClick = { openAnyway() }) { Text("Open anyway") }
+                }
+            },
+            dismissButton = {
+                if (canFix) {
+                    androidx.compose.material3.TextButton(onClick = { openAnyway() }) { Text("Open anyway") }
+                } else {
+                    androidx.compose.material3.TextButton(onClick = { limitWarning = null }) { Text("Cancel") }
+                }
+            },
+        )
+    }
+
     // A home-screen shortcut: open its app once the desktop is up.
     LaunchedEffect(pendingLaunch, session.connected) {
         val (id, name) = pendingLaunch ?: return@LaunchedEffect
@@ -1547,11 +1596,22 @@ fun UbuntuApp(
                             screen = Screen.STORE
                         }
                         else -> {
-                            // Linux apps open as windows on the desktop, so
-                            // go there to see them.
-                            launchOnDisplay(entry.command)
-                            opening = entry.name
-                            screen = Screen.DISPLAY
+                            // A Flathub app is ten or so more programs, which
+                            // takes Linux past what Android allows an app
+                            // while its child process restrictions are on:
+                            // Android then closes the app, and often the
+                            // desktop with it, as it starts. Said first.
+                            if (entry.category == com.ubuntumobile.ui.AppEntry.Category.FLATPAK &&
+                                com.ubuntumobile.linux.BackgroundLimits.childProcessesLimited(context)
+                            ) {
+                                limitWarning = entry
+                            } else {
+                                // Linux apps open as windows on the desktop, so
+                                // go there to see them.
+                                launchOnDisplay(entry.command)
+                                opening = entry.name
+                                screen = Screen.DISPLAY
+                            }
                         }
                     }
                 },

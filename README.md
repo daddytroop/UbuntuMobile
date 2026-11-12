@@ -488,6 +488,22 @@ and **Share log**. Before, such a tap looked like it did nothing. The
 or two: Flathub apps start through two proots (`linx-bwrap`), and Krita
 takes about a minute on a fast machine.
 
+### Flathub apps and Android's 32-process limit
+Since Android 12 the "phantom process" monitor kills an app's child
+processes when there are more than 32, and every Linux program is one. The
+desktop alone is about 35; a Flathub app adds ten or so (two proots, the
+stand-in bwrap, the D-Bus proxy, Flatpak's portal and session helper).
+With the limit on, opening Telegram from Flathub ended with Android
+killing Telegram, the panel, D-Bus and most of the desktop
+(`PhantomProcessRecord ... died` in logcat): on the phone, an app that
+"acts as if it is opening and never opens". It passed every emulator test
+because the emulator had the limit off.
+
+The cure is Android's own switch, Developer options → **Disable child
+process restrictions** (Android 14 and newer), which Settings' "Keep Linux
+running" has always pointed to. Now tapping a Flathub app while the limit
+is on says so first, with a button to Developer options and "Open anyway".
+
 ### One look for the whole app
 Apps, Software and Settings share setup's look (`Design.kt`): the dark sky
 with the accent glowing through it, edge to edge under transparent system
