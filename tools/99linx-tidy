@@ -1,0 +1,5 @@
+// Mobuntu: after every install, whoever ran it (the store, setup or apt in a
+// terminal), new apps' menu entries get the same clean-up as the image's:
+// plain names, Yaru icons, settings dialogs out of the menu (linx-apps.py).
+// Never fails the install.
+DPkg::Post-Invoke { "[ ! -x /usr/local/lib/linx/linx-apps.py ] || python3 /usr/local/lib/linx/linx-apps.py --tidy >/dev/null 2>&1 9>&- || true"; };

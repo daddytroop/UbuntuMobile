@@ -120,8 +120,10 @@ case "${1:-}" in
       exec 3>>"$LINX_APT_STATUS"
     fi
     if apt-get install -y -q --no-install-recommends "${STATUS_OPT[@]}" "$@" 9>&-; then
-      # New menu entries get the same clean-up as the image's.
-      python3 /usr/local/lib/linx/linx-apps.py --tidy >/dev/null 2>&1 9>&-
+      # New menu entries get the same clean-up as the image's: apt does
+      # it after every install, the terminal's too (apt.conf.d/99linx-tidy).
+      [ -f /etc/apt/apt.conf.d/99linx-tidy ] ||
+        python3 /usr/local/lib/linx/linx-apps.py --tidy >/dev/null 2>&1 9>&-
       echo "APT_DONE"
     else
       echo "APT_FAILED"

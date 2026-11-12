@@ -293,6 +293,22 @@ per command in `/usr/local/bin`, never in front of a real one):
   `/etc/bash.bashrc`), a failed `apt install` says what the name is in
   Ubuntu, and an unknown command says whether Ubuntu has it.
 - `linx-pkg install NAME` and `linx-pkg search WORD` look in both.
+- Some apps need more than a name, however they are asked for (`apt`,
+  `pacman`, `flatpak`, a failed install's hint):
+  - **Steam** on an ARM phone: said to run in DroidDeck, and `steam` opens
+    it, or the page to get it from (`linx-phone steam`).
+  - **Thunderbird** and **Chromium**: Ubuntu's packages are stubs that
+    install a snap, which cannot run here (any candidate version with
+    "snap" in it counts as not in Ubuntu), so they come from Flathub;
+    on ARM, Betterbird stands in for Thunderbird.
+  - **Discord**, **Chrome** and **Spotify** on ARM: built only for PCs;
+    Vesktop and Chromium are offered instead, and Spotify's web player.
+  - Docker, Wine and virtual machines install with a note on what cannot
+    work under Android.
+- A name nothing matches gets Ubuntu's and Flathub's nearest (programs,
+  not libraries), trying one letter less for a typo.
+- Apps installed with plain `apt` get the menu clean-up too
+  (`/etc/apt/apt.conf.d/99linx-tidy` runs `linx-apps.py --tidy` after dpkg).
 
 Scripts are not affected: the shell functions are for interactive shells
 only.

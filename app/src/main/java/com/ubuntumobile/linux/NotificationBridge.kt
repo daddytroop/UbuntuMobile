@@ -82,6 +82,8 @@ object NotificationBridge {
                             message.has("quick") -> com.ubuntumobile.display.PhoneRequests.post("quick")
                             message.has("screenshot") -> com.ubuntumobile.display.PhoneRequests.post("screenshot")
                             message.has("lock") -> com.ubuntumobile.display.PhoneRequests.post("lock")
+                            // Steam on an ARM phone: DroidDeck, or where to get it.
+                            message.has("steam") -> com.ubuntumobile.ui.DroidDeck.open(app)
                             message.has("print") -> com.ubuntumobile.display.PhoneRequests.post("print:" + message.getString("print"))
                             else -> post(app, message)
                         }

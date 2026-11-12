@@ -11,3 +11,4 @@ tools/linx-bwrap text eol=lf
 tools/linx-status text eol=lf
 tools/linx-phone text eol=lf
 tools/linx-pkg text eol=lf
+tools/99linx-tidy text eol=lf

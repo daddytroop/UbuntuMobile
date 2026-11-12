@@ -17,6 +17,12 @@
 #                          up first if it is not; an app that is not
 #                          built for this processor is said to be so
 #   linx-pkg install NAME  the same search, by hand
+#   steam                  Steam runs in DroidDeck on ARM phones: opens it
+#
+# Some apps need more than a name (special_case): Steam and Spotify have
+# no build that runs here; Ubuntu's own thunderbird and chromium packages
+# are stubs that install a snap, which cannot run here, so those come
+# from Flathub; Discord and Thunderbird have ARM stand-ins there.
 #
 # The app installs it as /usr/local/bin/linx-pkg and a two-line shim per
 # name (sudo, pacman, ...; ContainerSetup.SHIMS), never over a real one.
@@ -78,7 +84,65 @@ have_lists() { ls /var/lib/apt/lists/*_Packages* >/dev/null 2>&1; }
 in_ubuntu() {
   local c
   c="$(apt-cache policy "$1" 2>/dev/null | sed -n 's/^ *Candidate: //p')"
-  [ -n "$c" ] && [ "$c" != "(none)" ]
+  # A version like "2:1snap1-0ubuntu5" is a stub that installs a snap.
+  case "$c" in "" | "(none)" | *snap*) return 1 ;; esac
+}
+
+# (LINX_ARCH: for trying another processor's answers.)
+case "${LINX_ARCH:-$(uname -m)}" in
+  aarch64 | arm*) ARM=1 ;;
+  *) ARM=0 ;;
+esac
+
+# special_case NAME: apps that need more than a name. Prints why, and
+# returns 0 with REDIRECT set to a Flathub id to install instead, or to
+# nothing when there is nothing to install; returns 1 for any other name.
+REDIRECT=""
+special_case() {
+  REDIRECT=""
+  case "${1,,}" in
+    steam | steam-installer | steam-launcher | steamcmd | com.valvesoftware.steam | steamlink | steam-link | com.valvesoftware.steamlink)
+      [ "$ARM" = 1 ] || return 1
+      warn "Steam cannot run inside Mobuntu on this phone: it needs Valve's ARM build, a translator for PC code and the phone's graphics chip."
+      warn "It runs in DroidDeck, a separate free app that has all three. Type:  steam"
+      warn "(opens DroidDeck, or the page to get it from). It is also under All apps in Mobuntu." ;;
+    spotify | spotify-client | spotify-launcher | com.spotify.client)
+      [ "$ARM" = 1 ] || return 1
+      warn "Spotify makes its Linux app only for PCs. On this phone: open.spotify.com in Firefox, or the phone's own Spotify app." ;;
+    thunderbird | org.mozilla.thunderbird)
+      if [ "$ARM" = 1 ]; then
+        say "Thunderbird is built only for PCs on Flathub (and Ubuntu's package is a snap, which cannot run here). Betterbird is Thunderbird, built for ARM too."
+        REDIRECT=eu.betterbird.Betterbird
+      else
+        say "Ubuntu's thunderbird package is a snap, which cannot run here: taking Thunderbird from Flathub."
+        REDIRECT=org.mozilla.Thunderbird
+      fi ;;
+    chromium | chromium-browser)
+      say "Ubuntu's chromium package is a snap, which cannot run here: taking Chromium from Flathub."
+      REDIRECT=org.chromium.Chromium ;;
+    google-chrome | google-chrome-stable | chrome | com.google.chrome)
+      [ "$ARM" = 1 ] || return 1
+      say "Google makes Chrome for Linux only for PCs. Chromium is the same browser without Google's additions."
+      REDIRECT=org.chromium.Chromium ;;
+    discord | com.discordapp.discord)
+      [ "$ARM" = 1 ] || return 1
+      say "Discord makes its Linux app only for PCs. Vesktop is a Discord app built for ARM too."
+      REDIRECT=dev.vencord.Vesktop ;;
+    *) return 1 ;;
+  esac
+  return 0
+}
+
+# Things that install but cannot do their job here: said, not stopped.
+note_about() {
+  case "${1,,}" in
+    docker | docker.io | docker-ce | docker-desktop | podman | lxc | lxd)
+      warn "Note: containers need parts of the kernel that Android keeps from apps, so $1 can be installed but cannot run containers here." ;;
+    wine | wine-stable | winehq-stable | lutris | bottles | heroic)
+      [ "$ARM" = 1 ] && warn "Note: Windows programs are built for PC processors; most will not run on this phone." ;;
+    virtualbox | qemu-kvm | virt-manager | gnome-boxes)
+      warn "Note: virtual machines need hardware access Android does not give apps; expect them to be very slow or not to start." ;;
+  esac
 }
 flathub_ready() { "$FLATPAK" remotes 2>/dev/null | grep -q '^flathub'; }
 on_flathub() { ! "$FLATPAK" remote-info flathub "$1" 2>&1 >/dev/null | grep -qiE "nothing matches|can.t find ref"; }
@@ -101,21 +165,36 @@ find_flathub() {
     }' | sort -s -k1,1 | cut -f2- | head -n 5
 }
 
+# near_ubuntu WORD: Ubuntu's packages with WORD in the name, programs
+# first (not libraries or their development files).
+near_ubuntu() {
+  apt-cache search --names-only "$1" 2>/dev/null |
+    awk -v w="${1,,}" 'index($1, w) && $1 !~ /^lib|-dev$|-doc$|-dbg$|-data$|-common$/' | head -n 4
+}
+
 suggest() {
-  local name="$1" found
-  found="$(apt-cache search --names-only "$name" 2>/dev/null | head -n 5)"
-  if [ -n "$found" ]; then
+  local name="$1" debs flats="" word
+  debs="$(near_ubuntu "$name")"
+  flathub_ready && flats="$(find_flathub "$name")"
+  # Nothing at all: perhaps a letter too many (gimpp), so one less.
+  if [ -z "$debs$flats" ] && [ "${#name}" -gt 4 ]; then
+    word="${name%?}"
+    debs="$(near_ubuntu "$word")"
+    flathub_ready && flats="$(find_flathub "$word")"
+  fi
+  if [ -n "$debs" ]; then
     warn "Ubuntu has these with a similar name (apt install NAME):"
-    printf '%s\n' "$found" | sed 's/^/     /' >&2
+    printf '%s\n' "$debs" | sed 's/^/     /' >&2
   fi
-  if flathub_ready; then
-    found="$(find_flathub "$name")"
-    if [ -n "$found" ]; then
-      warn "Flathub has these (flatpak install ID):"
-      printf '%s\n' "$found" | sed 's/\t/   /; s/^/     /' >&2
-    fi
+  if [ -n "$flats" ]; then
+    warn "Flathub has these (flatpak install ID):"
+    printf '%s\n' "$flats" | sed 's/\t/   /; s/^/     /' >&2
   fi
-  warn "The Software store in Mobuntu searches both."
+  if [ -z "$debs$flats" ]; then
+    warn "Nothing with a similar name either. Check the spelling, or search: linx-pkg search WORD"
+  else
+    warn "The Software store in Mobuntu searches both."
+  fi
 }
 
 # ---------------------------------------------------------------- flatpak
@@ -145,6 +224,11 @@ install_flatpaks() {
       *.*.*) ;;
       *)
         # A plain name: Flathub's search finds the id.
+        if special_case "$a"; then
+          if [ -z "$REDIRECT" ]; then rc=1; continue; fi
+          ids+=("$REDIRECT")
+          continue
+        fi
         match="$(find_flathub "$a" | head -n 1)"
         id="$(flathub_id "$a" 2>/dev/null || printf '%s' "${match%%$'\t'*}")"
         if [ -z "$id" ]; then
@@ -156,6 +240,10 @@ install_flatpaks() {
         say "$a is $id on Flathub"
         ;;
     esac
+    if special_case "$id"; then
+      if [ -z "$REDIRECT" ]; then rc=1; continue; fi
+      id="$REDIRECT"
+    fi
     if ! on_flathub "$id"; then
       # Ids are case-sensitive: org.videolan.vlc is org.videolan.VLC.
       match="$(find_flathub "${id##*.}" | awk -F'\t' -v w="${id,,}" 'tolower($1) == w { print $1; exit }')"
@@ -196,11 +284,12 @@ install_names() {
         say "Firefox comes from Mozilla here"
         /usr/local/lib/linx/install-firefox.sh || rc=1
         continue ;;
-      steam)
-        warn "Steam needs a PC's processor and graphics. For games: RetroArch, or Moonlight to play from your PC."
-        rc=1
-        continue ;;
     esac
+    if special_case "$name"; then
+      if [ -n "$REDIRECT" ]; then flats+=("$REDIRECT"); else rc=1; fi
+      continue
+    fi
+    note_about "$name"
     deb="$(ubuntu_name "$name")"
     if in_ubuntu "$deb"; then
       [ "$deb" = "${name,,}" ] || say "$name is $deb in Ubuntu"
@@ -265,7 +354,14 @@ pacman_like() {
   case "$op" in
     *S*s*) search_names "${names[@]}" ;;
     *S*)
-      if [ "${#names[@]}" -gt 0 ]; then install_names "${names[@]}"; else upgrade_all; fi ;;
+      if [ "${#names[@]}" -gt 0 ]; then
+        install_names "${names[@]}"
+      elif [[ "$op" == *u* ]]; then
+        upgrade_all
+      else
+        say "apt update"
+        apt-get update -q
+      fi ;;
     *R*) remove_names "${names[@]}" ;;
     *Q*s*) dpkg -l | grep -i -- "${names[0]:-}" ;;
     *Q*) dpkg-query -W -f='${Package} ${Version}\n' "${names[@]}" ;;
@@ -350,6 +446,10 @@ hint() {
   for a in "$@"; do
     case "$a" in -*) continue ;; esac
     in_ubuntu "$a" && continue
+    if special_case "$a"; then
+      [ -n "$REDIRECT" ] && warn "Install it with: flatpak install $REDIRECT"
+      continue
+    fi
     deb="$(ubuntu_name "$a")"
     if [ "$deb" != "$a" ] && in_ubuntu "$deb"; then
       warn "\"$a\" is \"$deb\" in Ubuntu: apt install $deb"
@@ -378,8 +478,22 @@ missing() {
   esac
 }
 
+# steam: DroidDeck on ARM; Flathub's Steam elsewhere.
+steam_like() {
+  if [ "$ARM" = 1 ]; then
+    say "Steam runs in DroidDeck on this phone. Opening it (or the page to get it from)..."
+    /usr/local/bin/linx-phone steam
+  elif "$FLATPAK" info com.valvesoftware.Steam >/dev/null 2>&1; then
+    exec "$FLATPAK" run com.valvesoftware.Steam "$@"
+  else
+    warn "Steam is not installed. Install it with: flatpak install com.valvesoftware.Steam"
+    return 1
+  fi
+}
+
 [ -n "$ME" ] || { ME="${1:-}"; shift || true; }
 case "$ME" in
+  steam) steam_like "$@" ;;
   sudo | doas) sudo_like "$@" ;;
   pacman | yay | paru | pamac | pikaur | trizen) pacman_like "$ME" "$@" ;;
   dnf | yum | microdnf) verb_like "$ME" Fedora "$@" ;;
@@ -407,7 +521,7 @@ case "$ME" in
 linx-pkg: install lines from the web, made to work in Mobuntu.
   linx-pkg install NAME...   from Ubuntu's archive, or Flathub if it is not there
   linx-pkg search WORD       in both
-Also answers to: sudo, pacman, yay, paru, dnf, yum, zypper, apk, snap.
+Also answers to: sudo, pacman, yay, paru, dnf, yum, zypper, apk, snap, steam.
 EOF
     exit 2 ;;
 esac

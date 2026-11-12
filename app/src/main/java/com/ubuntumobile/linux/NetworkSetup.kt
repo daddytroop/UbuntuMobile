@@ -145,6 +145,7 @@ object ContainerSetup {
         "linx-print.sh" to "usr/local/lib/linx/linx-print.sh",
         "linx-pkg" to "usr/local/bin/linx-pkg",
         "linx-shell.sh" to "etc/profile.d/linx-shell.sh",
+        "99linx-tidy" to "etc/apt/apt.conf.d/99linx-tidy",
         "make-xfwm4-theme.py" to "usr/local/lib/linx/make-xfwm4-theme.py",
         "gamepad-helper.py" to "usr/local/lib/linx/gamepad-helper.py",
         "tint2rc" to "usr/local/share/linx/tint2rc",
@@ -189,7 +190,7 @@ object ContainerSetup {
      * distributions' package managers. Each is a two-line script handing
      * over to linx-pkg, and never stands in front of a real one.
      */
-    internal val SHIMS = listOf("sudo", "pacman", "yay", "paru", "dnf", "yum", "zypper", "apk", "snap")
+    internal val SHIMS = listOf("sudo", "pacman", "yay", "paru", "dnf", "yum", "zypper", "apk", "snap", "steam")
 
     private fun installShims(paths: LinuxPaths) {
         val bin = File(paths.root, "usr/local/bin")
