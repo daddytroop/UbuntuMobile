@@ -97,7 +97,7 @@ if [ "$LINX_FLATHUB" = 1 ]; then
       for app in $LINX_FLATPAKS; do
         # Not built for this phone's processor (Thunderbird and OBS are
         # PC-only on Flathub): skipped and said so, not a failed setup.
-        if flatpak remote-info flathub "$app" 2>&1 >/dev/null | grep -qi "nothing matches"; then
+        if flatpak remote-info flathub "$app" 2>&1 >/dev/null | grep -qiE "nothing matches|can.t find ref"; then
           echo "$app" >>/tmp/linx-setup-skipped
           echo "skipped $app: not on Flathub for $(uname -m)" >>/tmp/linx-setup-flatpaks.log
           continue

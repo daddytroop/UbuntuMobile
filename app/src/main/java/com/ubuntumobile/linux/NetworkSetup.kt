@@ -143,6 +143,8 @@ object ContainerSetup {
         "linx-clip.py" to "usr/local/lib/linx/linx-clip.py",
         "linx-status" to "usr/local/bin/linx-status",
         "linx-print.sh" to "usr/local/lib/linx/linx-print.sh",
+        "linx-pkg" to "usr/local/bin/linx-pkg",
+        "linx-shell.sh" to "etc/profile.d/linx-shell.sh",
         "make-xfwm4-theme.py" to "usr/local/lib/linx/make-xfwm4-theme.py",
         "gamepad-helper.py" to "usr/local/lib/linx/gamepad-helper.py",
         "tint2rc" to "usr/local/share/linx/tint2rc",
@@ -176,6 +178,55 @@ object ContainerSetup {
             } catch (e: Exception) {
                 Log.w(TAG, "could not update $target", e)
             }
+        }
+        installShims(paths)
+        hookShells(paths)
+    }
+
+    /**
+     * Commands that install lines from the web expect and Ubuntu under
+     * proot does not have: sudo (there is only root), and other
+     * distributions' package managers. Each is a two-line script handing
+     * over to linx-pkg, and never stands in front of a real one.
+     */
+    internal val SHIMS = listOf("sudo", "pacman", "yay", "paru", "dnf", "yum", "zypper", "apk", "snap")
+
+    private fun installShims(paths: LinuxPaths) {
+        val bin = File(paths.root, "usr/local/bin")
+        for (name in SHIMS) {
+            try {
+                val shim = File(bin, name)
+                val real = listOf("usr/bin", "usr/sbin", "bin", "sbin").any { File(paths.root, "$it/$name").exists() }
+                val text = "#!/bin/sh\n# Mobuntu: see linx-pkg.\nLINX_AS=$name exec /usr/local/bin/linx-pkg \"\$@\"\n"
+                val ours = shim.isFile && shim.length() < 200 && shim.readText().contains("linx-pkg")
+                when {
+                    // The real one was installed: ours steps aside.
+                    real -> if (ours) shim.delete()
+                    shim.exists() && !ours -> {}
+                    !ours || shim.readText() != text -> {
+                        shim.writeText(text)
+                        android.system.Os.chmod(shim.absolutePath, 0x1ED)
+                    }
+                }
+            } catch (e: Exception) {
+                Log.w(TAG, "could not set up $name", e)
+            }
+        }
+    }
+
+    /**
+     * Terminals inside the desktop start bash without a login, which reads
+     * /etc/bash.bashrc and not /etc/profile.d: one line there brings in
+     * linx-shell.sh for them too.
+     */
+    private fun hookShells(paths: LinuxPaths) {
+        try {
+            val rc = File(paths.root, "etc/bash.bashrc")
+            val line = "[ -r /etc/profile.d/linx-shell.sh ] && . /etc/profile.d/linx-shell.sh"
+            val now = if (rc.isFile) rc.readText() else ""
+            if (!now.contains(line)) rc.writeText(now.trimEnd('\n') + "\n\n# Mobuntu: help with install lines.\n" + line + "\n")
+        } catch (e: Exception) {
+            Log.w(TAG, "could not hook the shells", e)
         }
     }
 
