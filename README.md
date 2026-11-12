@@ -477,6 +477,17 @@ comes up and posts a notification when updates are waiting; tapping it opens
 the tab. Flatpak prints its progress only to a terminal, so installs and
 updates run under `script`.
 
+### An app that does not open says why
+An app started from the Apps screen (or a home-screen shortcut) runs under
+`linx-apps.py --run`, which keeps its output in `/tmp/linx-run/ID.log` and
+waits for it. If it stops with an error before any window has appeared, the
+log's last telling line goes to the desktop as a notification and to the
+app (`/tmp/linx-run-failed`), which shows "X did not start", the reason,
+and **Share log**. Before, such a tap looked like it did nothing. The
+"Opening..." pill adds, after 12 seconds, that big apps can take a minute
+or two: Flathub apps start through two proots (`linx-bwrap`), and Krita
+takes about a minute on a fast machine.
+
 ### One look for the whole app
 Apps, Software and Settings share setup's look (`Design.kt`): the dark sky
 with the accent glowing through it, edge to edge under transparent system

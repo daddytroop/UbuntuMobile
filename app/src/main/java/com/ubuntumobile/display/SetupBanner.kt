@@ -25,6 +25,7 @@ import androidx.compose.material3.Icon
 import androidx.compose.material3.LinearProgressIndicator
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.getValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
@@ -194,7 +195,25 @@ fun OpeningPill(name: String?, modifier: Modifier = Modifier) {
                 strokeWidth = 2.dp,
             )
             Spacer(Modifier.width(10.dp))
-            Text("Opening ${name.orEmpty()}…", color = Color.White, fontSize = 13.sp)
+            // After a while, say that waiting is normal: a big app, or a
+            // Flathub one, can take a minute or two to show its window.
+            val slow by androidx.compose.runtime.produceState(false, name) {
+                value = false
+                if (name != null) {
+                    kotlinx.coroutines.delay(12_000)
+                    value = true
+                }
+            }
+            androidx.compose.foundation.layout.Column {
+                Text("Opening ${name.orEmpty()}…", color = Color.White, fontSize = 13.sp)
+                if (slow) {
+                    Text(
+                        "Still starting. Big apps can take a minute or two.",
+                        color = Color.White.copy(alpha = 0.65f),
+                        fontSize = 11.5.sp,
+                    )
+                }
+            }
         }
     }
 }

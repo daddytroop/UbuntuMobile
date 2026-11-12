@@ -1166,15 +1166,60 @@ fun UbuntuApp(
     // without it the tap looked like it did nothing. linx-windows.py
     // touches /tmp/linx-new-window when one does.
     var opening by remember { mutableStateOf<String?>(null) }
+    // An app that stopped before showing a window: its name, why (the last
+    // telling line of its output) and its log (linx-apps.py's supervise).
+    var launchFailure by remember { mutableStateOf<Triple<String, String, java.io.File>?>(null) }
     LaunchedEffect(opening) {
         if (opening == null) return@LaunchedEffect
         val since = System.currentTimeMillis()
         val marker = java.io.File(vm.paths.sharedTmpDir, "linx-new-window")
+        val failed = java.io.File(vm.paths.sharedTmpDir, "linx-run-failed")
         while (System.currentTimeMillis() - since < 240_000) {
             delay(700)
+            // The failure first: its notification on the desktop is a new
+            // window too.
+            val failure = withContext(Dispatchers.IO) {
+                if (failed.lastModified() <= since) return@withContext null
+                try {
+                    val lines = failed.readLines()
+                    Triple(
+                        lines.getOrElse(0) { opening ?: "The app" },
+                        lines.getOrElse(1) { "" },
+                        // The log's path is Linux's: /tmp there is the shared tmp here.
+                        java.io.File(vm.paths.sharedTmpDir, lines.getOrElse(2) { "" }.removePrefix("/tmp/")),
+                    )
+                } catch (_: Exception) {
+                    null
+                }
+            }
+            if (failure != null) {
+                launchFailure = failure
+                break
+            }
             if (withContext(Dispatchers.IO) { marker.lastModified() } > since) break
         }
         opening = null
+    }
+    launchFailure?.let { (name, reason, log) ->
+        androidx.compose.material3.AlertDialog(
+            onDismissRequest = { launchFailure = null },
+            title = { Text("$name did not start") },
+            text = {
+                Text(
+                    reason.ifBlank { "It stopped before opening a window." } +
+                        "\n\nSharing the log shows what it printed while starting.",
+                )
+            },
+            confirmButton = {
+                androidx.compose.material3.TextButton(onClick = {
+                    shareRunLog(context, name, reason, log)
+                    launchFailure = null
+                }) { Text("Share log") }
+            },
+            dismissButton = {
+                androidx.compose.material3.TextButton(onClick = { launchFailure = null }) { Text("Close") }
+            },
+        )
     }
 
     fun launchOnDisplay(command: List<String>) {
@@ -2057,6 +2102,27 @@ private fun GamepadEditor(
             }
         }
     }
+}
+
+/** Send what an app printed while failing to start to another app, as text. */
+private fun shareRunLog(context: android.content.Context, name: String, reason: String, log: java.io.File) {
+    val text = buildString {
+        append("Mobuntu ${BuildConfig.VERSION_NAME}, Android ${android.os.Build.VERSION.RELEASE}, ")
+        append("${android.os.Build.MANUFACTURER} ${android.os.Build.MODEL}, ${android.os.Build.SUPPORTED_ABIS.firstOrNull()}\n")
+        append("$name did not start: $reason\n\n")
+        append(
+            try {
+                log.readLines().takeLast(200).joinToString("\n")
+            } catch (_: Exception) {
+                "(no log)"
+            },
+        )
+    }
+    val send = android.content.Intent(android.content.Intent.ACTION_SEND)
+        .setType("text/plain")
+        .putExtra(android.content.Intent.EXTRA_SUBJECT, "Mobuntu: $name did not start")
+        .putExtra(android.content.Intent.EXTRA_TEXT, text.takeLast(90_000))
+    context.startActivity(android.content.Intent.createChooser(send, "Share the log"))
 }
 
 /**
