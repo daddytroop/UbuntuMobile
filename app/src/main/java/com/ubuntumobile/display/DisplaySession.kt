@@ -131,6 +131,8 @@ class DisplaySession(
             pointerX = c.width / 2
             pointerY = c.height / 2
             bitmap = Bitmap.createBitmap(c.width, c.height, Bitmap.Config.ARGB_8888)
+            // Nothing drawn in it yet: the screen waits for the first frame.
+            frames = 0
             error = null
 
             c.onUpdate = { rects ->

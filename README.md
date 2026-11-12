@@ -477,6 +477,29 @@ comes up and posts a notification when updates are waiting; tapping it opens
 the tab. Flatpak prints its progress only to a terminal, so installs and
 updates run under `script`.
 
+### One look for the whole app
+Apps, Software and Settings share setup's look (`Design.kt`): the dark sky
+with the accent glowing through it, edge to edge under transparent system
+bars, and on it translucent cards, rows that lead with an icon on a tinted
+tile, segmented choices, chips, one search field and one kind of button.
+`MobuntuScreen` is the frame every screen uses: the backdrop, a round back
+button, a large title, and the page fading in.
+
+- The backdrop is `AuroraBackground(animated = false)`: one still frame,
+  drawn once, so scrolling over it costs nothing. Only setup and "Starting
+  the desktop" animate it.
+- **Apps**: an even grid (every tile fills its cell, one icon size, names
+  on up to two lines). The phone's apps are read off the main thread and
+  kept for the next time the screen opens.
+- **Settings**: what stops Linux from running well comes first, and only
+  while there is something to do; then Appearance, With your phone, Linux
+  and About, each a card of rows.
+- **Software**: the same frame; an app's page drops the search field and
+  tabs to give the app the room.
+- The desktop's side menu is glass with the accent on its icons, and
+  "Starting the desktop" stays up until the first picture has arrived
+  (`DisplaySession.frames`), instead of a black screen.
+
 ### The app in your colours
 The accent colour chosen at setup colours the app as well as Linux: the
 floating button, menus, Settings, the store and the system bars

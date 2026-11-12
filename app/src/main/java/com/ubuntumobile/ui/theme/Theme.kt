@@ -139,11 +139,13 @@ fun UbuntuTheme(
             // bars, so their icons are always drawn light.
             WindowCompat.getInsetsController(window, view).isAppearanceLightStatusBars = false
             WindowCompat.getInsetsController(window, view).isAppearanceLightNavigationBars = false
-            // The bars take the app's colour, which follows the accent.
+            // The bars are see-through: each screen draws its own backdrop
+            // under them, edge to edge.
             @Suppress("DEPRECATION")
-            window.statusBarColor = UbuntuPalette.Aubergine.toArgb()
+            window.statusBarColor = android.graphics.Color.TRANSPARENT
             @Suppress("DEPRECATION")
-            window.navigationBarColor = UbuntuPalette.AubergineDeep.toArgb()
+            window.navigationBarColor = android.graphics.Color.TRANSPARENT
+            if (android.os.Build.VERSION.SDK_INT >= 29) window.isNavigationBarContrastEnforced = false
         }
     }
 

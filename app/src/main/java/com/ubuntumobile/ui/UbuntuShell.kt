@@ -2,6 +2,7 @@ package com.ubuntumobile.ui
 
 import androidx.compose.foundation.Image
 import androidx.compose.foundation.background
+import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.combinedClickable
 import androidx.compose.foundation.layout.Arrangement
@@ -119,7 +120,9 @@ fun UbuntuShell(
         lifecycle.addObserver(observer)
         onDispose { lifecycle.removeObserver(observer) }
     }
-    val phoneApps = remember(phoneAppsRead) { PhoneApps.list(context) }
+    val phoneApps by produceState(PhoneApps.last, phoneAppsRead) {
+        value = withContext(Dispatchers.Default) { PhoneApps.list(context) }.also { PhoneApps.last = it }
+    }
     val phoneMatches = remember(query, phoneApps) {
         if (query.isBlank()) emptyList() else phoneApps.filter { it.label.contains(query.trim(), ignoreCase = true) }.take(8)
     }
@@ -155,63 +158,37 @@ fun UbuntuShell(
     val flatpaks = filtered.filter { it.category == AppEntry.Category.FLATPAK }
     val system = filtered.filter { it.category == AppEntry.Category.SYSTEM }
 
-    Column(
-        modifier = modifier
-            .fillMaxSize()
-            .background(
-                Brush.verticalGradient(
-                    listOf(UbuntuPalette.Aubergine, UbuntuPalette.AubergineDark, UbuntuPalette.AubergineDeep),
-                ),
-            ),
+    MobuntuScreen(
+        title = if (homeMode) "Mobuntu" else "Apps",
+        onBack = onBack,
+        modifier = modifier,
+        backIcon = if (homeMode) Icons.Default.DesktopWindows else Icons.AutoMirrored.Filled.ArrowBack,
+        backLabel = if (homeMode) "Open the Linux desktop" else "Back to the desktop",
+        trailing = {
+            Text(rememberClock(), color = Ui.inkSoft, fontSize = 15.sp, fontWeight = FontWeight.Medium)
+        },
     ) {
-        Row(
-            modifier = Modifier
-                .fillMaxWidth()
-                .height(56.dp)
-                .padding(horizontal = 4.dp),
-            verticalAlignment = Alignment.CenterVertically,
-        ) {
-            IconButton(onClick = onBack) {
-                if (homeMode) {
-                    Icon(Icons.Default.DesktopWindows, contentDescription = "Open the Linux desktop", tint = Color.White)
-                } else {
-                    Icon(Icons.AutoMirrored.Filled.ArrowBack, contentDescription = "Back to the desktop", tint = Color.White)
-                }
-            }
-            Text(
-                "Applications",
-                color = Color.White,
-                fontSize = 20.sp,
-                fontWeight = FontWeight.Medium,
-                modifier = Modifier.weight(1f),
-            )
-            Text(
-                rememberClock(),
-                color = Color.White.copy(alpha = 0.85f),
-                fontSize = 15.sp,
-                fontWeight = FontWeight.Medium,
-                modifier = Modifier.padding(end = 16.dp),
-            )
-        }
-
-        SearchField(
+        SearchBar(
             query = query,
             onQueryChange = { query = it },
+            hint = "Search apps, files and Flathub",
             modifier = Modifier
-                .widthIn(max = 720.dp)
+                .widthIn(max = Ui.maxWidth)
                 .fillMaxWidth()
-                .padding(horizontal = 16.dp, vertical = 4.dp)
+                .padding(horizontal = Ui.gutter)
+                .padding(top = 2.dp, bottom = 6.dp)
                 .align(Alignment.CenterHorizontally),
         )
 
         LazyVerticalGrid(
-            columns = GridCells.Adaptive(minSize = if (wide) 112.dp else 96.dp),
+            columns = GridCells.Adaptive(minSize = if (wide) 108.dp else 84.dp),
             modifier = Modifier
                 .weight(1f)
                 .widthIn(max = 900.dp)
-                .align(Alignment.CenterHorizontally),
-            contentPadding = PaddingValues(start = 12.dp, end = 12.dp, top = 16.dp, bottom = 24.dp),
-            verticalArrangement = Arrangement.spacedBy(8.dp),
+                .align(Alignment.CenterHorizontally)
+                .topFade(),
+            contentPadding = PaddingValues(start = 10.dp, end = 10.dp, top = 10.dp, bottom = 28.dp),
+            verticalArrangement = Arrangement.spacedBy(4.dp),
         ) {
             if (homeMode && query.isBlank()) {
                 item(span = { GridItemSpan(maxLineSpan) }) { SectionLabel("Phone apps") }
@@ -296,6 +273,9 @@ fun UbuntuShell(
 data class PhoneApp(val pkg: String, val label: String, val icon: androidx.compose.ui.graphics.ImageBitmap?)
 
 object PhoneApps {
+    /** The list as last read, shown at once while it is read again. */
+    @Volatile var last: List<PhoneApp> = emptyList()
+
     fun list(context: android.content.Context): List<PhoneApp> = try {
         val pm = context.packageManager
         pm.queryIntentActivities(
@@ -345,19 +325,20 @@ private fun PhoneAppTile(app: PhoneApp, onClick: () -> Unit) {
     val context = androidx.compose.ui.platform.LocalContext.current
     Column(
         Modifier
-            .clip(RoundedCornerShape(16.dp))
+            .fillMaxWidth()
+            .clip(RoundedCornerShape(18.dp))
             // Long-press: the app's own page in Android's settings (to uninstall it, for one).
             .combinedClickable(onClick = onClick, onLongClick = { PhoneApps.info(context, app.pkg) })
-            .padding(vertical = 10.dp, horizontal = 4.dp),
+            .padding(vertical = 10.dp, horizontal = 2.dp),
         horizontalAlignment = Alignment.CenterHorizontally,
     ) {
         if (app.icon != null) {
-            androidx.compose.foundation.Image(app.icon, contentDescription = null, modifier = Modifier.size(56.dp))
+            androidx.compose.foundation.Image(app.icon, contentDescription = null, modifier = Modifier.size(TILE_ICON))
         } else {
-            Box(Modifier.size(56.dp))
+            Box(Modifier.size(TILE_ICON))
         }
-        Spacer(Modifier.height(8.dp))
-        Text(app.label, color = Color.White, fontSize = 13.sp, maxLines = 1, overflow = TextOverflow.Ellipsis)
+        Spacer(Modifier.height(7.dp))
+        TileLabel(app.label)
     }
 }
 
@@ -366,13 +347,15 @@ private fun ResultRow(title: String, subtitle: String, icon: androidx.compose.ui
     Row(
         Modifier
             .fillMaxWidth()
-            .clip(RoundedCornerShape(12.dp))
+            .padding(horizontal = 6.dp, vertical = 3.dp)
+            .clip(RoundedCornerShape(16.dp))
+            .background(Ui.card)
             .clickable(onClick = onClick)
-            .padding(horizontal = 8.dp, vertical = 10.dp),
+            .padding(horizontal = 12.dp, vertical = 10.dp),
         verticalAlignment = Alignment.CenterVertically,
     ) {
-        Icon(icon, contentDescription = null, tint = Color.White.copy(alpha = 0.85f), modifier = Modifier.size(26.dp))
-        Spacer(Modifier.width(14.dp))
+        IconBadge(icon, size = 34.dp)
+        Spacer(Modifier.width(12.dp))
         Column(Modifier.weight(1f)) {
             Text(title, color = Color.White, fontSize = 15.sp, maxLines = 1, overflow = TextOverflow.Ellipsis)
             if (subtitle.isNotBlank()) {
@@ -385,11 +368,32 @@ private fun ResultRow(title: String, subtitle: String, icon: androidx.compose.ui
 @Composable
 private fun SectionLabel(text: String) {
     Text(
+        text.uppercase(),
+        color = Ui.inkFaint,
+        fontSize = 12.sp,
+        fontWeight = FontWeight.SemiBold,
+        letterSpacing = 1.2.sp,
+        modifier = Modifier.padding(start = 10.dp, top = 18.dp, bottom = 6.dp),
+    )
+}
+
+/** Every tile's icon is this size, so the grid's rows and columns line up. */
+private val TILE_ICON = 54.dp
+
+/** A tile's name: up to two lines, centred, the same height either way. */
+@Composable
+private fun TileLabel(text: String) {
+    Text(
         text,
-        color = Color.White.copy(alpha = 0.7f),
-        fontSize = 13.sp,
+        color = Ui.ink,
+        fontSize = 12.5.sp,
+        lineHeight = 15.sp,
         fontWeight = FontWeight.Medium,
-        modifier = Modifier.padding(start = 8.dp, top = 16.dp, bottom = 4.dp),
+        minLines = 2,
+        maxLines = 2,
+        overflow = TextOverflow.Ellipsis,
+        textAlign = TextAlign.Center,
+        modifier = Modifier.fillMaxWidth().padding(horizontal = 2.dp),
     )
 }
 
@@ -518,22 +522,23 @@ fun AppTile(
     }
     Column(
         modifier = Modifier
-            .clip(RoundedCornerShape(16.dp))
+            .fillMaxWidth()
+            .clip(RoundedCornerShape(18.dp))
             .combinedClickable(
                 onClick = onClick,
                 onLongClick = if (onPin != null) ({ menu = true }) else null,
             )
-            .padding(vertical = 10.dp, horizontal = 4.dp),
+            .padding(vertical = 10.dp, horizontal = 2.dp),
         horizontalAlignment = Alignment.CenterHorizontally,
     ) {
         if (picture != null) {
             // The app's own icon, as the desktop's menu shows it.
-            Image(picture, contentDescription = null, modifier = Modifier.size(60.dp).padding(2.dp))
+            Image(picture, contentDescription = null, modifier = Modifier.size(TILE_ICON))
         } else {
             Box(
                 modifier = Modifier
-                    .size(60.dp)
-                    .clip(RoundedCornerShape(18.dp))
+                    .size(TILE_ICON)
+                    .clip(RoundedCornerShape(16.dp))
                     .background(
                         Brush.linearGradient(
                             listOf(Color(app.accent), Color(app.accent).copy(alpha = 0.78f)),
@@ -541,19 +546,11 @@ fun AppTile(
                     ),
                 contentAlignment = Alignment.Center,
             ) {
-                Icon(iconFor(app), contentDescription = null, tint = Color.White, modifier = Modifier.size(30.dp))
+                Icon(iconFor(app), contentDescription = null, tint = Color.White, modifier = Modifier.size(28.dp))
             }
         }
-        Spacer(Modifier.height(8.dp))
-        Text(
-            text = app.name,
-            color = Color.White,
-            fontSize = 13.sp,
-            fontWeight = FontWeight.Medium,
-            maxLines = 1,
-            overflow = TextOverflow.Ellipsis,
-            textAlign = TextAlign.Center,
-        )
+        Spacer(Modifier.height(7.dp))
+        TileLabel(app.name)
     }
     }
 }
@@ -565,8 +562,9 @@ private fun SystemCard(state: UbuntuState, onRefresh: () -> Unit, modifier: Modi
     Column(
         modifier = modifier
             .fillMaxWidth()
-            .clip(RoundedCornerShape(20.dp))
-            .background(Color.Black.copy(alpha = 0.22f))
+            .clip(Ui.cardShape)
+            .background(Ui.card)
+            .border(1.dp, Ui.edge, Ui.cardShape)
             .padding(18.dp),
     ) {
         Row(verticalAlignment = Alignment.CenterVertically) {

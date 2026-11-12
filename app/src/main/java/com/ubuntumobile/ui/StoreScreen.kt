@@ -401,87 +401,43 @@ fun StoreScreen(
         }
     }
 
-    Column(
-        modifier = modifier
-            .fillMaxSize()
-            .background(UbuntuPalette.LightBackground),
+    MobuntuScreen(
+        title = "Software",
+        subtitle = if (details != null) "From Flathub" else when (source) {
+            StoreSource.FLATHUB -> "Linux apps from Flathub"
+            StoreSource.UBUNTU -> "Desktop apps from Ubuntu"
+            StoreSource.UPDATES -> "Ubuntu and Flathub, kept up to date"
+        },
+        onBack = {
+            when {
+                details != null -> details = null
+                collection != null -> collection = null
+                else -> onClose()
+            }
+        },
+        modifier = modifier,
     ) {
-        Column(
-            Modifier
+        if (source != StoreSource.UPDATES && details == null) SearchBar(
+            query = query,
+            onQueryChange = { query = it },
+            hint = if (source == StoreSource.FLATHUB) "Search Flathub" else "Search Ubuntu packages",
+            modifier = Modifier
+                .widthIn(max = Ui.maxWidth)
                 .fillMaxWidth()
-                .background(UbuntuPalette.Aubergine)
-                .padding(bottom = 16.dp),
-        ) {
-            Row(
-                modifier = Modifier
-                    .fillMaxWidth()
-                    .height(56.dp)
-                    .padding(horizontal = 4.dp),
-                verticalAlignment = Alignment.CenterVertically,
-            ) {
-                IconButton(onClick = {
-                    when {
-                        details != null -> details = null
-                        collection != null -> collection = null
-                        else -> onClose()
-                    }
-                }) {
-                    Icon(Icons.AutoMirrored.Filled.ArrowBack, contentDescription = "Back", tint = Color.White)
-                }
-                Column(Modifier.weight(1f)) {
-                    Text("Software", color = Color.White, fontSize = 20.sp, fontWeight = FontWeight.Medium)
-                    Text(
-                        when (source) {
-                            StoreSource.FLATHUB -> "Linux apps from Flathub"
-                            StoreSource.UBUNTU -> "Desktop apps from Ubuntu"
-                            StoreSource.UPDATES -> "Ubuntu and Flathub, kept up to date"
-                        },
-                        color = Color.White.copy(alpha = 0.7f),
-                        fontSize = 12.sp,
-                    )
-                }
-            }
-            if (source != StoreSource.UPDATES) StoreSearchField(
-                query = query,
-                onQueryChange = { query = it },
-                placeholder = if (source == StoreSource.FLATHUB) "Search Flathub" else "Search Ubuntu packages",
-                modifier = Modifier
-                    .widthIn(max = 720.dp)
-                    .fillMaxWidth()
-                    .padding(horizontal = 16.dp)
-                    .align(Alignment.CenterHorizontally),
-            )
-            Row(
-                Modifier
-                    .widthIn(max = 720.dp)
-                    .fillMaxWidth()
-                    .padding(start = 16.dp, end = 16.dp, top = 12.dp)
-                    .clip(RoundedCornerShape(20.dp))
-                    .background(Color.White.copy(alpha = 0.12f))
-                    .padding(4.dp)
-                    .align(Alignment.CenterHorizontally),
-            ) {
-                StoreSource.entries.forEach { s ->
-                    val selected = s == source
-                    Box(
-                        Modifier
-                            .weight(1f)
-                            .clip(RoundedCornerShape(16.dp))
-                            .background(if (selected) Color.White else Color.Transparent)
-                            .clickable { source = s }
-                            .padding(vertical = 8.dp),
-                        contentAlignment = Alignment.Center,
-                    ) {
-                        Text(
-                            s.label,
-                            color = if (selected) UbuntuPalette.Aubergine else Color.White,
-                            fontSize = 14.sp,
-                            fontWeight = FontWeight.Medium,
-                        )
-                    }
-                }
-            }
-        }
+                .padding(horizontal = Ui.gutter)
+                .padding(top = 2.dp)
+                .align(Alignment.CenterHorizontally),
+        )
+        if (details == null) Segmented(
+            StoreSource.entries,
+            source,
+            { it.label },
+            { source = it },
+            Modifier
+                .widthIn(max = Ui.maxWidth)
+                .padding(start = Ui.gutter, end = Ui.gutter, top = 10.dp, bottom = 10.dp)
+                .align(Alignment.CenterHorizontally),
+        )
 
         val pct = progress
         if (installing != null && pct != null) {
@@ -489,13 +445,13 @@ fun StoreScreen(
                 progress = { pct / 100f },
                 modifier = Modifier.fillMaxWidth(),
                 color = UbuntuPalette.UbuntuOrange,
-                trackColor = UbuntuPalette.LightSurfaceVariant,
+                trackColor = Ui.cardRaised,
             )
         } else if (searching || installing != null || flathubLoading) {
             LinearProgressIndicator(
                 modifier = Modifier.fillMaxWidth(),
                 color = UbuntuPalette.UbuntuOrange,
-                trackColor = UbuntuPalette.LightSurfaceVariant,
+                trackColor = Ui.cardRaised,
             )
         }
 
@@ -506,7 +462,7 @@ fun StoreScreen(
                     .fillMaxWidth()
                     .padding(start = 16.dp, end = 16.dp, top = 12.dp)
                     .clip(RoundedCornerShape(12.dp))
-                    .background(UbuntuPalette.LightSurfaceVariant)
+                    .background(Ui.cardRaised)
                     .padding(start = 14.dp, top = 6.dp, bottom = 6.dp, end = 4.dp)
                     .align(Alignment.CenterHorizontally),
                 verticalAlignment = Alignment.CenterVertically,
@@ -514,13 +470,13 @@ fun StoreScreen(
                 Text(
                     msg,
                     fontSize = 13.sp,
-                    color = UbuntuPalette.LightOnSurface,
+                    color = Ui.ink,
                     modifier = Modifier.weight(1f),
                     maxLines = 4,
                     overflow = TextOverflow.Ellipsis,
                 )
                 IconButton(onClick = { message = null }) {
-                    Icon(Icons.Default.Close, contentDescription = "Dismiss", tint = UbuntuPalette.LightOnSurfaceVariant)
+                    Icon(Icons.Default.Close, contentDescription = "Dismiss", tint = Ui.inkSoft)
                 }
             }
         }
@@ -534,7 +490,7 @@ fun StoreScreen(
                     .widthIn(max = 720.dp)
                     .align(Alignment.CenterHorizontally),
             )
-            return@Column
+            return@MobuntuScreen
         }
 
         details?.let { app ->
@@ -550,7 +506,7 @@ fun StoreScreen(
                     .widthIn(max = 720.dp)
                     .align(Alignment.CenterHorizontally),
             )
-            return@Column
+            return@MobuntuScreen
         }
 
         val open = collection
@@ -591,11 +547,11 @@ fun StoreScreen(
                     Text(
                         open.note!!,
                         fontSize = 13.sp,
-                        color = UbuntuPalette.LightOnSurfaceVariant,
+                        color = Ui.inkSoft,
                         modifier = Modifier
                             .fillMaxWidth()
                             .clip(RoundedCornerShape(12.dp))
-                            .background(UbuntuPalette.LightSurfaceVariant)
+                            .background(Ui.cardRaised)
                             .padding(12.dp),
                     )
                 }
@@ -616,7 +572,7 @@ fun StoreScreen(
                     },
                     fontSize = 14.sp,
                     fontWeight = FontWeight.Medium,
-                    color = UbuntuPalette.LightOnSurfaceVariant,
+                    color = Ui.inkSoft,
                     modifier = Modifier.padding(start = 4.dp, bottom = 4.dp),
                 )
             }
@@ -698,7 +654,7 @@ private fun UpdatesPane(
                 progress = { (pct ?: 0) / 100f },
                 modifier = Modifier.fillMaxWidth(),
                 color = UbuntuPalette.UbuntuOrange,
-                trackColor = UbuntuPalette.LightSurfaceVariant,
+                trackColor = Ui.cardRaised,
             )
             Spacer(Modifier.height(8.dp))
         }
@@ -713,7 +669,7 @@ private fun UpdatesPane(
                 },
                 fontSize = 16.sp,
                 fontWeight = FontWeight.Medium,
-                color = UbuntuPalette.LightOnSurface,
+                color = Ui.ink,
                 modifier = Modifier.weight(1f),
             )
             if (list != null && list.isNotEmpty() && !working) {
@@ -732,7 +688,7 @@ private fun UpdatesPane(
         }
         note?.let {
             Spacer(Modifier.height(10.dp))
-            Text(it, fontSize = 13.sp, color = UbuntuPalette.LightOnSurfaceVariant)
+            Text(it, fontSize = 13.sp, color = Ui.inkSoft)
         }
         Spacer(Modifier.height(12.dp))
         LazyColumn(verticalArrangement = Arrangement.spacedBy(6.dp)) {
@@ -741,20 +697,20 @@ private fun UpdatesPane(
                     Modifier
                         .fillMaxWidth()
                         .clip(RoundedCornerShape(12.dp))
-                        .background(UbuntuPalette.LightSurface)
+                        .background(Ui.card)
                         .padding(horizontal = 14.dp, vertical = 10.dp),
                     verticalAlignment = Alignment.CenterVertically,
                 ) {
                     Column(Modifier.weight(1f)) {
-                        Text(item.id, fontSize = 14.sp, color = UbuntuPalette.LightOnSurface, maxLines = 1, overflow = TextOverflow.Ellipsis)
+                        Text(item.id, fontSize = 14.sp, color = Ui.ink, maxLines = 1, overflow = TextOverflow.Ellipsis)
                         if (item.version.isNotBlank()) {
-                            Text(item.version, fontSize = 12.sp, color = UbuntuPalette.LightOnSurfaceVariant, maxLines = 1)
+                            Text(item.version, fontSize = 12.sp, color = Ui.inkSoft, maxLines = 1)
                         }
                     }
                     Text(
                         if (item.flatpak) "Flathub" else "Ubuntu",
                         fontSize = 12.sp,
-                        color = UbuntuPalette.LightOnSurfaceVariant,
+                        color = Ui.inkSoft,
                     )
                 }
             }
@@ -772,21 +728,7 @@ private fun CategoryChips(selected: String?, onSelect: (String?) -> Unit) {
         horizontalArrangement = Arrangement.spacedBy(8.dp),
     ) {
         (listOf<Pair<String?, String>>(null to "Popular") + FlathubApi.categories).forEach { (id, label) ->
-            val on = id == selected
-            Box(
-                Modifier
-                    .clip(RoundedCornerShape(18.dp))
-                    .background(if (on) UbuntuPalette.Aubergine else UbuntuPalette.LightSurface)
-                    .clickable { onSelect(id) }
-                    .padding(horizontal = 14.dp, vertical = 8.dp),
-            ) {
-                Text(
-                    label,
-                    fontSize = 13.sp,
-                    fontWeight = FontWeight.Medium,
-                    color = if (on) Color.White else UbuntuPalette.LightOnSurface,
-                )
-            }
+            Chip(label, id == selected) { onSelect(id) }
         }
     }
 }
@@ -862,12 +804,12 @@ private fun StoreButton(
             .clip(RoundedCornerShape(20.dp))
             .background(
                 when {
-                    busy -> UbuntuPalette.LightSurfaceVariant
-                    blocked -> UbuntuPalette.LightSurfaceVariant
-                    canOpen -> UbuntuPalette.Aubergine
-                    installed == true -> UbuntuPalette.LightSurfaceVariant
+                    busy -> Ui.cardRaised
+                    blocked -> Ui.cardRaised
+                    canOpen -> Color.White.copy(alpha = 0.2f)
+                    installed == true -> Ui.cardRaised
                     enabled -> UbuntuPalette.UbuntuOrange
-                    else -> UbuntuPalette.LightOutline
+                    else -> Ui.edge
                 },
             )
             .clickable(enabled = !busy && (blocked || canOpen || (installed != true && enabled))) {
@@ -883,12 +825,12 @@ private fun StoreButton(
                 color = UbuntuPalette.UbuntuOrange,
             )
             blocked -> Row(verticalAlignment = Alignment.CenterVertically) {
-                Icon(Icons.Default.Block, contentDescription = null, tint = UbuntuPalette.LightOnSurfaceVariant, modifier = Modifier.size(14.dp))
+                Icon(Icons.Default.Block, contentDescription = null, tint = Ui.inkSoft, modifier = Modifier.size(14.dp))
                 Spacer(Modifier.width(6.dp))
-                Text("PC only", color = UbuntuPalette.LightOnSurfaceVariant, fontSize = 13.sp)
+                Text("PC only", color = Ui.inkSoft, fontSize = 13.sp)
             }
             canOpen -> Text("Open", color = Color.White, fontSize = 13.sp, fontWeight = FontWeight.Medium)
-            installed == true -> Text("Installed", color = UbuntuPalette.LightOnSurface, fontSize = 13.sp)
+            installed == true -> Text("Installed", color = Ui.ink, fontSize = 13.sp)
             else -> Text("Install", color = Color.White, fontSize = 13.sp, fontWeight = FontWeight.Medium)
         }
     }
@@ -926,9 +868,9 @@ private fun StoreDetails(
             AppIcon(app, 72.dp)
             Spacer(Modifier.width(16.dp))
             Column(Modifier.weight(1f)) {
-                Text(app.name, fontSize = 22.sp, fontWeight = FontWeight.Medium, color = UbuntuPalette.LightOnSurface)
+                Text(app.name, fontSize = 22.sp, fontWeight = FontWeight.Medium, color = Ui.ink)
                 if (app.developer.isNotBlank()) {
-                    Text(app.developer, fontSize = 13.sp, color = UbuntuPalette.LightOnSurfaceVariant)
+                    Text(app.developer, fontSize = 13.sp, color = Ui.inkSoft)
                 }
                 Spacer(Modifier.height(10.dp))
                 StoreButton(app, installed, busy, enabled, onInstall, onOpen)
@@ -939,7 +881,7 @@ private fun StoreDetails(
             Text(
                 if (progress != null) "Downloading… $progress%" else "Installing…",
                 fontSize = 13.sp,
-                color = UbuntuPalette.LightOnSurfaceVariant,
+                color = Ui.inkSoft,
             )
         }
         if (!app.available && installed != true) {
@@ -947,16 +889,16 @@ private fun StoreDetails(
             Text(
                 notForThisPhone(app, DroidDeck.isInstalled(androidx.compose.ui.platform.LocalContext.current)),
                 fontSize = 14.sp,
-                color = UbuntuPalette.LightOnSurface,
+                color = Ui.ink,
                 modifier = Modifier
                     .fillMaxWidth()
                     .clip(RoundedCornerShape(12.dp))
-                    .background(UbuntuPalette.LightSurfaceVariant)
+                    .background(Ui.cardRaised)
                     .padding(14.dp),
             )
         }
         Spacer(Modifier.height(16.dp))
-        Text(app.summary, fontSize = 16.sp, fontWeight = FontWeight.Medium, color = UbuntuPalette.LightOnSurface)
+        Text(app.summary, fontSize = 16.sp, fontWeight = FontWeight.Medium, color = Ui.ink)
         val shots = info?.screenshots.orEmpty()
         if (shots.isNotEmpty()) {
             Spacer(Modifier.height(14.dp))
@@ -968,7 +910,7 @@ private fun StoreDetails(
                             .height(200.dp)
                             .width(300.dp)
                             .clip(RoundedCornerShape(12.dp))
-                            .background(UbuntuPalette.LightSurfaceVariant),
+                            .background(Ui.cardRaised),
                     ) {
                         if (shot != null) {
                             Image(shot, contentDescription = null, contentScale = ContentScale.Crop, modifier = Modifier.fillMaxSize())
@@ -982,14 +924,14 @@ private fun StoreDetails(
             info?.description ?: if (failed) "" else "Loading…",
             fontSize = 14.sp,
             lineHeight = 20.sp,
-            color = UbuntuPalette.LightOnSurface,
+            color = Ui.ink,
         )
         info?.license?.takeIf { it.isNotBlank() && !it.startsWith("LicenseRef") }?.let {
             Spacer(Modifier.height(12.dp))
-            Text("Licence: $it", fontSize = 12.sp, color = UbuntuPalette.LightOnSurfaceVariant)
+            Text("Licence: $it", fontSize = 12.sp, color = Ui.inkSoft)
         }
         Spacer(Modifier.height(4.dp))
-        Text("From Flathub · ${app.pkg}", fontSize = 12.sp, color = UbuntuPalette.LightOnSurfaceVariant)
+        Text("From Flathub · ${app.pkg}", fontSize = 12.sp, color = Ui.inkSoft)
     }
 }
 
@@ -1006,28 +948,28 @@ private fun StoreSearchField(
         modifier = modifier
             .height(48.dp)
             .clip(RoundedCornerShape(24.dp))
-            .background(Color.White)
+            .background(Ui.cardRaised)
             .padding(horizontal = 16.dp),
         verticalAlignment = Alignment.CenterVertically,
     ) {
-        Icon(Icons.Default.Search, contentDescription = null, tint = UbuntuPalette.LightOnSurfaceVariant)
+        Icon(Icons.Default.Search, contentDescription = null, tint = Ui.inkSoft)
         Spacer(Modifier.width(12.dp))
         Box(Modifier.weight(1f)) {
             if (query.isEmpty()) {
-                Text(placeholder, color = UbuntuPalette.LightOnSurfaceVariant, fontSize = 16.sp)
+                Text(placeholder, color = Ui.inkSoft, fontSize = 16.sp)
             }
             BasicTextField(
                 value = query,
                 onValueChange = onQueryChange,
                 singleLine = true,
-                textStyle = TextStyle(color = UbuntuPalette.LightOnSurface, fontSize = 16.sp),
+                textStyle = TextStyle(color = Ui.ink, fontSize = 16.sp),
                 cursorBrush = SolidColor(UbuntuPalette.UbuntuOrange),
                 modifier = Modifier.fillMaxWidth(),
             )
         }
         if (query.isNotEmpty()) {
             IconButton(onClick = { onQueryChange("") }, modifier = Modifier.size(32.dp)) {
-                Icon(Icons.Default.Close, contentDescription = "Clear", tint = UbuntuPalette.LightOnSurfaceVariant)
+                Icon(Icons.Default.Close, contentDescription = "Clear", tint = Ui.inkSoft)
             }
         }
     }
@@ -1047,7 +989,7 @@ private fun StoreRow(
         modifier = Modifier
             .fillMaxWidth()
             .clip(RoundedCornerShape(16.dp))
-            .background(UbuntuPalette.LightSurface)
+            .background(Ui.card)
             .then(if (onDetails != null) Modifier.clickable(onClick = onDetails) else Modifier)
             .padding(12.dp),
         verticalAlignment = Alignment.CenterVertically,
@@ -1059,14 +1001,14 @@ private fun StoreRow(
                 app.name,
                 fontSize = 16.sp,
                 fontWeight = FontWeight.Medium,
-                color = if (app.available) UbuntuPalette.LightOnSurface else UbuntuPalette.LightOnSurfaceVariant,
+                color = if (app.available) Ui.ink else Ui.inkSoft,
                 maxLines = 1,
                 overflow = TextOverflow.Ellipsis,
             )
             Text(
                 app.summary,
                 fontSize = 12.sp,
-                color = UbuntuPalette.LightOnSurfaceVariant,
+                color = Ui.inkSoft,
                 maxLines = 2,
                 overflow = TextOverflow.Ellipsis,
             )
@@ -1129,9 +1071,9 @@ private fun StoreHome(
                             interest.label + if (interest in interests) " · for you" else "",
                             fontSize = 16.sp,
                             fontWeight = FontWeight.SemiBold,
-                            color = UbuntuPalette.LightOnSurface,
+                            color = Ui.ink,
                         )
-                        Text(interest.detail, fontSize = 12.sp, color = UbuntuPalette.LightOnSurfaceVariant)
+                        Text(interest.detail, fontSize = 12.sp, color = Ui.inkSoft)
                     }
                     Text(
                         "See all",
@@ -1173,7 +1115,7 @@ private fun Spotlight(
             .clip(RoundedCornerShape(20.dp))
             .background(
                 androidx.compose.ui.graphics.Brush.linearGradient(
-                    listOf(Color(interest.color), Color(interest.color).copy(alpha = 0.55f), UbuntuPalette.Aubergine),
+                    listOf(Color(interest.color), Color(interest.color).copy(alpha = 0.55f), Ui.accent.copy(alpha = 0.35f)),
                 ),
             )
             .clickable(onClick = onClick)
@@ -1208,17 +1150,17 @@ private fun AppCard(
         Modifier
             .width(148.dp)
             .clip(RoundedCornerShape(16.dp))
-            .background(UbuntuPalette.LightSurface)
+            .background(Ui.card)
             .clickable(onClick = onClick)
             .padding(12.dp),
     ) {
         AppIcon(app, 52.dp)
         Spacer(Modifier.height(10.dp))
-        Text(app.name, fontSize = 14.sp, fontWeight = FontWeight.Medium, color = UbuntuPalette.LightOnSurface, maxLines = 1, overflow = TextOverflow.Ellipsis)
+        Text(app.name, fontSize = 14.sp, fontWeight = FontWeight.Medium, color = Ui.ink, maxLines = 1, overflow = TextOverflow.Ellipsis)
         Text(
             app.summary,
             fontSize = 12.sp,
-            color = UbuntuPalette.LightOnSurfaceVariant,
+            color = Ui.inkSoft,
             maxLines = 2,
             minLines = 2,
             overflow = TextOverflow.Ellipsis,

@@ -7,6 +7,7 @@ import androidx.compose.animation.slideInHorizontally
 import androidx.compose.animation.slideOutHorizontally
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
+import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.gestures.detectDragGestures
 import androidx.compose.foundation.interaction.MutableInteractionSource
@@ -52,7 +53,9 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
+import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.lerp
 import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.platform.LocalDensity
@@ -141,8 +144,21 @@ fun DesktopMenu(
                     .fillMaxHeight()
                     .widthIn(max = 320.dp)
                     .fillMaxWidth(0.8f)
-                    .clip(RoundedCornerShape(topStart = 24.dp, bottomStart = 24.dp))
-                    .background(UbuntuPalette.DarkSurface)
+                    .clip(RoundedCornerShape(topStart = 28.dp, bottomStart = 28.dp))
+                    .background(
+                        Brush.verticalGradient(
+                            listOf(
+                                lerp(UbuntuPalette.UbuntuOrange, Color(0xFF101014), 0.72f),
+                                Color(0xFF16141A),
+                                lerp(Color(0xFF77216F), Color(0xFF101014), 0.7f),
+                            ),
+                        ),
+                    )
+                    .border(
+                        1.dp,
+                        Color.White.copy(alpha = 0.10f),
+                        RoundedCornerShape(topStart = 28.dp, bottomStart = 28.dp),
+                    )
                     .clickable(
                         interactionSource = remember { MutableInteractionSource() },
                         indication = null,
@@ -158,7 +174,7 @@ fun DesktopMenu(
                     StatusDot(connected)
                     Spacer(Modifier.width(10.dp))
                     Column {
-                        Text("Mobuntu", color = Color.White, fontSize = 20.sp, fontWeight = FontWeight.Medium)
+                        Text("Mobuntu", color = Color.White, fontSize = 22.sp, fontWeight = FontWeight.Bold)
                         Text(
                             if (connected) "Desktop running" else "Starting…",
                             color = Color.White.copy(alpha = 0.6f),
@@ -202,11 +218,11 @@ fun DesktopMenu(
 private fun MenuSection(title: String) {
     Text(
         title.uppercase(),
-        color = UbuntuPalette.UbuntuOrange,
-        fontSize = 11.sp,
-        fontWeight = FontWeight.Medium,
-        letterSpacing = 1.sp,
-        modifier = Modifier.padding(start = 20.dp, top = 16.dp, bottom = 4.dp),
+        color = Color.White.copy(alpha = 0.5f),
+        fontSize = 11.5.sp,
+        fontWeight = FontWeight.SemiBold,
+        letterSpacing = 1.2.sp,
+        modifier = Modifier.padding(start = 22.dp, top = 18.dp, bottom = 6.dp),
     )
 }
 
@@ -215,12 +231,22 @@ private fun MenuItem(icon: ImageVector, label: String, onClick: () -> Unit, note
     Row(
         Modifier
             .fillMaxWidth()
+            .padding(horizontal = 10.dp)
+            .clip(RoundedCornerShape(16.dp))
             .clickable(onClick = onClick)
-            .padding(horizontal = 20.dp, vertical = 12.dp),
+            .padding(horizontal = 10.dp, vertical = 9.dp),
         verticalAlignment = Alignment.CenterVertically,
     ) {
-        Icon(icon, contentDescription = null, tint = Color.White.copy(alpha = 0.85f), modifier = Modifier.size(22.dp))
-        Spacer(Modifier.width(16.dp))
+        Box(
+            Modifier
+                .size(36.dp)
+                .clip(RoundedCornerShape(11.dp))
+                .background(Color.White.copy(alpha = 0.09f)),
+            contentAlignment = Alignment.Center,
+        ) {
+            Icon(icon, contentDescription = null, tint = UbuntuPalette.UbuntuOrangeLight, modifier = Modifier.size(20.dp))
+        }
+        Spacer(Modifier.width(14.dp))
         Column {
             Text(label, color = Color.White, fontSize = 15.sp)
             if (note != null) Text(note, color = Color.White.copy(alpha = 0.55f), fontSize = 12.sp)

@@ -1519,9 +1519,8 @@ fun UbuntuApp(
                 onOpenFile = { path -> openFileInLinux(path) },
                 onRefresh = { vm.refreshSystemInfo() },
                 onBack = { screen = Screen.DISPLAY },
-                // The launcher's gradient continues behind the system bars.
+                // The backdrop runs under the system bars; the page is padded.
                 modifier = Modifier
-                    .background(UbuntuPalette.Aubergine)
                     .systemBarsPadding(),
             )
         }
@@ -2134,20 +2133,16 @@ private fun SetupScreen(
     state: com.ubuntumobile.ui.UbuntuState,
     onInstall: () -> Unit,
 ) {
-    Box(
-        modifier = Modifier
-            .fillMaxSize()
-            .background(UbuntuPalette.Aubergine)
-            .systemBarsPadding()
-            .padding(28.dp),
-    ) {
+    Box(Modifier.fillMaxSize()) {
+        // The same sky as setup, which this follows.
+        com.ubuntumobile.ui.AuroraBackground(UbuntuPalette.UbuntuOrange)
         Column(
-            modifier = Modifier.fillMaxSize(),
+            modifier = Modifier.fillMaxSize().systemBarsPadding().padding(28.dp),
             horizontalAlignment = Alignment.CenterHorizontally,
             verticalArrangement = Arrangement.Center,
         ) {
-            com.ubuntumobile.ui.UbuntuLogo(72.dp)
-            Spacer(Modifier.height(24.dp))
+            com.ubuntumobile.ui.AnimatedLogo(64.dp, UbuntuPalette.UbuntuOrange)
+            Spacer(Modifier.height(8.dp))
             Text("Ubuntu 26.04", color = Color.White, fontSize = 30.sp, fontWeight = FontWeight.Bold)
             Spacer(Modifier.height(6.dp))
             Text(

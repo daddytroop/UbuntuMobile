@@ -174,9 +174,11 @@ fun DesktopSurface(
         LaunchedEffect(canvasW, canvasH) { onCanvasSize(IntSize(canvasW, canvasH)) }
 
         val bmp = session.bitmap
-        if (session.connecting || !session.connected || bmp == null) {
+        // Connected, but the new bitmap is still black until the first frame.
+        val hasFrame by remember(session) { androidx.compose.runtime.derivedStateOf { session.frames > 0 } }
+        if (session.connecting || !session.connected || bmp == null || !hasFrame) {
             ConnectingPanel(
-                connecting = session.connecting,
+                connecting = session.connecting || (session.connected && !hasFrame),
                 attempt = session.attempt,
                 error = session.error,
                 onRetry = { session.retry() },

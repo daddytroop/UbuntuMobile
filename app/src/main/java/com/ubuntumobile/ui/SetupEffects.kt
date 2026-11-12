@@ -93,9 +93,15 @@ private class Mote(val x: Float, val speed: Float, val size: Float, val phase: F
  * Ubuntu installer's background brought to life.
  */
 @Composable
-fun AuroraBackground(accent: Color, modifier: Modifier = Modifier, motes: Int = 36) {
+fun AuroraBackground(
+    accent: Color,
+    modifier: Modifier = Modifier,
+    motes: Int = 36,
+    /** False for the app's everyday screens: one still frame, drawn once. */
+    animated: Boolean = true,
+) {
     // Read while drawing, so each frame redraws and nothing recomposes.
-    val clock = frameClock(still = 40_000L)
+    val clock = if (animated) frameClock(still = 40_000L) else remember { mutableLongStateOf(40_000L) }
     val specks = remember(motes) {
         val r = Random(7)
         List(motes) { Mote(r.nextFloat(), 0.012f + r.nextFloat() * 0.03f, 0.6f + r.nextFloat() * 1.8f, r.nextFloat() * 6.28f, r.nextFloat() * 0.04f) }
