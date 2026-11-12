@@ -1,5 +1,6 @@
 package com.ubuntumobile.ui
 
+import android.provider.Settings
 import androidx.compose.animation.core.Animatable
 import androidx.compose.animation.core.FastOutSlowInEasing
 import androidx.compose.animation.core.LinearEasing
@@ -33,6 +34,7 @@ import androidx.compose.ui.graphics.drawscope.Stroke
 import androidx.compose.ui.graphics.drawscope.rotate
 import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.graphics.lerp
+import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
 import com.ubuntumobile.ui.theme.UbuntuPalette
@@ -50,13 +52,35 @@ import kotlin.random.Random
  * any phone (one canvas, a few dozen shapes).
  */
 
-/** Milliseconds since this was first shown, every frame. */
+/**
+ * True when the phone is set to show no animations (Settings, Accessibility,
+ * "Remove animations"): then nothing here moves, and nothing waits to appear.
+ */
 @Composable
-private fun frameClock(): State<Long> {
-    val now = remember { mutableLongStateOf(0L) }
+fun reducedMotion(): Boolean {
+    val context = LocalContext.current
+    return remember {
+        try {
+            Settings.Global.getFloat(context.contentResolver, Settings.Global.ANIMATOR_DURATION_SCALE, 1f) == 0f
+        } catch (_: Exception) {
+            false
+        }
+    }
+}
+
+/**
+ * Milliseconds since this was first shown, every frame, until [untilMs]
+ * (so an effect that has played out stops asking for frames). Stays at
+ * [still] when animations are off.
+ */
+@Composable
+private fun frameClock(untilMs: Long = Long.MAX_VALUE, still: Long = 0L): State<Long> {
+    val reduced = reducedMotion()
+    val now = remember { mutableLongStateOf(if (reduced) still else 0L) }
     LaunchedEffect(Unit) {
+        if (reduced) return@LaunchedEffect
         val start = withFrameMillis { it }
-        while (true) withFrameMillis { now.longValue = it - start }
+        while (now.longValue < untilMs) withFrameMillis { now.longValue = it - start }
     }
     return now
 }
@@ -71,7 +95,7 @@ private class Mote(val x: Float, val speed: Float, val size: Float, val phase: F
 @Composable
 fun AuroraBackground(accent: Color, modifier: Modifier = Modifier, motes: Int = 36) {
     // Read while drawing, so each frame redraws and nothing recomposes.
-    val clock = frameClock()
+    val clock = frameClock(still = 40_000L)
     val specks = remember(motes) {
         val r = Random(7)
         List(motes) { Mote(r.nextFloat(), 0.012f + r.nextFloat() * 0.03f, 0.6f + r.nextFloat() * 1.8f, r.nextFloat() * 6.28f, r.nextFloat() * 0.04f) }
@@ -126,8 +150,9 @@ val LocalStagger = compositionLocalOf<Stagger?> { null }
 
 fun Modifier.riseIn(): Modifier = composed {
     val stagger = LocalStagger.current
+    val reduced = reducedMotion()
     val index = remember { stagger?.take() ?: 0 }
-    val shown = remember { Animatable(if (stagger == null) 1f else 0f) }
+    val shown = remember { Animatable(if (stagger == null || reduced) 1f else 0f) }
     LaunchedEffect(Unit) {
         if (shown.value < 1f) {
             delay(60L * index.coerceAtMost(10))
@@ -145,12 +170,14 @@ fun Modifier.riseIn(): Modifier = composed {
 }
 
 /**
- * Ubuntu's circle, landing with a bounce, with a ring of light turning
- * around it and a soft halo breathing behind.
+ * Mobuntu's mark (the circle and dot of [UbuntuLogo]), landing with a
+ * bounce, with a ring of light turning around it, two sparks riding the
+ * ring and a soft halo breathing behind.
  */
 @Composable
 fun AnimatedLogo(size: Dp, accent: Color, spinning: Boolean = true) {
-    val landing = remember { Animatable(0.2f) }
+    val reduced = reducedMotion()
+    val landing = remember { Animatable(if (reduced) 1f else 0.2f) }
     LaunchedEffect(Unit) {
         landing.animateTo(1f, spring(dampingRatio = 0.45f, stiffness = Spring.StiffnessLow))
     }
@@ -181,7 +208,7 @@ fun AnimatedLogo(size: Dp, accent: Color, spinning: Boolean = true) {
                 radius = r * 1.9f * breathe,
                 center = c,
             )
-            if (spinning) {
+            if (spinning && !reduced) {
                 rotate(turn, c) {
                     drawArc(
                         Brush.sweepGradient(
@@ -197,14 +224,24 @@ fun AnimatedLogo(size: Dp, accent: Color, spinning: Boolean = true) {
                     )
                 }
             }
-            // The logo: the circle of friends, drawn as Ubuntu's mark.
-            drawCircle(accent, radius = r, center = c)
-            drawCircle(Color.White, radius = r * 0.62f, center = c, style = Stroke(width = r * 0.17f))
-            for (i in 0 until 3) {
-                val a = (turn * 0.15f + i * 120f - 90f) * PI.toFloat() / 180f
-                val dot = Offset(c.x + cos(a) * r * 0.66f, c.y + sin(a) * r * 0.66f)
-                drawCircle(accent, radius = r * 0.24f, center = dot)
-                drawCircle(Color.White, radius = r * 0.15f, center = dot)
+            // The mark: a disc in the accent with a white dot at its heart.
+            drawCircle(
+                Brush.linearGradient(
+                    listOf(lerp(accent, Color.White, 0.25f), accent, lerp(accent, Color.Black, 0.2f)),
+                    start = Offset(c.x - r, c.y - r),
+                    end = Offset(c.x + r, c.y + r),
+                ),
+                radius = r,
+                center = c,
+            )
+            drawCircle(Color.White, radius = r * 0.42f * (0.94f + 0.06f * breathe), center = c)
+            // Two sparks riding the ring of light.
+            if (spinning && !reduced) {
+                for (i in 0 until 2) {
+                    val a = (turn + i * 180f) * PI.toFloat() / 180f
+                    val dot = Offset(c.x + cos(a) * r * 1.3f, c.y + sin(a) * r * 1.3f)
+                    drawCircle(Color.White.copy(alpha = 0.9f), radius = 2.5.dp.toPx(), center = dot)
+                }
             }
         }
     }
@@ -238,7 +275,8 @@ fun Confetti(accent: Color, modifier: Modifier = Modifier) {
             )
         }
     }
-    val clock = frameClock()
+    if (reducedMotion()) return
+    val clock = frameClock(untilMs = 4600L)
     Canvas(modifier.fillMaxSize()) {
         val t = clock.value / 1000f
         if (t > 4.5f) return@Canvas

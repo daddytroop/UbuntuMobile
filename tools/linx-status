@@ -10,61 +10,72 @@
 #
 # Linux in proot cannot see the phone's battery or network itself; the app
 # writes them to /tmp/linx-phone-status (PhoneStatus.kt) as key=value lines
-# whenever they change. Clicking an item opens that page of the phone's
-# settings (linx-phone settings ...).
+# whenever they change. Clicking an item opens the quick settings
+# (linx-phone quick).
+#
+# The panel runs this every few seconds for as long as the desktop is up,
+# and starting a program is slow under proot, so it starts none: bash's
+# own builtins only (no $(...), no find, no date).
 set -u
 STATUS=/tmp/linx-phone-status
 
+declare -A S=()
+if [ -r "$STATUS" ]; then
+  while IFS='=' read -r k v; do
+    [ -n "$k" ] && S[$k]="$v"
+  done <"$STATUS"
+fi
+
 # Nothing to show until the app has written the status, or once it has
 # stopped writing it (a minute without the regular refresh).
-if [ ! -s "$STATUS" ] || [ -n "$(find "$STATUS" -mmin +1 2>/dev/null)" ]; then
+printf -v NOW '%(%s)T' -1
+UPDATED="${S[updated]:-0}"
+case "$UPDATED" in '' | *[!0-9]*) UPDATED=0 ;; esac
+if [ $((NOW - UPDATED)) -gt 60 ]; then
   echo "<txt></txt>"
   exit 0
 fi
 
-declare -A S=()
-while IFS='=' read -r k v; do
-  [ -n "$k" ] && S[$k]="$v"
-done <"$STATUS"
-s() { echo "${S[$1]:-}"; }
-
+# minutes SECONDS: sets TIME to "1 h 20 min" or "35 min".
 minutes() {
   local m=$(($1 / 60))
   if [ "$m" -ge 60 ]; then
-    printf '%d h %d min' $((m / 60)) $((m % 60))
+    printf -v TIME '%d h %d min' $((m / 60)) $((m % 60))
   else
-    printf '%d min' "$((m < 1 ? 1 : m))"
+    printf -v TIME '%d min' "$((m < 1 ? 1 : m))"
   fi
 }
 
 battery() {
-  local level state icon tip
-  level="$(s battery)"
-  [ -n "$level" ] || { echo "<txt></txt>"; return; }
-  state="$(s battery_state)"
+  local level state icon tip plugged full_in
+  level="${S[battery]:-}"
+  case "$level" in '' | *[!0-9]*) echo "<txt></txt>"; return ;; esac
+  state="${S[battery_state]:-}"
+  plugged="${S[plugged]:-}"
   local tens=$(((level + 5) / 10 * 10))
   [ "$tens" -gt 100 ] && tens=100
   case "$state" in
     full) icon=battery-level-100-charged-symbolic; tip="$level%, fully charged" ;;
     charging) icon="battery-level-$tens-charging-symbolic"; tip="$level%, charging" ;;
     not_charging) icon="battery-level-$tens-symbolic"
-      if [ -n "$(s plugged)" ]; then tip="$level%, plugged in, not charging"; else tip="$level%, on battery"; fi ;;
+      if [ -n "$plugged" ]; then tip="$level%, plugged in, not charging"; else tip="$level%, on battery"; fi ;;
     *) icon="battery-level-$tens-symbolic"; tip="$level%, on battery" ;;
   esac
-  case "$(s plugged)" in
+  case "$plugged" in
     ac) tip="$tip (charger)" ;;
     usb) tip="$tip (USB)" ;;
     wireless) tip="$tip (wireless charger)" ;;
     dock) tip="$tip (dock)" ;;
   esac
-  local full_in
-  full_in="$(s full_in)"
-  if [ "$state" = charging ] && [ "${full_in:--1}" -gt 0 ] 2>/dev/null; then
-    tip="$tip\nFull in about $(minutes "$full_in")"
+  full_in="${S[full_in]:-}"
+  case "$full_in" in '' | *[!0-9]*) full_in=0 ;; esac
+  if [ "$state" = charging ] && [ "$full_in" -gt 0 ]; then
+    minutes "$full_in"
+    tip="$tip\nFull in about $TIME"
   fi
-  [ "$(s power_saver)" = 1 ] && tip="$tip\nBattery saver is on"
-  [ -n "$(s temp)" ] && tip="$tip\nTemperature $(s temp) °C"
-  [ -n "$(s health)" ] && tip="$tip\nBattery condition: $(s health)"
+  [ "${S[power_saver]:-}" = 1 ] && tip="$tip\nBattery saver is on"
+  [ -n "${S[temp]:-}" ] && tip="$tip\nTemperature ${S[temp]} °C"
+  [ -n "${S[health]:-}" ] && tip="$tip\nBattery condition: ${S[health]}"
   tip="$tip\n\nClick for quick settings"
   # The level shows in the icon; the number is in the tooltip (the panel
   # is short of room on a phone).
@@ -74,18 +85,16 @@ battery() {
 }
 
 network() {
-  local net signal icon tip strength
-  net="$(s net)"
-  signal="$(s signal)"
-  case "${signal:-}" in
+  local net icon tip strength name
+  net="${S[net]:-}"
+  case "${S[signal]:-}" in
     4) strength=excellent ;;
     3) strength=good ;;
     2) strength=ok ;;
     1) strength=weak ;;
     *) strength=none ;;
   esac
-  local name
-  name="$(s wifi_name)"
+  name="${S[wifi_name]:-}"
   case "$net" in
     wifi)
       icon="network-wireless-signal-$strength-symbolic"
@@ -97,18 +106,18 @@ network() {
       icon="network-cellular-signal-$strength-symbolic"
       tip="Mobile data, signal $strength" ;;
     *)
-      if [ "$(s airplane)" = 1 ]; then
+      if [ "${S[airplane]:-}" = 1 ]; then
         icon=airplane-mode-symbolic; tip="Airplane mode: no internet"
       else
         icon=network-offline-symbolic; tip="No internet"
       fi ;;
   esac
-  if [ "$(s vpn)" = 1 ]; then
+  if [ "${S[vpn]:-}" = 1 ]; then
     tip="$tip\nThrough a VPN"
-    case "$net" in none|vpn) ;; *) icon=network-vpn-symbolic ;; esac
+    case "$net" in none | vpn) ;; *) icon=network-vpn-symbolic ;; esac
   fi
-  [ "$(s metered)" = 1 ] && [ "$net" != none ] && tip="$tip\nMetered: big downloads may cost data"
-  [ "$(s validated)" = 0 ] && [ "$net" != none ] && tip="$tip\nConnected, but no internet yet (a sign-in page?)"
+  [ "${S[metered]:-}" = 1 ] && [ "$net" != none ] && tip="$tip\nMetered: big downloads may cost data"
+  [ "${S[validated]:-}" = 0 ] && [ "$net" != none ] && tip="$tip\nConnected, but no internet yet (a sign-in page?)"
   tip="$tip\n\nClick for quick settings: Wi-Fi, Bluetooth, brightness and more"
   printf '<icon>%s</icon><tool>%b</tool>' "$icon" "$tip"
   printf '<iconclick>linx-phone quick</iconclick>\n'

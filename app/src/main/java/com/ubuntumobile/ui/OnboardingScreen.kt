@@ -815,6 +815,7 @@ private fun SelectCard(selected: Boolean, onClick: () -> Unit, content: @Composa
     val fill by animateColorAsState(if (selected) setupAccent.copy(alpha = 0.22f) else Color.White.copy(alpha = 0.06f), tween(300), label = "fill")
     val edge by animateColorAsState(if (selected) setupAccent else Color.White.copy(alpha = 0.12f), tween(300), label = "edge")
     val width by animateDpAsState(if (selected) 2.dp else 1.dp, label = "width")
+    val tick = rememberTick()
     Column(
         Modifier
             .fillMaxWidth()
@@ -824,7 +825,7 @@ private fun SelectCard(selected: Boolean, onClick: () -> Unit, content: @Composa
             .clip(RoundedCornerShape(18.dp))
             .background(Brush.linearGradient(listOf(fill, fill.copy(alpha = fill.alpha * 0.4f))))
             .border(width, edge, RoundedCornerShape(18.dp))
-            .clickable(interactionSource = press, indication = null, onClick = onClick)
+            .clickable(interactionSource = press, indication = null) { tick(); onClick() }
             .padding(16.dp),
     ) { content() }
 }
@@ -842,12 +843,13 @@ private fun AppToggle(
     val fill by animateColorAsState(if (checked) tick else Color.Transparent, tween(220), label = "tick")
     val edge by animateColorAsState(if (checked) tick else Color.White.copy(alpha = 0.4f), tween(220), label = "tickEdge")
     val pop by animateFloatAsState(if (checked) 1f else 0.85f, spring(dampingRatio = 0.35f, stiffness = Spring.StiffnessMedium), label = "pop")
+    val feel = rememberTick()
     Row(
         Modifier
             .fillMaxWidth()
             .riseIn()
             .clip(RoundedCornerShape(14.dp))
-            .clickable { onChange(!checked) }
+            .clickable { feel(); onChange(!checked) }
             .padding(vertical = 8.dp, horizontal = 4.dp),
         verticalAlignment = Alignment.CenterVertically,
     ) {
@@ -948,6 +950,7 @@ private fun PrimaryButton(label: String, enabled: Boolean = true, onClick: () ->
     val pressed by press.collectIsPressedAsState()
     val scale by animateFloatAsState(if (pressed) 0.93f else 1f, spring(dampingRatio = 0.45f), label = "press")
     val shine = shimmerOffset()
+    val feel = rememberTick()
     val base = setupAccent
     Box(
         Modifier
@@ -964,7 +967,7 @@ private fun PrimaryButton(label: String, enabled: Boolean = true, onClick: () ->
                     Brush.linearGradient(listOf(Color.White.copy(alpha = 0.15f), Color.White.copy(alpha = 0.15f)))
                 },
             )
-            .clickable(enabled = enabled, interactionSource = press, indication = null, onClick = onClick)
+            .clickable(enabled = enabled, interactionSource = press, indication = null) { feel(); onClick() }
             .padding(horizontal = 28.dp, vertical = 12.dp),
     ) {
         Text(label, color = if (enabled) Color.White else Color.White.copy(alpha = 0.5f), fontSize = 15.sp, fontWeight = FontWeight.SemiBold)
@@ -987,3 +990,12 @@ private fun sizeLabel(mb: Int): String = if (mb >= 1000) "%.1f GB".format(mb / 1
 
 /** A lighter, shinier version of a colour, for highlights. */
 private fun lerpWhite(c: Color): Color = androidx.compose.ui.graphics.lerp(c, Color.White, 0.6f)
+
+/** A light tick under the finger, for when something is picked. */
+@Composable
+private fun rememberTick(): () -> Unit {
+    val haptics = androidx.compose.ui.platform.LocalHapticFeedback.current
+    return remember(haptics) {
+        { haptics.performHapticFeedback(androidx.compose.ui.hapticfeedback.HapticFeedbackType.TextHandleMove) }
+    }
+}

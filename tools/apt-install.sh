@@ -13,15 +13,25 @@ export DEBIAN_FRONTEND=noninteractive
 
 # One at a time: setup, the store and the desktop's background extras all
 # come through here, and two apt-gets at once fail on apt's lock (which
-# looked like "could not download the package lists"). The others wait.
-if [ "${1:-}" != --status ] && [ -z "${LINX_APT_LOCKED:-}" ]; then
-  exec 9>/tmp/linx-apt.lock
-  if ! flock -w 3600 9; then
-    echo "APT_FAILED another install is still running"
-    exit 1
-  fi
-  export LINX_APT_LOCKED=1
-fi
+# looked like "could not download the package lists"). The others wait;
+# a search does not (it makes do with the lists there are). The lock is
+# this script's alone: everything it starts gets it closed (9>&-), or a
+# service started by a package would hold it for good.
+BUSY=0
+case "${1:-}" in
+  --status) ;;
+  --search)
+    exec 9>/tmp/linx-apt.lock
+    flock -n 9 || BUSY=1
+    ;;
+  *)
+    exec 9>/tmp/linx-apt.lock
+    if ! flock -w 3600 9; then
+      echo "APT_FAILED another install is still running"
+      exit 1
+    fi
+    ;;
+esac
 STAMP=/var/lib/apt/lists/.linx-updated
 
 # apt-get update, and when it fails, what can be done here about it:
@@ -33,7 +43,7 @@ STAMP=/var/lib/apt/lists/.linx-updated
 # On failure the reason apt gave is the last line printed.
 update_lists() {
   local log=/tmp/linx-apt-update.log
-  apt-get update -q 2>&1 | tee "$log"
+  apt-get update -q 2>&1 9>&- | tee "$log"
   # apt says "W: Failed to fetch" for some failures and still exits 0.
   [ "${PIPESTATUS[0]}" = 0 ] && ! grep -qE '^(E|W): Failed to fetch https?://[a-z.]*ubuntu.com' "$log"
 }
@@ -86,7 +96,7 @@ case "${1:-}" in
     ;;
   --search)
     shift
-    refresh_lists >/dev/null 2>&1
+    [ "$BUSY" = 1 ] || refresh_lists >/dev/null 2>&1
     # Applications only: packages that come with a menu entry are the ones
     # a desktop store is about. apt-cache cannot tell, so match on names
     # and descriptions and let the store show the best few.
@@ -109,9 +119,9 @@ case "${1:-}" in
       STATUS_OPT=(-o APT::Status-Fd=3)
       exec 3>>"$LINX_APT_STATUS"
     fi
-    if apt-get install -y -q --no-install-recommends "${STATUS_OPT[@]}" "$@"; then
+    if apt-get install -y -q --no-install-recommends "${STATUS_OPT[@]}" "$@" 9>&-; then
       # New menu entries get the same clean-up as the image's.
-      python3 /usr/local/lib/linx/linx-apps.py --tidy >/dev/null 2>&1
+      python3 /usr/local/lib/linx/linx-apps.py --tidy >/dev/null 2>&1 9>&-
       echo "APT_DONE"
     else
       echo "APT_FAILED"

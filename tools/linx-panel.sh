@@ -109,8 +109,14 @@ status_item() {
     xfconf-query -c xfce4-panel -p "$P/command" -n -t string -s "/usr/local/bin/linx-status $what"
     xfconf-query -c xfce4-panel -p "$P/use-label" -n -t bool -s false
     xfconf-query -c xfce4-panel -p "$P/text" -n -t string -s ""
-    xfconf-query -c xfce4-panel -p "$P/update-period" -n -t int -s 3000
+    xfconf-query -c xfce4-panel -p "$P/update-period" -n -t int -s 10000
     xfconf-query -c xfce4-panel -p "$P/enable-single-row" -n -t bool -s true
+    CHANGED=1
+  fi
+  # Every 10 seconds is plenty (the app rewrites the status every 15, and
+  # at once on a change); panels set up with 3 seconds are slowed down.
+  if [ "$(get /plugins/plugin-$id/update-period)" != 10000 ]; then
+    xfconf-query -c xfce4-panel -p "/plugins/plugin-$id/update-period" -n -t int -s 10000
     CHANGED=1
   fi
   add_before_clock "$id"

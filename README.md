@@ -170,9 +170,18 @@ Linux should be (`OnboardingScreen.kt`), while Ubuntu unpacks behind it:
   a Flathub app that is not built for the phone's processor rather than
   failing, and a failed setup's banner can be dismissed.
 
+Setup moves (`SetupEffects.kt`): a slow glow in the colour being picked
+with specks of light rising through it, a logo that lands with a bounce,
+pages whose parts rise in one after another, cards that give under the
+finger with a light haptic tick, and confetti at the end. It is all drawn
+by Compose on one canvas, and it holds still when the phone is set to
+remove animations. "Starting the desktop" shares the background and shows
+a tip every few seconds.
+
 The choices go to `/etc/linx/setup.conf`, and once the desktop is up
-`linx-setup.sh` installs them in the background - sound and Ubuntu's look
-always, then the rest - while a card at the top of the desktop shows the
+`linx-setup.sh` installs them in the background - sound, Ubuntu's look and
+the everyday apps (an image viewer, an archive manager, a calculator, file
+thumbnails, clipboard history) always, then the rest - while a card at the top of the desktop shows the
 step, what apt or Flatpak is doing and a progress bar (`SetupBanner.kt`,
 from apt's `APT::Status-Fd` lines). If it fails, tapping the card retries. It
 copies the file to `setup.done` when everything is in, so an interrupted
@@ -246,6 +255,23 @@ zone has always been the phone's. The language is the phone's from the next
 start: `linx-locale.sh` compiles the locale and installs Ubuntu's
 translations, and `LinuxRuntime` sets `LANG` from `/etc/linx/locale`.
 
+### Installs take turns, and reach the internet
+Setup, the store, updates and the desktop's background extras all install
+through `apt-install.sh` (or `linx-updates.sh`), which share one lock
+(`/tmp/linx-apt.lock`): two apt-gets at once fail on apt's own lock, which
+showed up as "could not download the package lists" when the background
+extras started during first-time setup. Installs wait for their turn; a
+store search or an update check does not, and makes do with the lists
+there are. The lock is closed for everything the scripts start, so a
+service started by a package cannot keep it.
+
+Linux's `/etc/resolv.conf` gets the DNS servers of the network the phone
+is using (not of every network it has: mobile data and the carrier's
+calling network stay up on Wi-Fi, and Linux only asks the first three),
+then a public one, and follows network changes. If `apt-get update` still
+fails, `apt-install.sh` tries public DNS servers, then Ubuntu's archive
+over HTTPS, and reports apt's own error.
+
 ### Battery, network and volume in the panel
 Next to the clock, as on a laptop:
 - **Network:** Wi-Fi or mobile data with signal bars, Ethernet, VPN,
@@ -261,7 +287,10 @@ Next to the clock, as on a laptop:
 Linux under proot cannot see the phone's battery or network, so while Linux
 runs, `PhoneStatus.kt` writes them to `/tmp/linx-phone-status`. Two generic
 monitor panel items run `linx-status battery|network` on that file every
-3 seconds. Setup installs `xfce4-genmon-plugin`; a Linux set up earlier gets it
+10 seconds. Starting a program is slow under proot, so the script uses
+bash's builtins only and starts none. The status icons are styled smaller
+than the dock's and white (`~/.config/gtk-3.0/gtk.css`, from
+`linx-panel.sh`). Setup installs `xfce4-genmon-plugin`; a Linux set up earlier gets it
 in the background the next time the desktop starts.
 
 ### Quick settings, lock, screenshots
