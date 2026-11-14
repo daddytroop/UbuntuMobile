@@ -20,8 +20,8 @@ android {
         // stay below API 29. This is exactly what Termux does, and it is why
         // the app cannot go to the Play Store as it stands.
         targetSdk = 28
-        versionCode = 173
-        versionName = "0.17.3"
+        versionCode = 174
+        versionName = "0.17.4"
         resourceConfigurations += listOf("en")
     }
 
