@@ -596,15 +596,10 @@ fun UbuntuApp(
         if (!java.io.File(vm.paths.root, "usr/bin/pulseaudio").exists()) return
         audio.start()
         mic.start()
-        // The sound server, then the watcher that says when Linux wants the
-        // microphone; when both run already, nothing more is started.
-        vm.runtime.startPersistent(
-            listOf(
-                "/bin/bash", "-c",
-                "/usr/local/lib/linx/linx-audio.sh; [ \$? -le 1 ] || exit; " +
-                    "pgrep -f '^/bin/bash /usr/local/lib/linx/linx-mic.sh' >/dev/null || exec /bin/bash /usr/local/lib/linx/linx-mic.sh",
-            ),
-        )
+        // The sound server; when it runs already, nothing more is started.
+        // (What says when Linux wants the microphone runs with the desktop:
+        // linx-notify.py.)
+        vm.runtime.startPersistent(listOf("/bin/bash", "-c", "exec /usr/local/lib/linx/linx-audio.sh"))
     }
 
     // What onboarding chose (OnboardingScreen) lives in the container, in
@@ -1222,29 +1217,32 @@ fun UbuntuApp(
         )
     }
 
-    fun launchOnDisplay(command: List<String>) {
-        // Set DISPLAY to the in-container X server. Because proot shares
-        // the network namespace and /tmp, a separate proot process can
-        // still connect to the X11 unix socket started by the display
-        // process.
-        vm.runtime.startPersistent(
-            // A login shell resets PATH from /etc/profile, so the
-            // stand-in bwrap is put in front of it inside the command.
-            listOf(
-                "/bin/bash", "-lc",
-                "export PATH=/usr/local/lib/linx/nosandbox:\$PATH; exec " +
-                    command.joinToString(" ") { quote(it) },
-            ),
-            mapOf(
-                "DISPLAY" to ":$DISPLAY_NUM",
-                // GTK applications take the scale from the desktop's
-                // XSETTINGS; Qt ones only read it when they start. Firefox
-                // starts through /usr/local/bin/firefox, which sets up what
-                // it needs under proot.
-                "QT_SCALE_FACTOR" to appliedScale.toString(),
-                "FLATPAK_BWRAP" to "/usr/bin/bwrap",
-            ),
+    fun launchOnDisplay(command: List<String>, name: String? = null) {
+        // A login shell resets PATH from /etc/profile, so the stand-in
+        // bwrap is put in front of it inside the command.
+        val argv = listOf(
+            "/bin/bash", "-lc",
+            "export PATH=/usr/local/lib/linx/nosandbox:\$PATH; exec " +
+                command.joinToString(" ") { quote(it) },
         )
+        val env = mapOf(
+            "DISPLAY" to ":$DISPLAY_NUM",
+            // GTK applications take the scale from the desktop's
+            // XSETTINGS; Qt ones only read it when they start. Firefox
+            // starts through /usr/local/bin/firefox, which sets up what
+            // it needs under proot.
+            "QT_SCALE_FACTOR" to appliedScale.toString(),
+            "FLATPAK_BWRAP" to "/usr/bin/bwrap",
+        )
+        // From inside the desktop's session when its launcher is there
+        // (linx-windows.py): no proot of its own, so one process fewer per
+        // app. Otherwise in a proot next to the desktop's: proot shares
+        // the network namespace and /tmp, so it reaches the X server too.
+        scope.launch(Dispatchers.IO) {
+            if (!com.ubuntumobile.linux.NotificationBridge.launch(argv, env, name)) {
+                vm.runtime.startPersistent(argv, env)
+            }
+        }
     }
 
     // A Flathub app about to be opened while Android's child process
@@ -1254,7 +1252,7 @@ fun UbuntuApp(
         val canFix = com.ubuntumobile.linux.BackgroundLimits.canTurnOffInSettings
         fun openAnyway() {
             limitWarning = null
-            launchOnDisplay(entry.command)
+            launchOnDisplay(entry.command, entry.name)
             opening = entry.name
             screen = Screen.DISPLAY
         }
@@ -1608,7 +1606,7 @@ fun UbuntuApp(
                             } else {
                                 // Linux apps open as windows on the desktop, so
                                 // go there to see them.
-                                launchOnDisplay(entry.command)
+                                launchOnDisplay(entry.command, entry.name)
                                 opening = entry.name
                                 screen = Screen.DISPLAY
                             }

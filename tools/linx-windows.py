@@ -15,8 +15,15 @@ It talks to X through ctypes, so it needs nothing beyond Python and libX11,
 and it waits for X events rather than polling.
 """
 import ctypes
+import json
 import os
+import re
 import select
+import shlex
+import signal
+import socket
+import subprocess
+import threading
 import time
 import sys
 
@@ -302,6 +309,110 @@ x11.XPending.argtypes = [ctypes.c_void_p]
 # appears, which undoes the maximize; so new windows are maximized once
 # more a little later.
 AGAIN_AFTER = (0.8, 2.5)
+
+# ------------------------------------------------------------ the launcher
+# The app starts Linux programs through this process rather than in a proot
+# of their own: it is in the desktop's session already, so a program costs
+# one process, not two (Android counts them: see linx-panel.sh), and comes
+# up in the session's environment. The app's socket is the one linx-phone
+# talks to; this end says it is the launcher and then reads a request a
+# line: {"argv": [...], "env": {...}, "name": "Krita"}.
+#
+# Each program's output is kept in /tmp/linx-run/NAME.log. One that stops
+# with an error before any window has appeared used to look like a tap that
+# did nothing: the reason (the log's last telling line) goes to the desktop
+# as a notification and to the app (/tmp/linx-run-failed: name, reason,
+# log), which shows it with a way to share the log.
+SOCKET_FILE = "/etc/linx/notify-socket"
+RUN_LOGS = "/tmp/linx-run"
+RUN_FAILED = "/tmp/linx-run-failed"
+# What a log line that explains a failed start tends to say...
+TELLING = re.compile(
+    r"error|fail|cannot|can't|could not|not found|no such|denied|unable|illegal|"
+    r"segmentation|abort|core dumped|bad system call|killed|symbol lookup|not supported",
+    re.I,
+)
+# ...and lines that say such things on every start, working or not.
+NOISE = re.compile(r"portal|at-spi|accessibility bus|dbind|Failed to connect to bus|DRI3|bwrap: No perm", re.I)
+
+
+def run_app(request):
+    argv = request.get("argv") or []
+    if not argv:
+        return
+    name = request.get("name") or os.path.basename(argv[0])
+    env = dict(os.environ)
+    env.update({str(k): str(v) for k, v in (request.get("env") or {}).items()})
+    os.makedirs(RUN_LOGS, exist_ok=True)
+    log = os.path.join(RUN_LOGS, re.sub(r"[^A-Za-z0-9._-]", "_", name) + ".log")
+    started = time.time()
+    try:
+        with open(log, "wb") as out:
+            out.write(("$ " + " ".join(shlex.quote(a) for a in argv) + "\n").encode())
+            out.flush()
+            code = subprocess.call(
+                argv, env=env, cwd=os.path.expanduser("~"), stdout=out, stderr=subprocess.STDOUT,
+                stdin=subprocess.DEVNULL, start_new_session=True,
+            )
+    except OSError as err:
+        with open(log, "ab") as out:
+            out.write(("cannot start: %s\n" % err).encode())
+        code = 127
+    try:
+        opened = os.path.getmtime(NEW_WINDOW_FILE) >= started
+    except OSError:
+        opened = False
+    if code == 0 or opened or not request.get("name"):
+        return
+    if code < 0:
+        try:
+            why = "stopped by %s" % signal.Signals(-code).name
+        except ValueError:
+            why = "stopped by signal %d" % -code
+    else:
+        why = "stopped with code %d" % code
+    try:
+        with open(log, errors="replace") as f:
+            lines = [l.strip() for l in f.read().splitlines()[1:] if l.strip()]
+    except OSError:
+        lines = []
+    telling = [l for l in lines if TELLING.search(l) and not NOISE.search(l)]
+    detail = (telling or [l for l in lines if not NOISE.search(l)] or [""])[-1][:300]
+    reason = (detail + " (" + why + ")") if detail else why
+    try:
+        with open(RUN_FAILED + ".new", "w") as f:
+            f.write("%s\n%s\n%s\n" % (name, reason, log))
+        os.replace(RUN_FAILED + ".new", RUN_FAILED)
+    except OSError:
+        pass
+    subprocess.call(
+        ["notify-send", "-u", "critical", "-i", "dialog-error", "%s did not start" % name, reason],
+        stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL,
+    )
+
+
+def launcher():
+    while True:
+        try:
+            with open(SOCKET_FILE) as f:
+                name = f.read().strip()
+            sock = socket.socket(socket.AF_UNIX, socket.SOCK_STREAM)
+            sock.connect("\0" + name)
+            sock.sendall(b'{"launcher": true}\n')
+            for line in sock.makefile("r"):
+                try:
+                    request = json.loads(line)
+                except ValueError:
+                    continue
+                # Taken: the app starts it itself when this does not come.
+                sock.sendall(b"ok\n")
+                threading.Thread(target=run_app, args=(request,), daemon=True).start()
+        except OSError:
+            pass
+        time.sleep(3)
+
+
+threading.Thread(target=launcher, daemon=True).start()
 
 known = set(clients())
 x11.XSelectInput(display, root, PROPERTY_CHANGE_MASK)

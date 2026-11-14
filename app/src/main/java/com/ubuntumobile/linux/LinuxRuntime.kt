@@ -111,6 +111,18 @@ class LinuxRuntime(private val paths: LinuxPaths) {
         put("LANG", locale)
         put("LC_ALL", locale)
         if (locale != "C.UTF-8") put("LANGUAGE", locale.substringBefore('_') + ":en")
+        // The desktop's session bus when there is one, and none otherwise.
+        // Left unset, a program that wants D-Bus (the sound server, pactl)
+        // starts a bus of its own - a dbus-launch and a dbus-daemon that
+        // stay for good, two more processes against Android's limit.
+        put(
+            "DBUS_SESSION_BUS_ADDRESS",
+            try {
+                java.io.File(paths.sharedTmpDir, "linx-session-bus").readText().trim().ifEmpty { "disabled:" }
+            } catch (_: Exception) {
+                "disabled:"
+            },
+        )
         // The desktop's X server (display-start.sh, started as :99 by the
         // app), so whatever runs in the guest - the scripts restarting the
         // panel, a program started from the console - finds it.

@@ -138,8 +138,62 @@ def show_phone_notes():
         time.sleep(1)
 
 
+MIC_WANTED = "/tmp/linx-mic-wanted"
+
+
+def mic_wanted():
+    """Whether anything records from the phone's microphone ("phonemic")."""
+    def short(what):
+        out = subprocess.run(["pactl", "list", "short", what], capture_output=True, text=True, timeout=10).stdout
+        return [line.split("\t") for line in out.splitlines() if line.strip()]
+    try:
+        index = [row[0] for row in short("sources") if len(row) > 1 and row[1] == "phonemic"]
+        if not index:
+            return False
+        return any(len(row) > 1 and row[1] == index[0] for row in short("source-outputs"))
+    except (OSError, subprocess.SubprocessError):
+        return False
+
+
+def watch_microphone():
+    """Say whether a Linux app is listening to the phone's microphone.
+
+    Writes 1 to /tmp/linx-mic-wanted while anything records from the
+    "phonemic" source (linx-audio.sh), and 0 otherwise. The app
+    (MicBridge.kt) reads the file and turns the phone's microphone on and
+    off to match, so the microphone - and Android's indicator - is only on
+    while an app is recording. It used to be a script of its own
+    (linx-mic.sh: a proot, two shells and pactl); here it is one pactl.
+    """
+    def write(on):
+        try:
+            with open(MIC_WANTED + ".new", "w") as f:
+                f.write("1\n" if on else "0\n")
+            os.replace(MIC_WANTED + ".new", MIC_WANTED)
+        except OSError:
+            pass
+
+    while True:
+        write(mic_wanted())
+        try:
+            # Every recording that starts or stops is a source-output event.
+            proc = subprocess.Popen(["pactl", "subscribe"], stdout=subprocess.PIPE,
+                                    stderr=subprocess.DEVNULL, text=True)
+            for line in proc.stdout:
+                if "source-output" in line:
+                    write(mic_wanted())
+            proc.wait()
+        except OSError:
+            pass
+        # The sound server went away; look again shortly.
+        write(False)
+        time.sleep(5)
+
+
 if __name__ == "__main__":
+    os.environ.setdefault("XDG_RUNTIME_DIR", "/tmp/runtime-root")
     threading.Thread(target=show_phone_notes, daemon=True).start()
+    threading.Thread(target=watch_microphone, daemon=True).start()
     # dbus-monitor ends with the session; the desktop starts this again.
     while True:
         watch()

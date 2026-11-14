@@ -295,9 +295,22 @@ def main():
                 break
 
     # Flatpak's D-Bus filter is handed file descriptors that cannot cross to
-    # the app; it is small and mostly waits, so it runs nested.
+    # the app. Its sandbox is the whole system as it is (every bind onto
+    # itself, plus the app's /.flatpak-info), so it needs no proot at all:
+    # it runs as it is, in this process's place - one process where a
+    # nested proot made three (Android counts them: see linx-panel.sh).
     code = None
-    if not os.path.basename(command[0]).startswith("xdg-dbus-proxy"):
+    if os.path.basename(command[0]).startswith("xdg-dbus-proxy"):
+        if all(src == dest or dest == "/.flatpak-info" for src, dest in box.binds):
+            write_json(box.info_fds + box.status_fds, {"child-pid": os.getpid()})
+            close_fds(box.info_fds)
+            shutil.rmtree(box.work, ignore_errors=True)
+            try:
+                os.execve(command[0], command, box.env)
+            except OSError as err:
+                sys.stderr.write("bwrap: execvp %s: %s\n" % (command[0], err))
+                sys.exit(1)
+    else:
         code = run_outside(box, command)
     if code is None:
         code = run_nested(box, command)

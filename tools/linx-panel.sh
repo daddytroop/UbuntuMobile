@@ -26,6 +26,18 @@ plugin_installed() { ls /usr/lib/*/xfce4/panel/plugins/"lib$1.so" >/dev/null 2>&
 get() { xfconf-query -c xfce4-panel -p "$1" 2>/dev/null; }
 CHANGED=0
 
+# Every panel item in the panel's own process. XFCE runs most plugins in a
+# process each ("wrapper-2.0": seven of them here), and Android counts every
+# Linux process against the 32 it lets an app have before it starts killing
+# them (see README, "Android's 32-process limit"). A plugin's .desktop file
+# says which way it runs; a package update puts the file back, so this is
+# done at every start.
+for f in /usr/share/xfce4/panel/plugins/*.desktop; do
+  if grep -qiE '^X-XFCE-Internal=false' "$f" 2>/dev/null && grep -q '^X-XFCE-Module=' "$f"; then
+    sed -i -E 's/^X-XFCE-Internal=.*/X-XFCE-Internal=true/I' "$f" && CHANGED=1
+  fi
+done
+
 # ---------------------------------------------------------------- the menu
 if plugin_installed whiskermenu && [ "$(get /plugins/plugin-1)" != whiskermenu ]; then
   P=/plugins/plugin-1

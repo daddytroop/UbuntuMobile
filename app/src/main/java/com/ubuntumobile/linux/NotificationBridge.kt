@@ -49,6 +49,47 @@ object NotificationBridge {
 
     fun socketName(packageName: String) = "$packageName.notify"
 
+    // The desktop's launcher, connected (linx-windows.py), or null.
+    private val launcherLock = Any()
+    private var launcher: android.net.LocalSocket? = null
+    private var launcherReader: java.io.BufferedReader? = null
+
+    /**
+     * Start a Linux program from inside the desktop's session, through the
+     * launcher there, rather than in a proot of its own: one process instead
+     * of two, which matters under Android's limit of 32 child processes.
+     * [name] is what to call it if it stops before opening a window.
+     *
+     * False when there is no launcher to take it (the desktop is not up, or
+     * is an older one): the caller then starts it the old way.
+     */
+    fun launch(argv: List<String>, env: Map<String, String>, name: String?): Boolean = synchronized(launcherLock) {
+        val socket = launcher ?: return false
+        try {
+            val request = JSONObject()
+                .put("argv", org.json.JSONArray(argv))
+                .put("env", JSONObject(env))
+            if (name != null) request.put("name", name)
+            socket.outputStream.write((request.toString() + "\n").toByteArray())
+            socket.outputStream.flush()
+            // It says "ok" when it has the request; silence means it is gone.
+            socket.soTimeout = 2500
+            launcherReader?.readLine() == "ok"
+        } catch (e: Exception) {
+            Log.w(TAG, "the launcher did not answer", e)
+            false
+        }.also { taken ->
+            if (!taken) {
+                try {
+                    socket.close()
+                } catch (_: Exception) {
+                }
+                launcher = null
+                launcherReader = null
+            }
+        }
+    }
+
     @Synchronized
     fun start(context: Context, paths: LinuxPaths) {
         val app = context.applicationContext
@@ -71,8 +112,24 @@ object NotificationBridge {
         Thread({
             while (true) {
                 try {
-                    server.accept().use { client ->
-                        val line = client.inputStream.bufferedReader().readLine() ?: return@use
+                    val accepted = server.accept()
+                    val reader = accepted.inputStream.bufferedReader()
+                    val first = reader.readLine()
+                    if (first != null && JSONObject(first).has("launcher")) {
+                        // The desktop's launcher (linx-windows.py): the
+                        // connection stays, for launch() to write to.
+                        synchronized(launcherLock) {
+                            try {
+                                launcher?.close()
+                            } catch (_: Exception) {
+                            }
+                            launcher = accepted
+                            launcherReader = reader
+                        }
+                        continue
+                    }
+                    accepted.use { _ ->
+                        val line = first ?: return@use
                         val message = JSONObject(line)
                         when {
                             message.has("open") -> openOnPhone(app, message.getString("open"))

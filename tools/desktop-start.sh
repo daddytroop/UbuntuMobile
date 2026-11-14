@@ -186,4 +186,17 @@ esac
 # Stay alive. This script runs under dbus-run-session, and the session bus
 # has to outlive the components: the GTK applications connect to it and
 # exit when it disappears.
+#
+# Without another process for it (Android counts them: see linx-panel.sh):
+# the shell itself waits, on a pipe nothing writes to. It is also the
+# parent of what was started above, so what ends (feh, the helpers) is
+# reaped rather than left as a zombie, which "exec sleep infinity" did.
+ANCHOR=/tmp/linx-session-anchor
+rm -f "$ANCHOR"
+if mkfifo "$ANCHOR" 2>/dev/null && exec 9<>"$ANCHOR"; then
+  while true; do
+    # Waits for any child to end, which reaps it; with none left, on the pipe.
+    wait -n 2>/dev/null || read -r -t 3600 -u 9 _ || true
+  done
+fi
 exec sleep infinity
