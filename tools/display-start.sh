@@ -204,6 +204,11 @@ for _ in 1 2 3 4 5 6 7 8 9 10 11 12 13 14 15; do
     # Flatpak finds bwrap on PATH too; keep it on /usr/bin/bwrap, which is
     # linx-bwrap once Flathub is on (linx-flatpak.sh).
     export FLATPAK_BWRAP=/usr/bin/bwrap
+    # An update of the app brings a newer linx-bwrap; linx-flatpak.sh only
+    # runs when something is installed, so it is put in place here.
+    if [ -e /usr/bin/bwrap.real ] && ! cmp -s /usr/local/lib/linx/linx-bwrap /usr/bin/bwrap; then
+      install -m 0755 /usr/local/lib/linx/linx-bwrap /usr/bin/bwrap
+    fi
     # Apps installed from Flathub appear in the Applications menu.
     export XDG_DATA_DIRS="/var/lib/flatpak/exports/share:/usr/local/share:/usr/share"
 

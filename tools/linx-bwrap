@@ -301,7 +301,7 @@ def main():
     # nested proot made three (Android counts them: see linx-panel.sh).
     code = None
     if os.path.basename(command[0]).startswith("xdg-dbus-proxy"):
-        if all(src == dest or dest == "/.flatpak-info" for src, dest in box.binds):
+        if all(src == os.path.realpath(dest) or dest == "/.flatpak-info" for src, dest in box.binds):
             write_json(box.info_fds + box.status_fds, {"child-pid": os.getpid()})
             close_fds(box.info_fds)
             shutil.rmtree(box.work, ignore_errors=True)
