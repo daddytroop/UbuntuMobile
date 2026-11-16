@@ -60,6 +60,7 @@ import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.setValue
+import androidx.compose.foundation.border
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
@@ -150,7 +151,35 @@ private val WELL_KNOWN = listOf(
     "org.videolan.", "org.blender.", "com.obsproject.", "org.freedesktop.",
 )
 
-private enum class StoreSource(val label: String) { FLATHUB("Flathub"), UBUNTU("Ubuntu"), UPDATES("Updates") }
+private enum class StoreSource(val label: String) { FLATHUB("Flathub"), UBUNTU("Ubuntu"), INSTALLED("Installed"), UPDATES("Updates") }
+
+/** An app that can be uninstalled (linx-apps.py --installed). */
+internal data class InstalledApp(
+    val flatpak: Boolean,
+    /** The package, or the Flathub app id. */
+    val owner: String,
+    val name: String,
+    val iconPath: String?,
+) {
+    companion object {
+        fun parse(output: String): List<InstalledApp> = output.lines().mapNotNull { line ->
+            val p = line.trim().split("|")
+            if (p.size < 5 || p[0] !in setOf("deb", "flatpak") || p[1].isBlank()) null
+            else InstalledApp(p[0] == "flatpak", p[1], p[3], p[4].ifBlank { null })
+        }
+    }
+}
+
+/** The command that uninstalls [app] in the container; its last lines say how it went. */
+internal fun uninstallCommand(flatpak: Boolean, owner: String): String =
+    if (flatpak) {
+        // Then the runtimes nothing uses any more, which are most of the space.
+        "flatpak uninstall -y --noninteractive ${shellQuote(owner)} 2>&1 | grep -v 'No permissions' | tail -n 3; " +
+            "flatpak uninstall -y --noninteractive --unused >/dev/null 2>&1; " +
+            "flatpak info ${shellQuote(owner)} >/dev/null 2>&1 && echo UNINSTALL_FAILED || echo UNINSTALL_DONE"
+    } else {
+        "/usr/local/lib/linx/apt-install.sh --remove ${shellQuote(owner)} 2>&1 | tail -n 3"
+    }
 
 /**
  * The store's front page: well-known desktop applications that run in the
@@ -233,6 +262,8 @@ fun StoreScreen(
     initialQuery: String = "",
     /** What setup was told it is for: those collections come first. */
     interests: Set<Interest> = emptySet(),
+    /** The container's root, for the installed apps' icons. */
+    iconRoot: java.io.File? = null,
 ) {
     var source by remember { mutableStateOf(if (showUpdates) StoreSource.UPDATES else StoreSource.FLATHUB) }
     // Flathub's front page: popular apps, or one category's.
@@ -253,6 +284,30 @@ fun StoreScreen(
     var installing by remember { mutableStateOf<String?>(null) }
     var message by remember { mutableStateOf<String?>(null) }
     val scope = rememberCoroutineScope()
+    // Uninstalling: the app asked about, and the Installed tab's list.
+    var confirmRemove by remember { mutableStateOf<InstalledApp?>(null) }
+    var installedApps by remember { mutableStateOf<List<InstalledApp>?>(null) }
+    var listVersion by remember { mutableStateOf(0) }
+
+    fun uninstall(app: InstalledApp) {
+        scope.launch {
+            installing = app.owner
+            progress = null
+            message = "Uninstalling ${app.name}…"
+            val out = runGuest(uninstallCommand(app.flatpak, app.owner), 900)
+            val done = out.contains("APT_DONE") || out.contains("UNINSTALL_DONE")
+            message = if (done) {
+                "${app.name} is uninstalled. Its settings in your home folder are kept, in case it comes back."
+            } else {
+                "${app.name} could not be uninstalled: " +
+                    (out.trim().lines().lastOrNull { it.isNotBlank() && !it.startsWith("APT_FAILED") && !it.startsWith("UNINSTALL") }?.take(200)
+                        ?: "no output")
+            }
+            installed[app.owner] = !done
+            installing = null
+            listVersion++
+        }
+    }
 
     suspend fun refreshStatus(apps: List<StoreApp>) {
         if (apps.isEmpty()) return
@@ -406,6 +461,7 @@ fun StoreScreen(
         subtitle = if (details != null) "From Flathub" else when (source) {
             StoreSource.FLATHUB -> "Linux apps from Flathub"
             StoreSource.UBUNTU -> "Desktop apps from Ubuntu"
+            StoreSource.INSTALLED -> "Apps you added, to open or uninstall"
             StoreSource.UPDATES -> "Ubuntu and Flathub, kept up to date"
         },
         onBack = {
@@ -417,7 +473,7 @@ fun StoreScreen(
         },
         modifier = modifier,
     ) {
-        if (source != StoreSource.UPDATES && details == null) SearchBar(
+        if (source != StoreSource.UPDATES && source != StoreSource.INSTALLED && details == null) SearchBar(
             query = query,
             onQueryChange = { query = it },
             hint = if (source == StoreSource.FLATHUB) "Search Flathub" else "Search Ubuntu packages",
@@ -481,6 +537,45 @@ fun StoreScreen(
             }
         }
 
+        confirmRemove?.let { app ->
+            androidx.compose.material3.AlertDialog(
+                onDismissRequest = { confirmRemove = null },
+                title = { Text("Uninstall ${app.name}?") },
+                text = {
+                    Text(
+                        if (app.flatpak) "It is removed from Linux, with the Flathub runtimes nothing else uses. Its settings in your home folder stay."
+                        else "It is removed from Linux, with what only it needed. Its settings in your home folder stay.",
+                    )
+                },
+                confirmButton = {
+                    androidx.compose.material3.TextButton({ confirmRemove = null; uninstall(app) }) { Text("Uninstall") }
+                },
+                dismissButton = { androidx.compose.material3.TextButton({ confirmRemove = null }) { Text("Cancel") } },
+            )
+        }
+
+        if (source == StoreSource.INSTALLED && details == null) {
+            LaunchedEffect(listVersion) {
+                installedApps = InstalledApp.parse(runGuest("python3 /usr/local/lib/linx/linx-apps.py --installed", 120))
+            }
+            InstalledPane(
+                apps = installedApps,
+                busy = installing,
+                iconRoot = iconRoot,
+                onOpen = { app ->
+                    openApp(
+                        if (app.flatpak) listOf("/usr/bin/flatpak", "run", app.owner)
+                        else listOf("/usr/bin/python3", "/usr/local/lib/linx/linx-apps.py", "--run", app.owner),
+                    )
+                },
+                onUninstall = { confirmRemove = it },
+                modifier = Modifier
+                    .widthIn(max = 720.dp)
+                    .align(Alignment.CenterHorizontally),
+            )
+            return@MobuntuScreen
+        }
+
         if (source == StoreSource.UPDATES) {
             UpdatesPane(
                 runGuest = runGuest,
@@ -502,6 +597,7 @@ fun StoreScreen(
                 enabled = installing == null,
                 onInstall = { install(app) },
                 onOpen = { openApp(app.command) },
+                onUninstall = { confirmRemove = InstalledApp(app.flatpak, app.pkg, app.name, null) },
                 modifier = Modifier
                     .widthIn(max = 720.dp)
                     .align(Alignment.CenterHorizontally),
@@ -846,6 +942,7 @@ private fun StoreDetails(
     enabled: Boolean,
     onInstall: () -> Unit,
     onOpen: () -> Unit,
+    onUninstall: () -> Unit = {},
     modifier: Modifier = Modifier,
 ) {
     var info by remember(app.pkg) { mutableStateOf<FlathubDetails?>(null) }
@@ -873,7 +970,10 @@ private fun StoreDetails(
                     Text(app.developer, fontSize = 13.sp, color = Ui.inkSoft)
                 }
                 Spacer(Modifier.height(10.dp))
-                StoreButton(app, installed, busy, enabled, onInstall, onOpen)
+                Row(horizontalArrangement = Arrangement.spacedBy(8.dp), verticalAlignment = Alignment.CenterVertically) {
+                    StoreButton(app, installed, busy, enabled, onInstall, onOpen)
+                    if (installed == true && !busy) UninstallButton(enabled, onUninstall)
+                }
             }
         }
         if (busy) {
@@ -1167,5 +1267,85 @@ private fun AppCard(
         )
         Spacer(Modifier.height(10.dp))
         StoreButton(app, installed, busy, enabled, onInstall, onOpen)
+    }
+}
+
+/** Uninstall, quietly: a red outline rather than a filled button. */
+@Composable
+private fun UninstallButton(enabled: Boolean, onClick: () -> Unit) {
+    val red = Color(0xFFF87171)
+    Box(
+        Modifier
+            .clip(RoundedCornerShape(18.dp))
+            .border(1.dp, red.copy(alpha = if (enabled) 0.7f else 0.25f), RoundedCornerShape(18.dp))
+            .clickable(enabled = enabled, onClick = onClick)
+            .padding(horizontal = 14.dp, vertical = 8.dp),
+    ) {
+        Text("Uninstall", color = if (enabled) red else red.copy(alpha = 0.4f), fontSize = 13.sp, fontWeight = FontWeight.Medium)
+    }
+}
+
+/** Software's Installed tab: the apps added to Linux, each to open or uninstall. */
+@Composable
+private fun InstalledPane(
+    apps: List<InstalledApp>?,
+    busy: String?,
+    iconRoot: java.io.File?,
+    onOpen: (InstalledApp) -> Unit,
+    onUninstall: (InstalledApp) -> Unit,
+    modifier: Modifier = Modifier,
+) {
+    LazyColumn(
+        modifier = modifier.fillMaxSize(),
+        contentPadding = PaddingValues(horizontal = 16.dp, vertical = 12.dp),
+        verticalArrangement = Arrangement.spacedBy(8.dp),
+    ) {
+        item {
+            Text(
+                when {
+                    apps == null -> "Looking…"
+                    apps.isEmpty() -> "Nothing added yet. Apps you install from Flathub or Ubuntu show up here."
+                    else -> (if (apps.size == 1) "1 app" else "${apps.size} apps") + ". The desktop's own (Terminal, Files, settings) are not listed."
+                },
+                fontSize = 14.sp,
+                fontWeight = FontWeight.Medium,
+                color = Ui.inkSoft,
+                modifier = Modifier.padding(start = 4.dp, bottom = 4.dp),
+            )
+        }
+        items(apps.orEmpty(), key = { (if (it.flatpak) "f:" else "d:") + it.owner }) { app ->
+            Row(
+                Modifier
+                    .fillMaxWidth()
+                    .clip(RoundedCornerShape(16.dp))
+                    .background(Ui.card)
+                    .clickable(enabled = busy == null) { onOpen(app) }
+                    .padding(12.dp),
+                verticalAlignment = Alignment.CenterVertically,
+            ) {
+                val icon = rememberAppIcon(iconRoot, app.iconPath)
+                Box(
+                    Modifier.size(44.dp).clip(RoundedCornerShape(12.dp)).background(Ui.cardRaised),
+                    contentAlignment = Alignment.Center,
+                ) {
+                    if (icon != null) {
+                        androidx.compose.foundation.Image(icon, contentDescription = null, modifier = Modifier.size(36.dp))
+                    } else {
+                        Icon(Icons.Default.Inventory2, contentDescription = null, tint = Ui.inkSoft, modifier = Modifier.size(24.dp))
+                    }
+                }
+                Spacer(Modifier.width(14.dp))
+                Column(Modifier.weight(1f)) {
+                    Text(app.name, fontSize = 16.sp, fontWeight = FontWeight.Medium, color = Ui.ink, maxLines = 1, overflow = TextOverflow.Ellipsis)
+                    Text(
+                        if (busy == app.owner) "Uninstalling…" else if (app.flatpak) "Flathub" else "Ubuntu",
+                        fontSize = 12.sp,
+                        color = Ui.inkSoft,
+                    )
+                }
+                Spacer(Modifier.width(8.dp))
+                UninstallButton(enabled = busy == null) { onUninstall(app) }
+            }
+        }
     }
 }

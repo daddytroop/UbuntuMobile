@@ -459,7 +459,7 @@ private val iconCache = android.util.LruCache<String, ImageBitmap>(96)
  * size for some apps) are rendered at 192 pixels.
  */
 @Composable
-private fun rememberAppIcon(root: java.io.File?, path: String?): ImageBitmap? {
+internal fun rememberAppIcon(root: java.io.File?, path: String?): ImageBitmap? {
     val icon by produceState(path?.let { iconCache.get(it) }, root, path) {
         if (value != null || root == null || path == null) return@produceState
         value = withContext(Dispatchers.IO) {

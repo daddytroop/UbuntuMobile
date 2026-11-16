@@ -453,8 +453,57 @@ def run(app_id, targets=()):
     os.execvp(argv[0], argv)
 
 
+# Packages the desktop itself is made of: Software's Installed tab does not
+# offer to uninstall their apps (Terminal, Files, the settings).
+CORE = re.compile(
+    r"^(xfce4|xfwm4|xfdesktop4|xfconf|libxfce|thunar|exo-utils|garcon|tigervnc|dbus|pulseaudio|pavucontrol|"
+    r"python3|bash|coreutils|apt|dpkg|systemd|ubuntu-|base-|xdg-|desktop-file|yaru|adwaita|tumbler|flatpak|"
+    r"proot|feh|openbox|tint2|policykit|lxpolkit|at-spi|gnome-keyring|cups|system-config-printer|"
+    # The everyday apps the desktop comes with (desktop-start.sh puts them back).
+    r"ristretto|xarchiver|galculator|mousepad|atril|evince)"
+)
+
+
+def installed_apps():
+    """The apps that can be uninstalled, a line each:
+    "deb|package|app id|name|icon" or "flatpak|app id|app id|name|icon"."""
+    index = icon_index()
+    rows = {}
+    debs = {}
+    for app_id, (path, e) in entries().items():
+        if not shown(app_id, e) or e.get("X-Linx-Android") == "true":
+            continue
+        if path.startswith("/var/lib/flatpak/"):
+            # The exported entry links into /var/lib/flatpak/app/<id>/...
+            real_path = os.path.realpath(path)
+            parts = real_path.split("/var/lib/flatpak/app/", 1)
+            owner = parts[1].split("/", 1)[0] if len(parts) == 2 else app_id
+            rows.setdefault(("flatpak", owner), (app_id, e))
+        elif path.startswith("/usr/share/applications/"):
+            debs[path] = (app_id, e)
+    if debs:
+        out = subprocess.run(["dpkg-query", "-S"] + list(debs), capture_output=True, text=True).stdout
+        for line in out.splitlines():
+            if ": " not in line or line.startswith("diversion"):
+                continue
+            pkgs, path = line.split(": ", 1)
+            pkg = pkgs.split(",")[0].strip().split(":")[0]
+            if path in debs and not CORE.match(pkg):
+                rows.setdefault(("deb", pkg), debs[path])
+    lines = []
+    for (kind, owner), (app_id, e) in rows.items():
+        name = NAMES.get(app_id, e["Name"])
+        lines.append((name.lower(), "|".join([
+            kind, owner, app_id, clean(name), real(find_icon(e.get("Icon", ""), index)),
+        ])))
+    for _, line in sorted(lines):
+        print(line)
+
+
 if __name__ == "__main__":
-    if len(sys.argv) >= 3 and sys.argv[1] == "--run":
+    if len(sys.argv) == 2 and sys.argv[1] == "--installed":
+        installed_apps()
+    elif len(sys.argv) >= 3 and sys.argv[1] == "--run":
         run(sys.argv[2], tuple(sys.argv[3:]))
     elif len(sys.argv) == 3 and sys.argv[1] == "--handlers":
         handlers(sys.argv[2])

@@ -43,6 +43,29 @@ class LinuxService : Service() {
             }
         }
 
+        /**
+         * Turn Linux off: the app and every Linux program with it (they are
+         * the app's processes). With [restart], the app opens again at once
+         * and Linux starts fresh. The same as the notification's Stop Linux,
+         * for phones where that notification is hidden (Pixels let it be
+         * swiped away, or notifications are off).
+         */
+        fun powerOff(activity: android.app.Activity, restart: Boolean) {
+            Log.i(TAG, if (restart) "restarting Linux" else "turning Linux off")
+            try {
+                activity.stopService(Intent(activity, LinuxService::class.java))
+            } catch (_: Exception) {
+            }
+            if (restart) {
+                activity.packageManager.getLaunchIntentForPackage(activity.packageName)?.let {
+                    activity.startActivity(it.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_ACTIVITY_CLEAR_TASK))
+                }
+            } else {
+                activity.finishAndRemoveTask()
+            }
+            android.os.Process.killProcess(android.os.Process.myPid())
+        }
+
         fun start(context: Context) {
             val intent = Intent(context, LinuxService::class.java)
             try {

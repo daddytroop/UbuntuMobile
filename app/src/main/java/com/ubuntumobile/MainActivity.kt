@@ -1,5 +1,6 @@
 package com.ubuntumobile
 
+import androidx.compose.material.icons.filled.PowerSettingsNew
 import com.ubuntumobile.display.QuickSettingsPanel
 import android.os.Bundle
 import android.view.WindowManager
@@ -1192,6 +1193,36 @@ fun UbuntuApp(
     // An app that stopped before showing a window: its name, why (the last
     // telling line of its output) and its log (linx-apps.py's supervise).
     var launchFailure by remember { mutableStateOf<Triple<String, String, java.io.File>?>(null) }
+    // The menu's Power: turn Linux off or restart it.
+    var powerAsked by remember { mutableStateOf(false) }
+    if (powerAsked) {
+        androidx.compose.material3.AlertDialog(
+            onDismissRequest = { powerAsked = false },
+            icon = { androidx.compose.material3.Icon(androidx.compose.material.icons.Icons.Default.PowerSettingsNew, contentDescription = null) },
+            title = { androidx.compose.material3.Text("Turn off Linux?") },
+            text = {
+                androidx.compose.material3.Text(
+                    "Every Linux app closes, and Linux stops using the battery in the background. " +
+                        "Save your work first. Your files and apps stay; open Mobuntu to start it again.",
+                )
+            },
+            confirmButton = {
+                androidx.compose.material3.TextButton({
+                    powerAsked = false
+                    (context as? android.app.Activity)?.let { com.ubuntumobile.linux.LinuxService.powerOff(it, restart = false) }
+                }) { androidx.compose.material3.Text("Turn off") }
+            },
+            dismissButton = {
+                androidx.compose.foundation.layout.Row {
+                    androidx.compose.material3.TextButton({ powerAsked = false }) { androidx.compose.material3.Text("Cancel") }
+                    androidx.compose.material3.TextButton({
+                        powerAsked = false
+                        (context as? android.app.Activity)?.let { com.ubuntumobile.linux.LinuxService.powerOff(it, restart = true) }
+                    }) { androidx.compose.material3.Text("Restart") }
+                }
+            },
+        )
+    }
     LaunchedEffect(opening) {
         if (opening == null) return@LaunchedEffect
         val since = System.currentTimeMillis()
@@ -1691,6 +1722,7 @@ fun UbuntuApp(
                 modifier = Modifier.systemBarsPadding(),
                 tmpDir = vm.paths.sharedTmpDir,
                 interests = look?.interests.orEmpty(),
+                iconRoot = vm.paths.root,
             )
         }
 
@@ -1819,6 +1851,7 @@ fun UbuntuApp(
                     }
                 },
                 onOpenSettings = { screen = Screen.SETTINGS },
+                onPower = { powerAsked = true },
                 browserNote = browserNote,
                 setup = setupStatus,
                 onRetrySetup = { if (!browserBusy) scope.launch { runSetup() } },

@@ -32,6 +32,7 @@ import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Apps
 import androidx.compose.material.icons.filled.Lock
+import androidx.compose.material.icons.filled.PowerSettingsNew
 import androidx.compose.material.icons.filled.Screenshot
 import androidx.compose.material.icons.filled.Tune
 import androidx.compose.material.icons.filled.Cast
@@ -209,6 +210,7 @@ fun DesktopMenu(
 
                 MenuSection("App")
                 MenuItem(Icons.Default.Settings, "Settings", go(actions.onOpenSettings))
+                MenuItem(Icons.Default.PowerSettingsNew, "Power", go(actions.onPower))
             }
         }
     }

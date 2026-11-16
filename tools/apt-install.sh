@@ -4,6 +4,7 @@
 #   apt-install.sh firefox             install (and say APT_DONE)
 #   apt-install.sh --status pkg...     print "pkg installed|missing" lines
 #   apt-install.sh --search words      print "pkg|summary" for matches
+#   apt-install.sh --remove pkg...     uninstall (and say APT_DONE)
 #
 # The image ships without apt's package lists (they are large and go stale),
 # so the first install fetches them; after that they are refreshed once a
@@ -101,6 +102,18 @@ case "${1:-}" in
     # a desktop store is about. apt-cache cannot tell, so match on names
     # and descriptions and let the store show the best few.
     apt-cache search --names-only "$*" 2>/dev/null | head -40 | sed 's/ - /|/'
+    ;;
+  --remove)
+    shift
+    [ $# -gt 0 ] || { echo "APT_FAILED nothing to remove"; exit 2; }
+    # What only these needed goes too (--autoremove); settings in the home
+    # folder stay.
+    if apt-get remove -y -q --autoremove "$@" 9>&-; then
+      echo "APT_DONE"
+    else
+      echo "APT_FAILED"
+      exit 1
+    fi
     ;;
   "")
     echo "usage: apt-install.sh package..." >&2

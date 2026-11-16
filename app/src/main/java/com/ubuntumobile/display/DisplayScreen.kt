@@ -89,6 +89,8 @@ class DisplayActions(
     val onUseMonitor: (() -> Unit)? = null,
     val onOpenBrowser: () -> Unit = {},
     val onOpenSettings: () -> Unit = {},
+    /** Turn Linux off, or restart it (the menu's Power). */
+    val onPower: () -> Unit = {},
     /** What is happening with the browser, e.g. "Installing Firefox…"; null when it is ready. */
     val browserNote: String? = null,
     /** The apps chosen at setup installing; null when there is nothing to show. */
