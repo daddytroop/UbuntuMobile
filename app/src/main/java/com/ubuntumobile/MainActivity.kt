@@ -335,6 +335,28 @@ fun UbuntuApp(
         )
     }
     var fullScreen by remember { mutableStateOf(prefs.getBoolean("full_screen", true)) }
+    var performance by remember { mutableStateOf(com.ubuntumobile.ui.Performance.saved(prefs, context)) }
+    // The frame rate here, the rest in Linux (linx-performance.sh reads the
+    // file; desktop-start.sh at the next start, the launcher at once).
+    var performanceApplied by remember { mutableStateOf<com.ubuntumobile.ui.Performance?>(null) }
+    LaunchedEffect(performance) {
+        com.ubuntumobile.display.VncClient.frameIntervalMs = 1000L / performance.fps
+        withContext(Dispatchers.IO) {
+            try {
+                vm.paths.sharedTmpDir.mkdirs()
+                java.io.File(vm.paths.sharedTmpDir, "linx-performance").writeText(performance.id + "\n")
+            } catch (_: Exception) {
+            }
+            if (performanceApplied != null) {
+                com.ubuntumobile.linux.NotificationBridge.launch(
+                    listOf("/bin/bash", "/usr/local/lib/linx/linx-performance.sh"),
+                    mapOf("DISPLAY" to ":$DISPLAY_NUM"),
+                    null,
+                )
+            }
+        }
+        performanceApplied = performance
+    }
 
     var monitorSize by remember { mutableStateOf<androidx.compose.ui.unit.IntSize?>(null) }
 
@@ -1660,6 +1682,13 @@ fun UbuntuApp(
 
         Screen.SETTINGS -> {
             SettingsScreen(
+                performance = performance,
+                recommendedPerformance = remember { com.ubuntumobile.ui.Performance.recommended(context) },
+                memoryGb = remember { com.ubuntumobile.ui.Performance.memoryGb(context) },
+                onPerformance = {
+                    performance = it
+                    com.ubuntumobile.ui.Performance.save(prefs, it)
+                },
                 desktopSize = desktopSize,
                 onDesktopSize = {
                     desktopSize = it

@@ -36,6 +36,10 @@ class VncClient(
 
     companion object {
         const val ENCODING_RAW = 0
+
+        /** The least time between screen updates (Performance); 0 for as fast as they come. */
+        @Volatile
+        var frameIntervalMs = 0L
         const val ENCODING_COPY_RECT = 1
         const val ENCODING_HEXTILE = 5
 
@@ -154,6 +158,8 @@ class VncClient(
     }
 
     /** The pixel format the server announced. */
+    private var lastFrameRequestAt = 0L
+
     var pixelFormat: PixelFormat = PixelFormat(32, 24, false, true, 255, 255, 255, 16, 8, 0)
         private set
 
@@ -303,7 +309,16 @@ class VncClient(
                     // second request while one is still pending is a protocol
                     // violation and servers may ignore it. A new size starts
                     // from an empty framebuffer, so that asks for all of it.
-                    if (resized) requestFullUpdate() else requestIncrementalUpdate()
+                    if (resized) {
+                        requestFullUpdate()
+                    } else {
+                        // No sooner than the frame rate allows (Performance):
+                        // fewer frames for the server to encode and this
+                        // side to draw.
+                        val wait = lastFrameRequestAt + frameIntervalMs - (System.nanoTime() / 1_000_000)
+                        if (wait > 0) Thread.sleep(wait)
+                        requestIncrementalUpdate()
+                    }
                 }
                 MSG_SET_COLOUR_MAP_ENTRIES -> {
                     // RFC 6143 7.6.2: padding (1), first colour (2), count (2).
@@ -394,6 +409,7 @@ class VncClient(
      */
     @Synchronized
     fun requestIncrementalUpdate() {
+        lastFrameRequestAt = (System.nanoTime() / 1_000_000)
         val out = output ?: return
         out.write(3) // FramebufferUpdateRequest
         out.write(1) // incremental = true

@@ -131,6 +131,7 @@ object ContainerSetup {
         "linx-folders.sh" to "usr/local/lib/linx/linx-folders.sh",
         "linx-bwrap" to "usr/local/lib/linx/linx-bwrap",
         "linx-flatpak.sh" to "usr/local/lib/linx/linx-flatpak.sh",
+        "linx-performance.sh" to "usr/local/lib/linx/linx-performance.sh",
         "linx-setup.sh" to "usr/local/lib/linx/linx-setup.sh",
         "linx-apps.py" to "usr/local/lib/linx/linx-apps.py",
         "linx-panel.sh" to "usr/local/lib/linx/linx-panel.sh",

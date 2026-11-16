@@ -268,6 +268,10 @@ fun OnboardingScreen(
     onCancel: () -> Unit = {},
 ) {
     var page by remember { mutableStateOf(if (again) Page.PROFILE else Page.WELCOME) }
+    // Phone settings not done yet (OneDevicePage), and whether to ask
+    // before going past them.
+    var phoneLeft by remember { mutableStateOf(0) }
+    var askSkip by remember { mutableStateOf(false) }
     var choices by remember { mutableStateOf(initial) }
     // The app takes the accent as it is chosen, so the choice can be seen.
     androidx.compose.runtime.LaunchedEffect(choices.accent) {
@@ -328,7 +332,7 @@ fun OnboardingScreen(
                         Page.APPS -> AppsPage(choices) { choices = it }
                         Page.DEV -> DevPage(choices) { choices = it }
                         Page.STORES -> StoresPage(choices) { choices = it }
-                        Page.PHONE -> OneDevicePage()
+                        Page.PHONE -> OneDevicePage { phoneLeft = it }
                         Page.READY -> ReadyPage(choices, unpackFraction)
                     }
                 }
@@ -362,12 +366,29 @@ fun OnboardingScreen(
                     when {
                         page == Page.WELCOME -> { onStarted(); go(Page.PROFILE) }
                         last -> onFinish(choices)
+                        page == Page.PHONE && phoneLeft > 0 -> askSkip = true
                         else -> go(next())
                     }
                 }
             }
         }
     }
+        if (askSkip) {
+            androidx.compose.material3.AlertDialog(
+                onDismissRequest = { askSkip = false },
+                title = { Text(if (phoneLeft == 1) "1 phone setting is not done" else "$phoneLeft phone settings are not done") },
+                text = {
+                    Text(
+                        "Without them, Android closes Linux apps while they start or run in the background. " +
+                            "They take a minute; Settings → Keep Linux running has them later too.",
+                    )
+                },
+                confirmButton = { androidx.compose.material3.TextButton({ askSkip = false }) { Text("Do them now") } },
+                dismissButton = {
+                    androidx.compose.material3.TextButton({ askSkip = false; go(next()) }) { Text("Skip for now") }
+                },
+            )
+        }
         if (page == Page.READY) {
             key(page) { Confetti(accent) }
         }

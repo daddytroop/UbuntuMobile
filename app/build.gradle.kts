@@ -184,7 +184,7 @@ val linxScripts = tasks.register<BundleLinxScripts>("bundleLinxScripts") {
             "display-start.sh", "desktop-start.sh", "display-scale.sh", "tint2rc", "gamepad-helper.py",
             "nosandbox-bwrap", "linx-windows.py", "xfce4-panel.xml", "apt-install.sh",
             "install-firefox.sh", "firefox", "linx-audio.sh", "linx-look.sh",
-            "make-xfwm4-theme.py", "linx-folders.sh", "linx-bwrap", "linx-flatpak.sh", "linx-setup.sh",
+            "make-xfwm4-theme.py", "linx-folders.sh", "linx-bwrap", "linx-flatpak.sh", "linx-performance.sh", "linx-setup.sh",
             "linx-apps.py", "linx-panel.sh", "linx-notify.py", "linx-snapshot.sh", "linx-locale.sh", "linx-phone", "linx-updates.sh", "linx-mic.sh", "linx-clip.py", "linx-status", "linx-print.sh", "linx-pkg", "linx-shell.sh", "99linx-tidy",
         )
             .map { rootProject.file("tools/$it") }

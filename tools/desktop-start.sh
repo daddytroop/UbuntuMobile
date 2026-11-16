@@ -16,6 +16,8 @@
 set -u
 
 DESKTOP="${1:-xfce}"
+# The performance level the app chose (linx-performance.sh says what each does).
+LEVEL="$(cat /tmp/linx-performance 2>/dev/null)"
 
 # The panel layout ships with the app; it is installed over the user's once
 # per version, so an update can change it. Bump this when it changes.
@@ -89,15 +91,18 @@ add_extras() {
       mkdir -p /var/lib/linx && touch /var/lib/linx/no-extras
     fi
   fi
-  # Printing: CUPS and the "Phone" printer (linx-print.sh).
-  bash /usr/local/lib/linx/linx-print.sh >/tmp/linx-print.log 2>&1
+  # Printing: CUPS and the "Phone" printer (linx-print.sh); not on Basic.
+  [ "$LEVEL" = basic ] || bash /usr/local/lib/linx/linx-print.sh >/tmp/linx-print.log 2>&1
 }
 
 # The XFCE programs are started as well. They add the desktop icons and
 # the file manager's menu integration.
 start_xfce_extras() {
-  xfdesktop >/tmp/linx-desktop.log 2>&1 &
-  thunar --daemon >/tmp/linx-thunar.log 2>&1 &
+  # Not on Basic: the wallpaper is feh's, and Thunar starts when opened.
+  if [ "$LEVEL" != basic ]; then
+    xfdesktop >/tmp/linx-desktop.log 2>&1 &
+    thunar --daemon >/tmp/linx-thunar.log 2>&1 &
+  fi
   # On the phone, application windows open maximized.
   python3 /usr/local/lib/linx/linx-windows.py >/tmp/linx-windows.log 2>&1 &
   # Apps' notifications reach the phone's notification shade too.
@@ -127,6 +132,13 @@ start_settings() {
     set_xsettings /Xft/Hinting int 1
     set_xsettings /Xft/HintStyle string hintslight
     set_xsettings /Xft/RGBA string none
+    # No sticky keys, slow keys or their "are enabled/disabled" pop-ups:
+    # phone keyboards press Shift on their own (capitals after a full stop),
+    # and five Shifts in a row turn sticky keys on or off. (display-start.sh
+    # also starts the X server with -accessx.)
+    xfconf-query -c accessibility -p /AccessXKeys -n -t bool -s false
+    xfconf-query -c accessibility -p /StickyKeys -n -t bool -s false
+    xfconf-query -c accessibility -p /SlowKeys -n -t bool -s false
     # A screen that changes size is not a new monitor: no dialog about it.
     xfconf-query -c displays -p /Notify -n -t int -s 0 2>/dev/null
 
@@ -138,6 +150,8 @@ start_settings() {
     xfconf-query -c xfwm4 -p /general/button_layout -n -t string -s "O|HMC"
     xfconf-query -c xfwm4 -p /general/workspace_count -n -t int -s 1
     xfconf-query -c xfwm4 -p /general/use_compositing -n -t bool -s false
+    # Animations or not, by the performance level.
+    /usr/local/lib/linx/linx-performance.sh --start >/dev/null 2>&1
 
     xfsettingsd --no-daemon >/tmp/linx-xfsettingsd.log 2>&1 &
     sleep 1

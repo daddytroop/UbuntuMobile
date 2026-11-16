@@ -252,6 +252,60 @@ def write_json(fds, obj):
             pass
 
 
+# flatpak-spawn inside an app's sandbox, standing in for the runtime's.
+# The real one asks Flatpak's portal to start the program in a sandbox of
+# its own, and the portal finds out which app is asking from the caller's
+# /proc/PID/root - which under proot is not the app's, so it refuses ("Can't
+# find peer app id"). GNOME apps load every image that way (glycin), and
+# abort when the first icon fails: Rhythmbox, for one, never opened. This
+# runs the program in the app's own sandbox instead, as glycin does outside
+# Flatpak here (see nosandbox-bwrap). --host still goes to the real one.
+SPAWN = r"""#!/bin/sh
+# Mobuntu's flatpak-spawn (linx-bwrap says why).
+for a in "$@"; do
+  case "$a" in
+    --host) exec /run/linx-spawn/flatpak-spawn "$@" ;;
+    --) break ;;
+  esac
+done
+dir=
+while [ $# -gt 0 ]; do
+  case "$1" in
+    --directory=*) dir="${1#--directory=}" ;;
+    --env=*) export "${1#--env=}" ;;
+    --unset-env=*) unset "${1#--unset-env=}" ;;
+    --directory | --env | --unset-env | --forward-fd | --sandbox-expose | --sandbox-expose-ro | \
+      --sandbox-expose-path | --sandbox-expose-path-ro | --app-path | --usr-path)
+      [ "$1" = --directory ] && dir="$2"
+      [ "$1" = --env ] && export "$2"
+      shift ;;
+    --) shift; break ;;
+    --*) ;;
+    *) break ;;
+  esac
+  shift
+done
+[ $# -gt 0 ] || { echo "flatpak-spawn: no command" >&2; exit 1; }
+[ -n "$dir" ] && cd "$dir"
+exec "$@"
+"""
+
+
+def stand_in_spawn(box):
+    """In an app's sandbox, Mobuntu's flatpak-spawn over the runtime's."""
+    if not any(dest == "/.flatpak-info" for _, dest in box.binds):
+        return
+    real = box.host_path("/usr/bin/flatpak-spawn")
+    if not os.path.isfile(real):
+        return
+    path = box.scratch("flatpak-spawn")
+    with open(path, "w") as f:
+        f.write(SPAWN)
+    os.chmod(path, 0o755)
+    box.bind(real, "/run/linx-spawn/flatpak-spawn")
+    box.bind(path, "/usr/bin/flatpak-spawn")
+
+
 def called_by_flatpak():
     # Flatpak always hands its arguments over in a file descriptor; glycin
     # never does. Some of its helpers are started through an extra fork, so
@@ -311,6 +365,7 @@ def main():
                 sys.stderr.write("bwrap: execvp %s: %s\n" % (command[0], err))
                 sys.exit(1)
     else:
+        stand_in_spawn(box)
         code = run_outside(box, command)
     if code is None:
         code = run_nested(box, command)

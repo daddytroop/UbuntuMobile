@@ -94,6 +94,7 @@ start_xtigervnc() {
     -dpi 96 \
     -desktop Ubuntu \
     -CompareFB 0 \
+    -accessx \
     >/tmp/linx-xtigervnc.log 2>&1 &
   return 0
 }

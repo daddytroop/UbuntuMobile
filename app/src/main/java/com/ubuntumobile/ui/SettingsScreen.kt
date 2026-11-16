@@ -24,6 +24,9 @@ import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.AspectRatio
 import androidx.compose.material.icons.filled.AutoAwesome
+import androidx.compose.material.icons.filled.BatterySaver
+import androidx.compose.material.icons.filled.Bolt
+import androidx.compose.material.icons.filled.Tune
 import androidx.compose.material.icons.filled.BatteryChargingFull
 import androidx.compose.material.icons.filled.Check
 import androidx.compose.material.icons.filled.CheckCircle
@@ -77,6 +80,11 @@ enum class DesktopSize(val label: String, val detail: String, val shortSide: Int
  */
 @Composable
 fun SettingsScreen(
+    performance: Performance,
+    recommendedPerformance: Performance,
+    /** The phone's memory, to say why that one is recommended. */
+    memoryGb: Int,
+    onPerformance: (Performance) -> Unit,
     desktopSize: DesktopSize,
     onDesktopSize: (DesktopSize) -> Unit,
     fullScreen: Boolean,
@@ -210,6 +218,19 @@ fun SettingsScreen(
                         "Full screen",
                         "Hide the status and navigation bars on the desktop. Swipe from an edge to see them.",
                     ) { AccentSwitch(fullScreen, onFullScreen) }
+                }
+            }
+
+            Group("Performance") {
+                Text(
+                    "Pick the one for your phone. You can switch any time; it changes at once.",
+                    color = Ui.inkSoft,
+                    fontSize = 12.5.sp,
+                    modifier = Modifier.padding(start = 14.dp, end = 14.dp, top = 12.dp),
+                )
+                Performance.entries.forEachIndexed { i, level ->
+                    if (i > 0) RowDivider()
+                    PerformanceRow(level, level == performance, level == recommendedPerformance, memoryGb) { onPerformance(level) }
                 }
             }
 
@@ -431,5 +452,52 @@ private fun AboutLine(label: String, value: String) {
     Row(Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 13.dp)) {
         Text(label, fontSize = 14.5.sp, color = Ui.inkSoft, modifier = Modifier.weight(1f))
         Text(value, fontSize = 14.5.sp, color = Ui.ink, fontWeight = FontWeight.Medium)
+    }
+}
+
+/** One performance level: what phones it is for, what it does, and a tick. */
+@Composable
+private fun PerformanceRow(level: Performance, selected: Boolean, recommended: Boolean, memoryGb: Int, onClick: () -> Unit) {
+    val icon = when (level) {
+        Performance.BASIC -> Icons.Default.BatterySaver
+        Performance.BALANCED -> Icons.Default.Tune
+        Performance.FAST -> Icons.Default.Bolt
+    }
+    Row(
+        Modifier
+            .fillMaxWidth()
+            .clickable(onClick = onClick)
+            .background(if (selected) Ui.accent.copy(alpha = 0.10f) else Color.Transparent)
+            .padding(horizontal = 14.dp, vertical = 13.dp),
+        verticalAlignment = Alignment.CenterVertically,
+    ) {
+        IconBadge(icon, if (selected) Ui.accent else Color(0xFF64748B))
+        Spacer(Modifier.width(14.dp))
+        Column(Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(2.dp)) {
+            Row(verticalAlignment = Alignment.CenterVertically) {
+                Text(level.label, color = Ui.ink, fontSize = 15.sp, fontWeight = FontWeight.Medium)
+                Text(" · " + level.phones, color = Ui.inkSoft, fontSize = 13.sp)
+            }
+            if (recommended) {
+                Text(
+                    "Recommended for this phone ($memoryGb GB)",
+                    color = Ui.good,
+                    fontSize = 12.sp,
+                    fontWeight = FontWeight.Medium,
+                )
+            }
+            Text(level.detail, color = Ui.inkSoft, fontSize = 12.5.sp, lineHeight = 17.sp)
+        }
+        Spacer(Modifier.width(10.dp))
+        Box(
+            Modifier
+                .size(24.dp)
+                .clip(CircleShape)
+                .border(2.dp, if (selected) Ui.accent else Ui.edge, CircleShape)
+                .background(if (selected) Ui.accent else Color.Transparent),
+            contentAlignment = Alignment.Center,
+        ) {
+            if (selected) Icon(Icons.Default.Check, contentDescription = "Selected", tint = Color.White, modifier = Modifier.size(15.dp))
+        }
     }
 }

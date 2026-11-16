@@ -68,7 +68,7 @@ private data class PhoneStep(
  * from Android's settings.
  */
 @Composable
-internal fun OneDevicePage() {
+internal fun OneDevicePage(onRemaining: (Int) -> Unit = {}) {
     val context = LocalContext.current
     var checks by remember { mutableIntStateOf(0) }
     val lifecycle = androidx.lifecycle.compose.LocalLifecycleOwner.current.lifecycle
@@ -150,24 +150,18 @@ internal fun OneDevicePage() {
         }
     }
 
-    PageTitle(
-        "One device for everything",
-        "Your phone is the computer now: a pocket desktop on the go, a full one when you plug into a screen.",
-    )
-    Spacer(Modifier.height(18.dp))
-    Feature(Icons.Default.DesktopWindows, "Dock it", "Plug into a monitor, keyboard and mouse for a full Ubuntu desktop.")
-    Feature(Icons.Default.SyncAlt, "Share between both", "Share files, links and copy-paste between your phone and Linux.")
-    Feature(Icons.Default.Apps, "One home for your apps", "Phone apps in the Linux menu; Linux notifications on the phone.")
-
-    Spacer(Modifier.height(22.dp))
+    // The settings come first: on a small screen, what is below the fold
+    // is skipped, and without them Android closes Linux's apps.
     val needed = steps.filter { it.done != null }
-    StepsLabel("Phone settings · ${needed.count { it.done == true }} of ${needed.size} done")
-    Text(
-        "So Linux keeps running and can reach your things. Each is a tap; come back here after each one.",
-        color = Color.White.copy(alpha = 0.7f),
-        fontSize = 13.sp,
+    val remaining = needed.count { it.done == false }
+    androidx.compose.runtime.LaunchedEffect(remaining) { onRemaining(remaining) }
+    PageTitle(
+        "Phone settings",
+        if (remaining == 0) "All set: Linux can keep running and reach your things."
+        else "Without these, Android closes Linux apps. Each is a tap; come back here after each one.",
     )
-    Spacer(Modifier.height(12.dp))
+    StepsLabel("${needed.count { it.done == true }} of ${needed.size} done")
+    Spacer(Modifier.height(6.dp))
     steps.forEachIndexed { i, step -> StepRow(i + 1, step) }
 
     // Optional, and not counted: some keep their usual home screen.
@@ -187,10 +181,16 @@ internal fun OneDevicePage() {
     )
     Spacer(Modifier.height(8.dp))
     Text(
-        "Skipping is fine: Settings → Keep Linux running has these too. The microphone is asked for the first time a Linux app needs it.",
+        "Settings → Keep Linux running has these too. The microphone is asked for the first time a Linux app needs it.",
         color = Color.White.copy(alpha = 0.55f),
         fontSize = 12.sp,
     )
+
+    Spacer(Modifier.height(22.dp))
+    StepsLabel("One device for everything")
+    Feature(Icons.Default.DesktopWindows, "Dock it", "Plug into a monitor, keyboard and mouse for a full Ubuntu desktop.")
+    Feature(Icons.Default.SyncAlt, "Share between both", "Share files, links and copy-paste between your phone and Linux.")
+    Feature(Icons.Default.Apps, "One home for your apps", "Phone apps in the Linux menu; Linux notifications on the phone.")
 }
 
 @Composable

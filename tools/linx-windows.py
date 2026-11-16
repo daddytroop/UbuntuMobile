@@ -362,7 +362,9 @@ def run_app(request):
         opened = os.path.getmtime(NEW_WINDOW_FILE) >= started
     except OSError:
         opened = False
-    if code == 0 or opened or not request.get("name"):
+    # One that ends with an error in its first two minutes is reported
+    # even when a window had come up: a splash screen is a window too.
+    if code == 0 or not request.get("name") or (opened and time.time() - started > 120):
         return
     if code < 0:
         try:
@@ -379,6 +381,10 @@ def run_app(request):
     telling = [l for l in lines if TELLING.search(l) and not NOISE.search(l)]
     detail = (telling or [l for l in lines if not NOISE.search(l)] or [""])[-1][:300]
     reason = (detail + " (" + why + ")") if detail else why
+    # SIGKILL, from nothing in Linux: Android's limit on child processes.
+    if code in (-9, 137) or any("terminated with signal 9" in l for l in lines[-5:]):
+        reason = ("Android closed it: too many Linux programs were running. Close other Linux apps and try "
+                  "again, or turn on \"Disable child process restrictions\" in Developer options. (" + why + ")")
     try:
         with open(RUN_FAILED + ".new", "w") as f:
             f.write("%s\n%s\n%s\n" % (name, reason, log))
