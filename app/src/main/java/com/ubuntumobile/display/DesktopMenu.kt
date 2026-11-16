@@ -33,6 +33,7 @@ import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Apps
 import androidx.compose.material.icons.filled.Lock
 import androidx.compose.material.icons.filled.PowerSettingsNew
+import androidx.compose.material.icons.filled.TouchApp
 import androidx.compose.material.icons.filled.Screenshot
 import androidx.compose.material.icons.filled.Tune
 import androidx.compose.material.icons.filled.Cast
@@ -204,6 +205,7 @@ fun DesktopMenu(
 
                 MenuSection("Controls")
                 MenuItem(Icons.Default.Keyboard, "Keyboard", go(actions.onShowKeyboard))
+                MenuItem(Icons.Default.TouchApp, "Touch mode: " + TouchInput.mode.label, go(actions.onTouchMode))
                 MenuItem(Icons.Default.Gamepad, "Gamepad", go(actions.onOpenGamepad))
                 actions.onUseMonitor?.let { MenuItem(Icons.Default.Cast, "Use the monitor", go(it)) }
                 MenuItem(Icons.Default.Refresh, "Reconnect display", go(actions.onReconnect))

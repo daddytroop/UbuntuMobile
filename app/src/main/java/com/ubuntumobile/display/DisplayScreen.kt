@@ -91,6 +91,8 @@ class DisplayActions(
     val onOpenSettings: () -> Unit = {},
     /** Turn Linux off, or restart it (the menu's Power). */
     val onPower: () -> Unit = {},
+    /** Choose how touches work the mouse (TouchInput). */
+    val onTouchMode: () -> Unit = {},
     /** What is happening with the browser, e.g. "Installing Firefox…"; null when it is ready. */
     val browserNote: String? = null,
     /** The apps chosen at setup installing; null when there is nothing to show. */
@@ -204,6 +206,7 @@ fun DesktopSurface(
         // Set while a mouse is in use, so the touch gestures leave its
         // events alone.
         var mouse by remember { mutableStateOf(false) }
+        val touchMode = TouchInput.mode
 
         Canvas(
             modifier = Modifier
@@ -216,8 +219,25 @@ fun DesktopSurface(
                         while (true) {
                             val event = awaitPointerEvent(PointerEventPass.Initial)
                             val change = event.changes.firstOrNull() ?: continue
-                            mouse = change.type == PointerType.Mouse
-                            if (!mouse) continue
+                            val pen = change.type == PointerType.Stylus || change.type == PointerType.Eraser
+                            mouse = change.type == PointerType.Mouse || (pen && touchMode == TouchMode.STYLUS)
+                            if (!mouse) {
+                                // Stylus mode: one finger alone does nothing
+                                // (a hand resting on the screen); two scroll.
+                                if (touchMode == TouchMode.STYLUS && event.changes.count { it.pressed } == 1) {
+                                    change.consume()
+                                }
+                                continue
+                            }
+                            if (pen) {
+                                // Hovering points; touching clicks (or right-
+                                // clicks with the pen's button held).
+                                val side = event.buttons.isSecondaryPressed || event.buttons.isTertiaryPressed
+                                val mask = if (!change.pressed) 0 else if (side) 4 else 1
+                                session.pointer(fbX(change.position), fbY(change.position), mask)
+                                event.changes.forEach { it.consume() }
+                                continue
+                            }
                             val x = fbX(change.position)
                             val y = fbY(change.position)
                             if (event.type == PointerEventType.Scroll) {
@@ -232,7 +252,7 @@ fun DesktopSurface(
                         }
                     }
                 }
-                .pointerInput(bmp.width, bmp.height, scale) {
+                .then(if (touchMode != TouchMode.TOUCH) Modifier else Modifier.pointerInput(bmp.width, bmp.height, scale) {
                     detectTapGestures(
                         onTap = { p ->
                             if (mouse) return@detectTapGestures
@@ -258,8 +278,8 @@ fun DesktopSurface(
                             session.pointer(fbX(p), fbY(p), 0)
                         },
                     )
-                }
-                .pointerInput(bmp.width, bmp.height, scale) {
+                })
+                .then(if (touchMode != TouchMode.TOUCH) Modifier else Modifier.pointerInput(bmp.width, bmp.height, scale) {
                     var last = Offset.Zero
                     var dragging = false
                     detectDragGestures(
@@ -280,7 +300,10 @@ fun DesktopSurface(
                         onDragEnd = { if (dragging) session.pointer(fbX(last), fbY(last), 0) },
                         onDragCancel = { if (dragging) session.pointer(fbX(last), fbY(last), 0) },
                     )
-                }
+                })
+                .then(if (touchMode != TouchMode.TRACKPAD) Modifier else Modifier.pointerInput(bmp.width, bmp.height, scale) {
+                    trackpad(session, scale, viewConfiguration.touchSlop)
+                })
                 .pointerInput(bmp.width, bmp.height, scale) {
                     // Two fingers scrolling is the only way to scroll a
                     // window on a touch screen.
@@ -334,7 +357,7 @@ fun DesktopSurface(
                 .padding(bottom = 20.dp),
         ) {
             Text(
-                "Tap to click · Hold to right-click · Two fingers to scroll",
+                TouchInput.mode.hint,
                 color = Color.White,
                 fontSize = 12.sp,
                 textAlign = TextAlign.Center,
@@ -344,6 +367,79 @@ fun DesktopSurface(
                     .clickable { hintVisible = false }
                     .padding(horizontal = 14.dp, vertical = 8.dp),
             )
+        }
+    }
+}
+
+/**
+ * Trackpad mode: the screen is a laptop's trackpad, as in Chrome Remote
+ * Desktop. One finger sliding moves the pointer (faster the faster it
+ * slides); a tap clicks where the pointer is; a two-finger tap, or holding
+ * still, right-clicks; a double tap whose second touch slides drags with
+ * the button held. Two fingers moving scroll (the scroll handler).
+ */
+private suspend fun androidx.compose.ui.input.pointer.PointerInputScope.trackpad(
+    session: DisplaySession,
+    scale: Float,
+    slop: Float,
+) {
+    var lastTapUp = 0L
+    var restX = 0f
+    var restY = 0f
+    awaitEachGesture {
+        val down = awaitFirstDown(requireUnconsumed = false)
+        if (down.type == PointerType.Mouse) return@awaitEachGesture
+        val start = down.uptimeMillis
+        // The second touch of a double tap, soon after the first: a drag.
+        val dragging = start - lastTapUp < 300
+        if (dragging) session.movePointer(0, 0, 1)
+        var last = down.position
+        var travelled = 0f
+        var most = 1
+        var end = start
+        do {
+            val event = awaitPointerEvent()
+            val pressed = event.changes.filter { it.pressed }
+            most = maxOf(most, pressed.size)
+            end = event.changes.maxOf { it.uptimeMillis }
+            if (pressed.size == 1 && most == 1) {
+                val p = pressed[0].position
+                val d = p - last
+                last = p
+                val dist = d.getDistance()
+                travelled += dist
+                // Slow moves are exact, fast ones cross the screen.
+                val gain = (1f + dist / 24f).coerceAtMost(2.75f) / scale
+                restX += d.x * gain
+                restY += d.y * gain
+                val dx = restX.toInt()
+                val dy = restY.toInt()
+                if (dx != 0 || dy != 0) {
+                    restX -= dx
+                    restY -= dy
+                    session.movePointer(dx, dy, if (dragging) 1 else 0)
+                }
+                pressed[0].consume()
+            }
+        } while (event.changes.any { it.pressed })
+        val held = end - start
+        val still = travelled < slop
+        when {
+            dragging -> session.movePointer(0, 0, 0)
+            most >= 2 && held < 350 -> {
+                session.movePointer(0, 0, 4)
+                session.movePointer(0, 0, 0)
+            }
+            most == 1 && still && held >= 550 -> {
+                session.movePointer(0, 0, 4)
+                session.movePointer(0, 0, 0)
+            }
+            most == 1 && still -> {
+                session.movePointer(0, 0, 1)
+                session.movePointer(0, 0, 0)
+                session.onTapped?.invoke()
+                lastTapUp = end
+            }
         }
     }
 }

@@ -27,6 +27,7 @@ import androidx.compose.material.icons.filled.AutoAwesome
 import androidx.compose.material.icons.filled.BatterySaver
 import androidx.compose.material.icons.filled.Bolt
 import androidx.compose.material.icons.filled.Tune
+import androidx.compose.material.icons.filled.ViewQuilt
 import androidx.compose.material.icons.filled.SystemUpdate
 import kotlinx.coroutines.launch
 import androidx.compose.material.icons.filled.BatteryChargingFull
@@ -70,6 +71,13 @@ import androidx.compose.ui.unit.sp
  * this many pixels, with everything doubled; more pixels means smaller
  * text and windows, and more room.
  */
+/** How the desktop's bars are laid out (linx-panel.sh does it). */
+enum class DesktopLayout(val id: String, val label: String, val detail: String) {
+    MOBUNTU("mobuntu", "Mobuntu", "One bar at the bottom: the app grid, your apps as icons, and the clock."),
+    WINDOWS("windows", "Windows", "A taskbar: Start on the left, open windows with their names, the clock on the right."),
+    UBUNTU("ubuntu", "Ubuntu", "A top bar with the clock in the middle, and a dock of apps at the bottom."),
+}
+
 enum class DesktopSize(val label: String, val detail: String, val shortSide: Int) {
     COMPACT("Compact", "Most room; small text", 1080),
     STANDARD("Standard", "Sized for a 6-inch phone", 900),
@@ -82,6 +90,8 @@ enum class DesktopSize(val label: String, val detail: String, val shortSide: Int
  */
 @Composable
 fun SettingsScreen(
+    desktopLayout: DesktopLayout,
+    onDesktopLayout: (DesktopLayout) -> Unit,
     performance: Performance,
     recommendedPerformance: Performance,
     /** The phone's memory, to say why that one is recommended. */
@@ -204,6 +214,12 @@ fun SettingsScreen(
                                 }
                             }
                         }
+                    }
+                    RowDivider()
+                    Column(Modifier.padding(14.dp), verticalArrangement = Arrangement.spacedBy(10.dp)) {
+                        Label(Icons.Default.ViewQuilt, "Layout")
+                        Segmented(DesktopLayout.entries, desktopLayout, { it.label }, onDesktopLayout)
+                        Text(desktopLayout.detail, color = Ui.inkSoft, fontSize = 12.5.sp)
                     }
                     RowDivider()
                     Column(Modifier.padding(14.dp), verticalArrangement = Arrangement.spacedBy(10.dp)) {

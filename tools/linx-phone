@@ -12,6 +12,8 @@
     linx-phone print FILE   print a PDF with the phone's printers
     linx-phone steam        open DroidDeck (Steam on ARM phones), or the page
                             to get it from
+    linx-phone mobuntu      open Mobuntu's own settings (screen size, full
+                            screen, performance)
     linx-phone settings PAGE
                             open a page of the phone's settings: battery,
                             internet, wifi, bluetooth, sound or display
@@ -48,7 +50,7 @@ if __name__ == "__main__":
         send({"open": sys.argv[2]})
     elif len(sys.argv) == 3 and sys.argv[1] == "app":
         send({"app": sys.argv[2]})
-    elif len(sys.argv) == 2 and sys.argv[1] in ("quick", "screenshot", "lock", "steam"):
+    elif len(sys.argv) == 2 and sys.argv[1] in ("quick", "screenshot", "lock", "steam", "mobuntu"):
         send({sys.argv[1]: True})
     elif len(sys.argv) == 3 and sys.argv[1] == "print":
         send({"print": sys.argv[2]})

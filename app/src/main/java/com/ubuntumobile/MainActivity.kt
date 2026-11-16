@@ -343,6 +343,32 @@ fun UbuntuApp(
     }
     var fullScreen by remember { mutableStateOf(prefs.getBoolean("full_screen", true)) }
     var performance by remember { mutableStateOf(com.ubuntumobile.ui.Performance.saved(prefs, context)) }
+    // The desktop's layout: linx-panel.sh reads the file when the desktop
+    // starts, and at once when it changes (through the launcher).
+    var desktopLayout by remember {
+        mutableStateOf(
+            com.ubuntumobile.ui.DesktopLayout.entries.firstOrNull { it.name == prefs.getString("desktop_layout", null) }
+                ?: com.ubuntumobile.ui.DesktopLayout.MOBUNTU,
+        )
+    }
+    var layoutApplied by remember { mutableStateOf<com.ubuntumobile.ui.DesktopLayout?>(null) }
+    LaunchedEffect(desktopLayout) {
+        withContext(Dispatchers.IO) {
+            try {
+                vm.paths.sharedTmpDir.mkdirs()
+                java.io.File(vm.paths.sharedTmpDir, "linx-desktop-layout").writeText(desktopLayout.id + "\n")
+            } catch (_: Exception) {
+            }
+            if (layoutApplied != null) {
+                com.ubuntumobile.linux.NotificationBridge.launch(
+                    listOf("/bin/bash", "/usr/local/lib/linx/linx-panel.sh", "--restart"),
+                    mapOf("DISPLAY" to ":$DISPLAY_NUM"),
+                    null,
+                )
+            }
+        }
+        layoutApplied = desktopLayout
+    }
     // The frame rate here, the rest in Linux (linx-performance.sh reads the
     // file; desktop-start.sh at the next start, the launcher at once).
     var performanceApplied by remember { mutableStateOf<com.ubuntumobile.ui.Performance?>(null) }
@@ -444,6 +470,7 @@ fun UbuntuApp(
                     takeScreenshot()
                 }
                 event == "lock" -> com.ubuntumobile.display.PhoneExtras.locked = true
+                event == "mobuntu-settings" -> screen = Screen.SETTINGS
                 event.startsWith("print:") -> {
                     // Only what the Linux printer wrote, in the shared /tmp.
                     val path = event.removePrefix("print:")
@@ -1193,6 +1220,43 @@ fun UbuntuApp(
     // An app that stopped before showing a window: its name, why (the last
     // telling line of its output) and its log (linx-apps.py's supervise).
     var launchFailure by remember { mutableStateOf<Triple<String, String, java.io.File>?>(null) }
+    // The menu's Touch mode: how a finger works the mouse.
+    var touchModeAsked by remember { mutableStateOf(false) }
+    LaunchedEffect(Unit) { com.ubuntumobile.display.TouchInput.load(context) }
+    if (touchModeAsked) {
+        androidx.compose.material3.AlertDialog(
+            onDismissRequest = { touchModeAsked = false },
+            title = { androidx.compose.material3.Text("Touch mode") },
+            text = {
+                androidx.compose.foundation.layout.Column(
+                    verticalArrangement = androidx.compose.foundation.layout.Arrangement.spacedBy(6.dp),
+                ) {
+                    com.ubuntumobile.display.TouchMode.entries.forEach { m ->
+                        val selected = com.ubuntumobile.display.TouchInput.mode == m
+                        androidx.compose.foundation.layout.Row(
+                            Modifier
+                                .fillMaxWidth()
+                                .clip(androidx.compose.foundation.shape.RoundedCornerShape(12.dp))
+                                .clickable {
+                                    com.ubuntumobile.display.TouchInput.set(context, m)
+                                    touchModeAsked = false
+                                }
+                                .padding(vertical = 8.dp, horizontal = 4.dp),
+                            verticalAlignment = Alignment.Top,
+                        ) {
+                            androidx.compose.material3.RadioButton(selected = selected, onClick = null)
+                            androidx.compose.foundation.layout.Spacer(Modifier.width(10.dp))
+                            androidx.compose.foundation.layout.Column {
+                                androidx.compose.material3.Text(m.label, fontWeight = androidx.compose.ui.text.font.FontWeight.Medium)
+                                androidx.compose.material3.Text(m.detail, fontSize = 13.sp)
+                            }
+                        }
+                    }
+                }
+            },
+            confirmButton = { androidx.compose.material3.TextButton({ touchModeAsked = false }) { androidx.compose.material3.Text("Done") } },
+        )
+    }
     // The menu's Power: turn Linux off or restart it.
     var powerAsked by remember { mutableStateOf(false) }
     if (powerAsked) {
@@ -1728,6 +1792,11 @@ fun UbuntuApp(
 
         Screen.SETTINGS -> {
             SettingsScreen(
+                desktopLayout = desktopLayout,
+                onDesktopLayout = {
+                    desktopLayout = it
+                    prefs.edit().putString("desktop_layout", it.name).apply()
+                },
                 performance = performance,
                 recommendedPerformance = remember { com.ubuntumobile.ui.Performance.recommended(context) },
                 memoryGb = remember { com.ubuntumobile.ui.Performance.memoryGb(context) },
@@ -1852,6 +1921,7 @@ fun UbuntuApp(
                 },
                 onOpenSettings = { screen = Screen.SETTINGS },
                 onPower = { powerAsked = true },
+                onTouchMode = { touchModeAsked = true },
                 browserNote = browserNote,
                 setup = setupStatus,
                 onRetrySetup = { if (!browserBusy) scope.launch { runSetup() } },

@@ -63,6 +63,7 @@ install_panel_layout() {
 # The panel and the wallpaper.
 start_panel() {
   xfce4-panel >/tmp/linx-panel.log 2>&1 &
+  PANEL_PID=$!
   # The wallpaper. feh is a plain X11 program, so it draws where the GTK
   # ones cannot.
   # The wallpaper chosen at setup (linx-look.sh says which).
@@ -207,10 +208,46 @@ esac
 # reaped rather than left as a zombie, which "exec sleep infinity" did.
 ANCHOR=/tmp/linx-session-anchor
 rm -f "$ANCHOR"
+#
+# The panel is one of those children, and when it ends (a crash: its items
+# all run in its process, so one item's crash ends it), it is started again
+# at once, so the bottom bar does not just vanish. Not more than five times
+# in ten minutes; each time goes in /tmp/linx-panel-crashes.log.
+PANEL_RESTARTS=()
+# linx-panel.sh --restart quits the panel and leaves the starting to this.
+echo $$ >/tmp/linx-panel-watchdog
+keep_panel() {
+  [ -n "${PANEL_PID:-}" ] || return 0
+  kill -0 "$PANEL_PID" 2>/dev/null && return 0
+  # Replaced rather than ended ("xfce4-panel -r" starts a new one): that
+  # one is not this shell's child, so it is not watched.
+  if pgrep -x xfce4-panel >/dev/null 2>&1; then
+    PANEL_PID=
+    return 0
+  fi
+  local now recent=() t
+  printf -v now '%(%s)T' -1
+  for t in "${PANEL_RESTARTS[@]}"; do [ $((now - t)) -lt 600 ] && recent+=("$t"); done
+  PANEL_RESTARTS=("${recent[@]}")
+  if [ "${#PANEL_RESTARTS[@]}" -ge 5 ]; then
+    PANEL_PID=
+    return 0
+  fi
+  PANEL_RESTARTS+=("$now")
+  { printf '%(%F %T)T the panel ended; starting it again. Its last words:
+' -1
+    tail -n 15 /tmp/linx-panel.log; echo; } >>/tmp/linx-panel-crashes.log 2>/dev/null
+  xfce4-panel >>/tmp/linx-panel.log 2>&1 &
+  PANEL_PID=$!
+}
 if mkfifo "$ANCHOR" 2>/dev/null && exec 9<>"$ANCHOR"; then
   while true; do
-    # Waits for any child to end, which reaps it; with none left, on the pipe.
-    wait -n 2>/dev/null || read -r -t 3600 -u 9 _ || true
+    # Waits for any child to end, which reaps it; with none left (127), on
+    # the pipe. A child that crashed ends with an error too, which is not
+    # "none left".
+    wait -n 2>/dev/null
+    [ $? = 127 ] && { read -r -t 3600 -u 9 _ || true; }
+    keep_panel
   done
 fi
 exec sleep infinity

@@ -22,6 +22,19 @@ fi
 [ "${DBUS_SESSION_BUS_ADDRESS:-disabled:}" != disabled: ] || exit 0
 command -v xfconf-query >/dev/null 2>&1 || exit 0
 
+# Restart the panel. desktop-start.sh watches it and starts it again when
+# it ends, so it is asked to quit; "-r" would start a new one that is
+# nobody's child, and so not watched.
+restart_panel() {
+  local w
+  w="$(cat /tmp/linx-panel-watchdog 2>/dev/null)"
+  if [ -n "$w" ] && kill -0 "$w" 2>/dev/null; then
+    xfce4-panel -q
+  else
+    xfce4-panel -r
+  fi
+}
+
 plugin_installed() { ls /usr/lib/*/xfce4/panel/plugins/"lib$1.so" >/dev/null 2>&1; }
 get() { xfconf-query -c xfce4-panel -p "$1" 2>/dev/null; }
 CHANGED=0
@@ -102,6 +115,8 @@ fi
 # (13). Each is added once, when its plugin is installed.
 add_before_clock() {
   local ids new="" id
+  # Already in a bar (the Ubuntu layout has the status items in the top one).
+  get /panels/panel-2/plugin-ids | grep -qx "$1" && return
   ids="$(get /panels/panel-1/plugin-ids | grep -E '^[0-9]+$')"
   echo "$ids" | grep -qx "$1" && return
   for id in $ids; do
@@ -214,7 +229,111 @@ entry linx-lock "Lock screen" "Lock the desktop until the phone's PIN or fingerp
   "linx-phone lock" system-lock-screen System
 entry linx-quick "Quick settings" "Wi-Fi, Bluetooth, torch, brightness and night light" \
   "linx-phone quick" preferences-system Settings
+# Display, in the Settings app: the app sizes the screen, so its settings
+# (size, full screen, performance) are where this goes (linx-apps.py hides
+# XFCE's own). Rewritten each time, so a change here reaches it.
+rm -f "$APPS/linx-display.desktop"
+entry linx-display "Display" "Screen size, full screen and performance, in Mobuntu's settings" \
+  "linx-phone mobuntu" org.xfce.settings.display \
+  "Settings;DesktopSettings;X-XFCE-SettingsDialog;X-XFCE-HardwareSettings;"
+
+# ------------------------------------------------------------ the layout
+# How the bars are laid out, as chosen in the app (Settings → Appearance),
+# which writes /tmp/linx-desktop-layout:
+#   mobuntu  one bar at the bottom: the app grid, the dock, status, clock
+#   windows  one bar at the bottom: Start, a few launchers, the open windows
+#            with their names, status, clock
+#   ubuntu   a bar at the top (the clock in the middle, status on the
+#            right) and a dock at the bottom, centred, the app grid last
+# The items are the ones set up above; a layout only says which go in which
+# bar and where the bars are. The panel follows at its next start, or at
+# once with --restart.
+LAYOUT="$(cat /tmp/linx-desktop-layout 2>/dev/null)"
+case "$LAYOUT" in windows | ubuntu) ;; *) LAYOUT=mobuntu ;; esac
+have() { [ -n "$(get /plugins/plugin-$1)" ]; }
+ids() {
+  local out="" id
+  for id in "$@"; do have "$id" && out="$out -t int -s $id"; done
+  echo "$out"
+}
+panel_props() {
+  local P=/panels/panel-$1
+  xfconf-query -c xfce4-panel -p "$P/position" -n -t string -s "$2"
+  xfconf-query -c xfce4-panel -p "$P/length" -n -t uint -s "$3"
+  xfconf-query -c xfce4-panel -p "$P/length-adjust" -n -t bool -s "$4"
+  xfconf-query -c xfce4-panel -p "$P/size" -n -t uint -s "$5"
+  xfconf-query -c xfce4-panel -p "$P/position-locked" -n -t bool -s true
+  xfconf-query -c xfce4-panel -p "$P/icon-size" -n -t uint -s 0
+}
+separator() {
+  [ "$(get /plugins/plugin-$1)" = separator ] && return
+  xfconf-query -c xfce4-panel -p "/plugins/plugin-$1" -n -t string -s separator
+  xfconf-query -c xfce4-panel -p "/plugins/plugin-$1/expand" -n -t bool -s true
+  xfconf-query -c xfce4-panel -p "/plugins/plugin-$1/style" -n -t uint -s 0
+}
+MARK_LAYOUT="$HOME/.config/xfce4/.linx-layout"
+if [ "$(cat "$MARK_LAYOUT" 2>/dev/null)" != "$LAYOUT" ]; then
+  # The status items, in their order (some may not be installed).
+  STATUS="7 12 13 14 15"
+  MENU_ICON=view-app-grid-symbolic
+  CLOCK_FORMAT="%-I:%M %p"
+  case "$LAYOUT" in
+    windows)
+      MENU_ICON=start-here
+      # shellcheck disable=SC2046
+      panel_props 1 "p=8;x=0;y=0" 100 false 40
+      xfconf-query -c xfce4-panel -p /plugins/plugin-5/show-labels -n -t bool -s true
+      # The launchers with the apps' own entries (and so their Yaru icons).
+      launcher() {
+        [ -f "/usr/share/applications/$2.desktop" ] || return
+        rm -rf "$HOME/.config/xfce4/panel/launcher-$1"
+        xfconf-query -c xfce4-panel -p "/plugins/plugin-$1/items" -n --force-array -t string -s "$2.desktop"
+      }
+      launcher 10 firefox
+      launcher 2 xfce4-terminal
+      launcher 3 thunar
+      # shellcheck disable=SC2086,SC2046
+      xfconf-query -c xfce4-panel -p /panels/panel-1/plugin-ids -n --force-array $(ids 1 10 2 3 4 5 6 $STATUS 8 9)
+      xfconf-query -c xfce4-panel -p /panels -n --force-array -t int -s 1
+      ;;
+    ubuntu)
+      separator 20
+      separator 21
+      CLOCK_FORMAT="%a %-d %b  %-I:%M %p"
+      panel_props 2 "p=6;x=0;y=0" 100 false 30
+      xfconf-query -c xfce4-panel -p /panels/panel-2/dark-mode -n -t bool -s true
+      # shellcheck disable=SC2086,SC2046
+      xfconf-query -c xfce4-panel -p /panels/panel-2/plugin-ids -n --force-array $(ids 20 8 21 $STATUS 9)
+      panel_props 1 "p=10;x=0;y=0" 1 true 48
+      if have 11; then
+        # shellcheck disable=SC2046
+        xfconf-query -c xfce4-panel -p /panels/panel-1/plugin-ids -n --force-array $(ids 11 1)
+      else
+        # shellcheck disable=SC2046
+        xfconf-query -c xfce4-panel -p /panels/panel-1/plugin-ids -n --force-array $(ids 10 2 3 5 1)
+      fi
+      xfconf-query -c xfce4-panel -p /panels -n --force-array -t int -s 1 -t int -s 2
+      ;;
+    *)
+      panel_props 1 "p=8;x=0;y=0" 100 false 40
+      if have 11 && [ "$(get /plugins/plugin-11)" = docklike ]; then
+        # shellcheck disable=SC2086,SC2046
+        xfconf-query -c xfce4-panel -p /panels/panel-1/plugin-ids -n --force-array $(ids 1 11 6 $STATUS 8 9)
+      else
+        # shellcheck disable=SC2086,SC2046
+        xfconf-query -c xfce4-panel -p /panels/panel-1/plugin-ids -n --force-array $(ids 1 10 2 3 4 5 6 $STATUS 8 9)
+      fi
+      xfconf-query -c xfce4-panel -p /panels -n --force-array -t int -s 1
+      ;;
+  esac
+  [ "$(get /plugins/plugin-1)" = whiskermenu ] &&
+    xfconf-query -c xfce4-panel -p /plugins/plugin-1/button-icon -n -t string -s "$MENU_ICON"
+  xfconf-query -c xfce4-panel -p /plugins/plugin-8/digital-time-format -n -t string -s "$CLOCK_FORMAT"
+  mkdir -p "$(dirname "$MARK_LAYOUT")"
+  echo "$LAYOUT" >"$MARK_LAYOUT"
+  CHANGED=1
+fi
 
 if [ "$CHANGED" = 1 ] && [ "${1:-}" = --restart ] && pgrep -x xfce4-panel >/dev/null; then
-  xfce4-panel -r
+  restart_panel
 fi

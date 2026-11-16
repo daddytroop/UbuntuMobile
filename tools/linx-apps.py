@@ -52,6 +52,12 @@ HIDDEN = {
     "panel-desktop-handler", "panel-preferences", "xfce4-appfinder",
 }
 
+# Settings pages that cannot work here, taken out of the Settings app too
+# (which shows hidden entries; only Hidden=true keeps them out). The screen
+# is the app's to size: Display is replaced by linx-display, which opens the
+# app's own settings (linx-panel.sh). Colour profiles need colord.
+REMOVED = {"xfce-display-settings", "xfce4-color-settings"}
+
 # Plainer names for the image's own apps, as on a phone.
 NAMES = {
     "xfce4-terminal": "Terminal",
@@ -366,6 +372,8 @@ def tidy():
         changes = {}
         if hidden(app_id, e, dock):
             changes["NoDisplay"] = "true"
+        if app_id in REMOVED:
+            changes["Hidden"] = "true"
         if app_id in NAMES:
             changes["Name"] = NAMES[app_id]
         if yaru and app_id in ICONS:
