@@ -193,6 +193,11 @@ class MainActivity : ComponentActivity() {
             pendingHome = true
             return
         }
+        if (intent?.action == com.ubuntumobile.linux.AppUpdate.ACTION_SHOW) {
+            pendingAppUpdate = true
+            intent.action = null
+            return
+        }
         if (intent?.action == com.ubuntumobile.linux.Updates.ACTION_SHOW) {
             pendingUpdates = true
             intent.action = null
@@ -238,6 +243,7 @@ private var pendingHome by mutableStateOf(false)
 
 /** The updates notification was tapped: open Software on its Updates tab. */
 private var pendingUpdates by mutableStateOf(false)
+private var pendingAppUpdate by mutableStateOf(false)
 
 /** Files or a link shared to the app, to open in a Linux app. */
 private var pendingShare by mutableStateOf<com.ubuntumobile.ui.SharedIn?>(null)
@@ -1403,6 +1409,14 @@ fun UbuntuApp(
     }
     val isHomeApp = remember(resumes) { com.ubuntumobile.ui.HomeScreen.isDefault(context) }
 
+    // New versions of Mobuntu: looked for now and then (AppUpdate), and its
+    // notification opens Settings, where the update is.
+    LaunchedEffect(Unit) { com.ubuntumobile.linux.AppUpdate.check(context, quiet = true) }
+    LaunchedEffect(pendingAppUpdate) {
+        if (!pendingAppUpdate) return@LaunchedEffect
+        pendingAppUpdate = false
+        screen = Screen.SETTINGS
+    }
     // The updates notification opens Software on its Updates tab.
     var storeOnUpdates by remember { mutableStateOf(false) }
     LaunchedEffect(pendingUpdates) {

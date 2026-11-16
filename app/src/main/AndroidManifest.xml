@@ -2,6 +2,8 @@
 <manifest xmlns:android="http://schemas.android.com/apk/res/android">
 
     <uses-permission android:name="android.permission.INTERNET" />
+    <!-- Installing a new version of Mobuntu over itself (AppUpdate). -->
+    <uses-permission android:name="android.permission.REQUEST_INSTALL_PACKAGES" />
     <uses-permission android:name="android.permission.ACCESS_NETWORK_STATE" />
     <!-- The Wi-Fi signal, for the Linux panel's network item. -->
     <uses-permission android:name="android.permission.ACCESS_WIFI_STATE" />
@@ -109,5 +111,18 @@
             android:name=".linux.LinuxService"
             android:exported="false"
             android:foregroundServiceType="microphone" />
+
+        <!-- Android's answers while it installs a new version (AppUpdate). -->
+        <receiver
+            android:name=".linux.AppUpdate$Receiver"
+            android:exported="false" />
+        <!-- After an update: a notification to open the app again. -->
+        <receiver
+            android:name=".linux.AppUpdate$Updated"
+            android:exported="false">
+            <intent-filter>
+                <action android:name="android.intent.action.MY_PACKAGE_REPLACED" />
+            </intent-filter>
+        </receiver>
     </application>
 </manifest>

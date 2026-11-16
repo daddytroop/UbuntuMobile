@@ -124,7 +124,10 @@ class Sandbox:
 
     def bind(self, src, dest, try_only=False):
         if not os.path.exists(src) and not os.path.islink(src):
-            if try_only:
+            # A device Flatpak saw but this side cannot (/dev/udmabuf, for
+            # Krita: Android lists it, and SELinux keeps it out of reach).
+            # Without it the app draws in software, as it does anyway here.
+            if try_only or os.path.normpath(src).startswith("/dev/"):
                 return
             sys.stderr.write("bwrap: Can't find source path %s\n" % src)
             sys.exit(1)

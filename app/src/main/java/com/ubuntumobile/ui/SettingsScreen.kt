@@ -27,6 +27,8 @@ import androidx.compose.material.icons.filled.AutoAwesome
 import androidx.compose.material.icons.filled.BatterySaver
 import androidx.compose.material.icons.filled.Bolt
 import androidx.compose.material.icons.filled.Tune
+import androidx.compose.material.icons.filled.SystemUpdate
+import kotlinx.coroutines.launch
 import androidx.compose.material.icons.filled.BatteryChargingFull
 import androidx.compose.material.icons.filled.Check
 import androidx.compose.material.icons.filled.CheckCircle
@@ -140,6 +142,7 @@ fun SettingsScreen(
             verticalArrangement = Arrangement.spacedBy(22.dp),
         ) {
             Hero(versionName, ubuntuVersion)
+            AppUpdateCard()
 
             // What stops Linux from running well comes first, and only
             // while there is something to do about it.
@@ -315,6 +318,8 @@ fun SettingsScreen(
 
             Group("About") {
                 AboutLine("Mobuntu", versionName)
+                RowDivider()
+                CheckForUpdatesRow()
                 RowDivider()
                 AboutLine("Linux", ubuntuVersion.ifBlank { "Ubuntu" })
                 RowDivider()
@@ -498,6 +503,111 @@ private fun PerformanceRow(level: Performance, selected: Boolean, recommended: B
             contentAlignment = Alignment.Center,
         ) {
             if (selected) Icon(Icons.Default.Check, contentDescription = "Selected", tint = Color.White, modifier = Modifier.size(15.dp))
+        }
+    }
+}
+
+/** A new version of Mobuntu, while there is one: download, install, progress. */
+@Composable
+private fun AppUpdateCard() {
+    val context = androidx.compose.ui.platform.LocalContext.current
+    val scope = androidx.compose.runtime.rememberCoroutineScope()
+    val state = com.ubuntumobile.linux.AppUpdate.state
+    val release = when (state) {
+        is com.ubuntumobile.linux.AppUpdate.State.Available -> state.release
+        is com.ubuntumobile.linux.AppUpdate.State.Downloading -> state.release
+        is com.ubuntumobile.linux.AppUpdate.State.Installing -> state.release
+        is com.ubuntumobile.linux.AppUpdate.State.Failed -> state.release
+        else -> null
+    } ?: return
+    fun start() {
+        if (!com.ubuntumobile.linux.AppUpdate.canInstall(context)) {
+            com.ubuntumobile.linux.AppUpdate.openInstallPermission(context)
+            return
+        }
+        scope.launch { com.ubuntumobile.linux.AppUpdate.install(context, release) }
+    }
+    val mb = release.size / 1_000_000
+    Column(
+        Modifier
+            .fillMaxWidth()
+            .clip(Ui.cardShape)
+            .background(Brush.linearGradient(listOf(Ui.good.copy(alpha = 0.22f), Ui.card)))
+            .border(1.dp, Ui.good.copy(alpha = 0.45f), Ui.cardShape)
+            .padding(18.dp),
+        verticalArrangement = Arrangement.spacedBy(10.dp),
+    ) {
+        Row(verticalAlignment = Alignment.CenterVertically) {
+            IconBadge(Icons.Default.SystemUpdate, Ui.good)
+            Spacer(Modifier.width(14.dp))
+            Column(Modifier.weight(1f)) {
+                Text("Mobuntu ${release.version} is available", color = Ui.ink, fontSize = 16.sp, fontWeight = FontWeight.SemiBold)
+                Text("You have ${com.ubuntumobile.linux.AppUpdate.current()}", color = Ui.inkSoft, fontSize = 12.5.sp)
+            }
+        }
+        val notes = remember(release.notes) {
+            release.notes.lines()
+                .map { it.trim().trimStart('#', '-', '*', ' ').replace("**", "") }
+                .filter { it.isNotBlank() && !it.startsWith("app-") && it != "Download" }
+                .take(5)
+                .joinToString("\n")
+        }
+        if (notes.isNotBlank()) {
+            Text(notes, color = Ui.inkSoft, fontSize = 12.5.sp, lineHeight = 17.sp, maxLines = 6)
+        }
+        when (state) {
+            is com.ubuntumobile.linux.AppUpdate.State.Downloading -> {
+                androidx.compose.material3.LinearProgressIndicator(
+                    progress = { state.fraction },
+                    modifier = Modifier.fillMaxWidth().height(6.dp).clip(RoundedCornerShape(3.dp)),
+                    color = Ui.good,
+                    trackColor = Color.White.copy(alpha = 0.12f),
+                )
+                Text(
+                    "Downloading: ${(state.fraction * 100).toInt()}% of $mb MB. Keep Mobuntu open.",
+                    color = Ui.inkSoft,
+                    fontSize = 12.5.sp,
+                )
+            }
+            is com.ubuntumobile.linux.AppUpdate.State.Installing ->
+                Text("Android is installing it. Mobuntu closes for a moment; a notification says when it is updated.", color = Ui.inkSoft, fontSize = 12.5.sp)
+            is com.ubuntumobile.linux.AppUpdate.State.Failed -> {
+                Text(state.message, color = Ui.warn, fontSize = 12.5.sp)
+                GlassButton("Try again", { start() }, icon = Icons.Default.SystemUpdate)
+            }
+            else -> {
+                Text(
+                    "$mb MB download. Linux, your apps and files stay as they are; Linux restarts once it is installed." +
+                        if (com.ubuntumobile.linux.AppUpdate.canInstall(context)) "" else " Android asks once to allow updates from Mobuntu: turn it on, then come back and tap Update again.",
+                    color = Ui.inkSoft,
+                    fontSize = 12.5.sp,
+                    lineHeight = 17.sp,
+                )
+                GlassButton("Update", { start() }, icon = Icons.Default.SystemUpdate)
+            }
+        }
+    }
+}
+
+/** About's row: this version, and a way to look for a newer one. */
+@Composable
+private fun CheckForUpdatesRow() {
+    val context = androidx.compose.ui.platform.LocalContext.current
+    val scope = androidx.compose.runtime.rememberCoroutineScope()
+    val state = com.ubuntumobile.linux.AppUpdate.state
+    val detail = when (state) {
+        is com.ubuntumobile.linux.AppUpdate.State.Checking -> "Checking..."
+        is com.ubuntumobile.linux.AppUpdate.State.UpToDate -> "You have the latest version."
+        is com.ubuntumobile.linux.AppUpdate.State.Failed -> if (state.release == null) state.message else "Version ${state.release.version} is available, above."
+        is com.ubuntumobile.linux.AppUpdate.State.Idle -> "Mobuntu looks for new versions by itself, too."
+        else -> "A new version is available, above."
+    }
+    SettingRow(Icons.Default.SystemUpdate, "Updates", detail, tint = Ui.good) {
+        if (state is com.ubuntumobile.linux.AppUpdate.State.Idle ||
+            state is com.ubuntumobile.linux.AppUpdate.State.UpToDate ||
+            (state is com.ubuntumobile.linux.AppUpdate.State.Failed && state.release == null)
+        ) {
+            GlassButton("Check", { scope.launch { com.ubuntumobile.linux.AppUpdate.check(context, quiet = false) } }, primary = false)
         }
     }
 }

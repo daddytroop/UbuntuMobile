@@ -224,4 +224,6 @@ dependencies {
     implementation(libs.androidsvg)
 
     testImplementation(libs.junit)
+    // Android's org.json is only stubs off the phone; the real one for tests.
+    testImplementation("org.json:json:20240303")
 }
