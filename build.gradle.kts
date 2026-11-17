@@ -5,7 +5,7 @@ plugins {
     alias(libs.plugins.kotlin.serialization) apply false
 }
 
-// This project lives inside OneDrive, which conflicts with Gradle's
+// A synced folder (OneDrive, Dropbox) conflicts with Gradle's
 // file-locking during incremental builds. Redirect all build output to a
 // local-disk directory (override with -Pubuntumobile.buildDir=...).
 val buildRoot: String = (findProperty("ubuntumobile.buildDir") as String?)
